@@ -1,0 +1,54 @@
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: go-apply
+    main: ./cmd/go-apply/
+    binary: go-apply
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+
+archives:
+  - id: default
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        format: zip
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: checksums.txt
+
+release:
+  github:
+    owner: thedandano
+    name: go-apply
+  draft: false
+  prerelease: auto
+
+brews:
+  - name: go-apply
+    repository:
+      owner: thedandano
+      name: homebrew-tap
+    description: "AI-powered job application CLI with MCP server support"
+    homepage: "https://github.com/thedandano/go-apply"

@@ -1,0 +1,13 @@
+Senior Software Engineer — Platform
+
+We are looking for a senior Go engineer to join our platform team.
+
+Required: golang, kubernetes, postgresql, grpc, docker
+Preferred: terraform, aws, redis
+
+Responsibilities:
+- Design and maintain distributed microservices
+- Own reliability and performance of core platform APIs
+- Mentor junior engineers
+
+Location: Remote
