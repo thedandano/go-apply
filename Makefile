@@ -25,6 +25,7 @@ vet:
 
 security:
 	govulncheck ./...
+	gosec ./...
 
 # check mirrors what CI runs — use before pushing
 check: vet lint security test-unit
