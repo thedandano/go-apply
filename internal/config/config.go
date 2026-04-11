@@ -10,7 +10,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func ConfigDir() string {
+func Dir() string {
 	if d := os.Getenv("XDG_CONFIG_HOME"); d != "" {
 		return filepath.Join(d, "go-apply")
 	}
@@ -101,7 +101,7 @@ func (c *Config) ResolveDBPath() string {
 
 func Load() (*Config, error) {
 	cfg := &Config{}
-	cfgFile := filepath.Join(ConfigDir(), "config.yaml")
+	cfgFile := filepath.Join(Dir(), "config.yaml")
 	data, err := os.ReadFile(cfgFile) // #nosec G304 -- config file path is user-controlled XDG path
 	if err != nil && !os.IsNotExist(err) {
 		return nil, fmt.Errorf("read config %s: %w", cfgFile, err)
@@ -118,7 +118,7 @@ func Load() (*Config, error) {
 }
 
 func (c *Config) Save() error {
-	dir := ConfigDir()
+	dir := Dir()
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return fmt.Errorf("create config dir %s: %w", dir, err)
 	}
