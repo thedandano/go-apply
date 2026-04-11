@@ -34,7 +34,7 @@ func New(logDir string, level slog.Level) (*slog.Logger, func(), error) {
 	timestamp := time.Now().UTC().Format("2006-01-02T150405Z")
 	logPath := filepath.Join(logDir, logFilePrefix+timestamp+".log")
 
-	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600) //nolint:gosec // G304: logPath is constructed from os.UserHomeDir() + fixed internal values
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600) //nolint:gosec // #nosec G304 -- logPath built from os.UserHomeDir() + fixed suffix, not user input
 	if err != nil {
 		return stderrOnly(level), func() {}, nil
 	}
