@@ -27,8 +27,7 @@ func (s *stubLLMClient) ChatComplete(_ context.Context, messages []port.ChatMess
 }
 
 func testDefaults() *config.AppDefaults {
-	d := config.EmbeddedDefaults()
-	return d
+	return config.EmbeddedDefaults()
 }
 
 func TestGenerate_ReturnsResult(t *testing.T) {
@@ -43,14 +42,13 @@ func TestGenerate_ReturnsResult(t *testing.T) {
 			Title:    "Software Engineer",
 			Company:  "Acme Corp",
 			Location: "Remote",
+			Required: []string{"Go", "REST"},
 		},
 		Scores: map[string]model.ScoreResult{
 			"resume_a": {
 				ResumeLabel: "resume_a",
 				Breakdown:   model.ScoreBreakdown{KeywordMatch: 30, ExperienceFit: 20, ImpactEvidence: 8, ATSFormat: 8, Readability: 8},
-				Keywords: model.KeywordResult{
-					ReqMatched: []string{"Go", "REST"},
-				},
+				Keywords:    model.KeywordResult{ReqMatched: []string{"Go", "REST"}},
 			},
 		},
 		Channel: model.ChannelCold,
@@ -66,7 +64,6 @@ func TestGenerate_ReturnsResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
-
 	if result.Text == "" {
 		t.Error("expected non-empty Text")
 	}
@@ -81,37 +78,80 @@ func TestGenerate_ReturnsResult(t *testing.T) {
 	}
 }
 
-func TestGenerate_UsesHighestScoringResume(t *testing.T) {
-	stub := &stubLLMClient{
-		response: "Cover letter text.",
-	}
-
+func TestGenerate_PromptIncludesJDSkills(t *testing.T) {
+	stub := &stubLLMClient{response: "Cover letter."}
 	gen := coverletter.New(stub, testDefaults())
 
 	input := port.CoverLetterInput{
 		JD: model.JDData{
-			Title:   "Data Engineer",
-			Company: "DataCo",
+			Title:     "Backend Engineer",
+			Company:   "TechCo",
+			Required:  []string{"Kubernetes", "PostgreSQL"},
+			Preferred: []string{"Rust"},
 		},
+		Scores:  map[string]model.ScoreResult{"r": {ResumeLabel: "r"}},
+		Channel: model.ChannelCold,
+		Profile: model.UserProfile{Name: "Test"},
+	}
+
+	_, err := gen.Generate(context.Background(), &input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	userMsg := stub.recorded[len(stub.recorded)-1].Content
+	for _, skill := range []string{"Kubernetes", "PostgreSQL", "Rust"} {
+		if !strings.Contains(userMsg, skill) {
+			t.Errorf("prompt missing JD skill %q", skill)
+		}
+	}
+}
+
+func TestGenerate_PromptIncludesWordTargets(t *testing.T) {
+	stub := &stubLLMClient{response: "Cover letter."}
+	gen := coverletter.New(stub, testDefaults())
+
+	input := port.CoverLetterInput{
+		JD:      model.JDData{Title: "Eng", Company: "Co"},
+		Scores:  map[string]model.ScoreResult{"r": {ResumeLabel: "r"}},
+		Channel: model.ChannelCold,
+		Profile: model.UserProfile{Name: "Test"},
+	}
+
+	_, err := gen.Generate(context.Background(), &input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	userMsg := stub.recorded[len(stub.recorded)-1].Content
+	// Prompt must communicate word/sentence constraints derived from defaults.
+	if !strings.Contains(userMsg, "words") {
+		t.Error("prompt does not mention word count target from defaults")
+	}
+	if !strings.Contains(userMsg, "sentences") {
+		t.Error("prompt does not mention sentence count target from defaults")
+	}
+}
+
+func TestGenerate_UsesHighestScoringResume(t *testing.T) {
+	stub := &stubLLMClient{response: "Cover letter text."}
+	gen := coverletter.New(stub, testDefaults())
+
+	input := port.CoverLetterInput{
+		JD:      model.JDData{Title: "Data Engineer", Company: "DataCo"},
+		Channel: model.ChannelReferral,
+		Profile: model.UserProfile{Name: "John Smith"},
 		Scores: map[string]model.ScoreResult{
 			"low_score": {
 				ResumeLabel: "low_score",
 				Breakdown:   model.ScoreBreakdown{KeywordMatch: 10, ExperienceFit: 10, ImpactEvidence: 5, ATSFormat: 5, Readability: 5},
-				Keywords: model.KeywordResult{
-					ReqMatched: []string{"Python"},
-				},
+				Keywords:    model.KeywordResult{ReqMatched: []string{"Python"}},
 			},
 			"high_score": {
 				ResumeLabel: "high_score",
 				Breakdown:   model.ScoreBreakdown{KeywordMatch: 40, ExperienceFit: 22, ImpactEvidence: 9, ATSFormat: 9, Readability: 9},
-				Keywords: model.KeywordResult{
-					ReqMatched: []string{"Spark", "Kafka", "SQL"},
-				},
+				Keywords:    model.KeywordResult{ReqMatched: []string{"Spark", "Kafka", "SQL"}},
 			},
-		},
-		Channel: model.ChannelReferral,
-		Profile: model.UserProfile{
-			Name: "John Smith",
 		},
 	}
 
@@ -120,32 +160,67 @@ func TestGenerate_UsesHighestScoringResume(t *testing.T) {
 		t.Fatalf("expected no error, got: %v", err)
 	}
 
-	if len(stub.recorded) < 2 {
-		t.Fatalf("expected at least 2 messages (system + user), got %d", len(stub.recorded))
-	}
-
 	userMsg := stub.recorded[len(stub.recorded)-1].Content
+	// High-score keywords must appear in prompt.
 	for _, kw := range []string{"Spark", "Kafka", "SQL"} {
 		if !strings.Contains(userMsg, kw) {
-			t.Errorf("expected prompt to contain keyword %q from highest scoring resume", kw)
+			t.Errorf("prompt missing high-score keyword %q", kw)
 		}
 	}
-	// low_score resume's unique keyword should NOT dominate the prompt
-	// (Python might appear if it's a preferred keyword; just verify high-score keywords are present)
+	// Low-score unique keyword must NOT appear (it's not in the JD Required/Preferred either).
+	if strings.Contains(userMsg, "Python") {
+		t.Error("prompt contains low-score resume's unique keyword 'Python' — wrong resume selected")
+	}
 }
 
-func TestGenerate_LLMError(t *testing.T) {
-	stub := &stubLLMClient{
-		err: errors.New("connection refused"),
-	}
-
+func TestGenerate_EmptyScores(t *testing.T) {
+	stub := &stubLLMClient{response: "Cover letter with no score context."}
 	gen := coverletter.New(stub, testDefaults())
 
 	input := port.CoverLetterInput{
-		JD: model.JDData{Title: "Engineer", Company: "Corp"},
-		Scores: map[string]model.ScoreResult{
-			"r": {ResumeLabel: "r"},
-		},
+		JD:      model.JDData{Title: "Engineer", Company: "Corp"},
+		Scores:  map[string]model.ScoreResult{},
+		Channel: model.ChannelCold,
+		Profile: model.UserProfile{Name: "Test User"},
+	}
+
+	// Empty scores is a degraded-mode path — should succeed, not panic.
+	result, err := gen.Generate(context.Background(), &input)
+	if err != nil {
+		t.Fatalf("expected no error for empty scores, got: %v", err)
+	}
+	if result.Text == "" {
+		t.Error("expected non-empty Text even with empty scores")
+	}
+}
+
+func TestGenerate_EmptyLLMResponse(t *testing.T) {
+	stub := &stubLLMClient{response: ""}
+	gen := coverletter.New(stub, testDefaults())
+
+	input := port.CoverLetterInput{
+		JD:      model.JDData{Title: "Engineer", Company: "Corp"},
+		Scores:  map[string]model.ScoreResult{"r": {ResumeLabel: "r"}},
+		Channel: model.ChannelCold,
+		Profile: model.UserProfile{Name: "Test"},
+	}
+
+	_, err := gen.Generate(context.Background(), &input)
+	if err == nil {
+		t.Fatal("expected error for empty LLM response, got nil")
+	}
+	if !strings.Contains(err.Error(), "empty response") {
+		t.Errorf("error %q should mention 'empty response'", err.Error())
+	}
+}
+
+func TestGenerate_LLMError(t *testing.T) {
+	stub := &stubLLMClient{err: errors.New("connection refused")}
+	gen := coverletter.New(stub, testDefaults())
+
+	input := port.CoverLetterInput{
+		JD:      model.JDData{Title: "Engineer", Company: "Corp"},
+		Scores:  map[string]model.ScoreResult{"r": {ResumeLabel: "r"}},
 		Channel: model.ChannelRecruiter,
 		Profile: model.UserProfile{Name: "Test User"},
 	}

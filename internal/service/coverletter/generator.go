@@ -3,6 +3,7 @@ package coverletter
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/thedandano/go-apply/internal/config"
@@ -12,6 +13,11 @@ import (
 
 // Compile-time interface satisfaction check.
 var _ port.CoverLetterGenerator = (*Generator)(nil)
+
+// sentenceEnd matches terminal punctuation followed by whitespace or end-of-string.
+// More accurate than counting every '.', '!', '?' — avoids false positives from
+// decimal numbers ("3.5 years"), abbreviations ("Inc.", "U.S."), and ellipses.
+var sentenceEnd = regexp.MustCompile(`[.!?]+(\s|$)`)
 
 // Generator produces cover letters by calling an LLM with structured job and candidate context.
 type Generator struct {
@@ -31,8 +37,7 @@ func New(llm port.LLMClient, defaults *config.AppDefaults) *Generator {
 // a CoverLetterResult with the generated text plus word and sentence counts.
 func (g *Generator) Generate(ctx context.Context, input *port.CoverLetterInput) (model.CoverLetterResult, error) {
 	best := bestScore(input.Scores)
-
-	prompt := buildPrompt(input, &best)
+	prompt := buildPrompt(input, &best, g.defaults)
 
 	messages := []port.ChatMessage{
 		{
@@ -53,6 +58,9 @@ func (g *Generator) Generate(ctx context.Context, input *port.CoverLetterInput) 
 	text, err := g.llm.ChatComplete(ctx, messages, opts)
 	if err != nil {
 		return model.CoverLetterResult{}, fmt.Errorf("cover letter llm call: %w", err)
+	}
+	if strings.TrimSpace(text) == "" {
+		return model.CoverLetterResult{}, fmt.Errorf("cover letter llm call: empty response")
 	}
 
 	return model.CoverLetterResult{
@@ -78,8 +86,8 @@ func bestScore(scores map[string]model.ScoreResult) model.ScoreResult {
 	return best
 }
 
-// buildPrompt constructs the user message for the LLM containing job, candidate, and match context.
-func buildPrompt(input *port.CoverLetterInput, best *model.ScoreResult) string {
+// buildPrompt constructs the user message for the LLM with job, candidate, and match context.
+func buildPrompt(input *port.CoverLetterInput, best *model.ScoreResult, defaults *config.AppDefaults) string {
 	var sb strings.Builder
 
 	sb.WriteString("Job Details:\n")
@@ -87,6 +95,15 @@ func buildPrompt(input *port.CoverLetterInput, best *model.ScoreResult) string {
 	sb.WriteString(fmt.Sprintf("  Company:  %s\n", input.JD.Company))
 	sb.WriteString(fmt.Sprintf("  Location: %s\n", input.JD.Location))
 	sb.WriteString(fmt.Sprintf("  Channel:  %s\n", string(input.Channel)))
+
+	if len(input.JD.Required) > 0 {
+		sb.WriteString("\nJob Required Skills:\n")
+		sb.WriteString("  " + strings.Join(input.JD.Required, ", ") + "\n")
+	}
+	if len(input.JD.Preferred) > 0 {
+		sb.WriteString("\nJob Preferred Skills:\n")
+		sb.WriteString("  " + strings.Join(input.JD.Preferred, ", ") + "\n")
+	}
 
 	sb.WriteString("\nCandidate:\n")
 	sb.WriteString(fmt.Sprintf("  Name:       %s\n", input.Profile.Name))
@@ -98,7 +115,6 @@ func buildPrompt(input *port.CoverLetterInput, best *model.ScoreResult) string {
 		sb.WriteString("\nMatched Required Keywords:\n")
 		sb.WriteString("  " + strings.Join(best.Keywords.ReqMatched, ", ") + "\n")
 	}
-
 	if len(best.Keywords.PrefMatched) > 0 {
 		sb.WriteString("\nMatched Preferred Keywords:\n")
 		sb.WriteString("  " + strings.Join(best.Keywords.PrefMatched, ", ") + "\n")
@@ -112,7 +128,12 @@ func buildPrompt(input *port.CoverLetterInput, best *model.ScoreResult) string {
 	sb.WriteString(fmt.Sprintf("  Readability:     %.1f\n", best.Breakdown.Readability))
 	sb.WriteString(fmt.Sprintf("  Total:           %.1f\n", best.Breakdown.Total()))
 
-	sb.WriteString("\nWrite a concise, authentic cover letter for this candidate and role.")
+	sb.WriteString(fmt.Sprintf(
+		"\nWrite a concise, authentic cover letter for this candidate and role. Target %d words, maximum %d words, approximately %d sentences.",
+		defaults.CoverLetter.TargetWords,
+		defaults.CoverLetter.MaxWords,
+		defaults.CoverLetter.SentenceCount,
+	))
 
 	return sb.String()
 }
@@ -122,13 +143,8 @@ func countWords(text string) int {
 	return len(strings.Fields(text))
 }
 
-// countSentences counts terminal punctuation characters (., !, ?) as a sentence-count heuristic.
+// countSentences counts sentences by matching terminal punctuation followed by
+// whitespace or end-of-string. More accurate than counting raw punctuation characters.
 func countSentences(text string) int {
-	count := 0
-	for _, ch := range text {
-		if ch == '.' || ch == '!' || ch == '?' {
-			count++
-		}
-	}
-	return count
+	return len(sentenceEnd.FindAllString(strings.TrimSpace(text), -1))
 }
