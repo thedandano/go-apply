@@ -21,7 +21,7 @@ internal/repository/sqlite/   SQLite + sqlite-vec (profile embeddings)
 internal/presenter/headless/  JSON output (agent/headless mode)
 internal/presenter/mcp/       MCP tool result accumulator
 tui/                          bubbletea TUI (Epic 6)
-config/defaults.json          All tunable constants — edit here, not in source
+internal/config/defaults.json All tunable constants — edit here, not in source
 ```
 
 ## Adding a New Adapter
@@ -42,7 +42,7 @@ make test-e2e         # builds binary, runs full CLI — run before every PR
 
 ## No Magic Numbers
 
-All tunable constants live in `config/defaults.json`. The `AppDefaults` struct
+All tunable constants live in `internal/config/defaults.json`. The `AppDefaults` struct
 (`internal/config/defaults.go`) mirrors that JSON. If you change a value in one,
 change it in both — `TestDefaultsMatchJSON` will catch mismatches in CI.
 

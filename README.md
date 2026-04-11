@@ -48,7 +48,7 @@ occupation: "Software Engineer"
 location: "San Francisco, CA"
 ```
 
-> All tunable scoring constants (weights, thresholds, limits) live in `config/defaults.json`.
+> All tunable scoring constants (weights, thresholds, limits) live in `internal/config/defaults.json`.
 
 ## Commands
 

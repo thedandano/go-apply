@@ -68,7 +68,7 @@ type LLMDefaults struct {
 	BulletRewriteMaxTokens     int     `json:"bullet_rewrite_max_tokens"`
 }
 
-// AppDefaults holds all tunable constants loaded from config/defaults.json.
+// AppDefaults holds all tunable constants loaded from internal/config/defaults.json.
 // Injected into services — never read inline constants from source code.
 type AppDefaults struct {
 	Scoring      ScoringDefaults      `json:"scoring"`

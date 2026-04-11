@@ -7,7 +7,7 @@ import (
 	"github.com/thedandano/go-apply/internal/config"
 )
 
-// TestDefaultsMatchJSON verifies EmbeddedDefaults() matches config/defaults.json.
+// TestDefaultsMatchJSON verifies EmbeddedDefaults() matches internal/config/defaults.json.
 // Fails CI if someone edits one and not the other.
 func TestDefaultsMatchJSON(t *testing.T) {
 	fromFile, err := config.LoadDefaults()
