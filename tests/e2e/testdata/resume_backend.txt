@@ -1,0 +1,16 @@
+John Doe — Software Engineer
+john@example.com
+
+Summary
+Senior engineer with 7 years building distributed systems in Go and Python.
+
+Experience
+- Designed kubernetes-based deployment platform reducing deploy times by 60%
+- Built grpc APIs serving 10M requests/day with 99.95% uptime
+- Migrated postgresql database to multi-region setup saving $200K/year
+- Containerized 15 services with docker, reducing environment inconsistencies
+
+Skills
+Languages: golang, python, typescript
+Infrastructure: kubernetes, docker, terraform, aws
+Databases: postgresql, redis, mysql
