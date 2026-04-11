@@ -1,13 +1,22 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"gopkg.in/yaml.v3"
+)
+
+// DirPerm and FilePerm are the Unix permission bits used for all config
+// directories and files. Exported so callers and tests use one source of truth.
+const (
+	DirPerm  fs.FileMode = 0o700 // config directory: owner rwx, no group/other access
+	FilePerm fs.FileMode = 0o600 // config file: owner rw-, no group/other access
 )
 
 func Dir() string {
@@ -99,27 +108,39 @@ func (c *Config) ResolveDBPath() string {
 	return filepath.Join(DataDir(), "profile.db")
 }
 
+// Load reads config.yaml from the XDG config directory.
+// Returns an error if the file does not exist or cannot be parsed —
+// a missing config file is not a valid state; use `go-apply init` to create one.
+// The GO_APPLY_API_KEY environment variable overrides the orchestrator API key.
 func Load() (*Config, error) {
-	cfg := &Config{}
 	cfgFile := filepath.Join(Dir(), "config.yaml")
-	data, err := os.ReadFile(cfgFile) // #nosec G304 -- config file path is user-controlled XDG path
-	if err != nil && !os.IsNotExist(err) {
+	slog.Debug("loading config", "path", cfgFile)
+
+	data, err := os.ReadFile(cfgFile) // #nosec G304 -- path is XDG_CONFIG_HOME/go-apply/config.yaml, not user input
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, fmt.Errorf("config file not found at %s — run 'go-apply init' to create one: %w", cfgFile, err)
+		}
 		return nil, fmt.Errorf("read config %s: %w", cfgFile, err)
 	}
-	if err == nil {
-		if err := yaml.Unmarshal(data, cfg); err != nil {
-			return nil, fmt.Errorf("parse config %s: %w", cfgFile, err)
-		}
+
+	cfg := &Config{}
+	if err := yaml.Unmarshal(data, cfg); err != nil {
+		return nil, fmt.Errorf("parse config %s: %w", cfgFile, err)
 	}
+	slog.Info("config loaded", "path", cfgFile, "log_level", cfg.LogLevel, "model", cfg.Orchestrator.Model)
+
 	if key := os.Getenv("GO_APPLY_API_KEY"); key != "" {
+		slog.Debug("orchestrator API key overridden by GO_APPLY_API_KEY env var")
 		cfg.Orchestrator.APIKey = key
 	}
+
 	return cfg, nil
 }
 
 func (c *Config) Save() error {
 	dir := Dir()
-	if err := os.MkdirAll(dir, 0700); err != nil {
+	if err := os.MkdirAll(dir, DirPerm); err != nil {
 		return fmt.Errorf("create config dir %s: %w", dir, err)
 	}
 	data, err := yaml.Marshal(c)
@@ -127,8 +148,9 @@ func (c *Config) Save() error {
 		return fmt.Errorf("marshal config: %w", err)
 	}
 	cfgPath := filepath.Join(dir, "config.yaml")
-	if err := os.WriteFile(cfgPath, data, 0600); err != nil { // #nosec G306 -- config file, user-owned
+	if err := os.WriteFile(cfgPath, data, FilePerm); err != nil { // #nosec G306 -- config file, user-owned
 		return fmt.Errorf("write config %s: %w", cfgPath, err)
 	}
+	slog.Info("config saved", "path", cfgPath)
 	return nil
 }

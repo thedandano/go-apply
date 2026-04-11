@@ -32,10 +32,10 @@ orchestrator:
 years_of_experience: 7.0
 `
 	cfgDir := filepath.Join(dir, "go-apply")
-	if err := os.MkdirAll(cfgDir, 0700); err != nil {
+	if err := os.MkdirAll(cfgDir, config.DirPerm); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(cfgDir, "config.yaml"), []byte(yaml), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.yaml"), []byte(yaml), config.FilePerm); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("XDG_CONFIG_HOME", dir)
@@ -57,10 +57,10 @@ func TestEnvVarOverridesAPIKey(t *testing.T) {
 	yaml := `orchestrator:
   api_key: "key-from-file"`
 	cfgDir := filepath.Join(dir, "go-apply")
-	if err := os.MkdirAll(cfgDir, 0700); err != nil {
+	if err := os.MkdirAll(cfgDir, config.DirPerm); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(cfgDir, "config.yaml"), []byte(yaml), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.yaml"), []byte(yaml), config.FilePerm); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("XDG_CONFIG_HOME", dir)
@@ -75,17 +75,17 @@ func TestEnvVarOverridesAPIKey(t *testing.T) {
 	}
 }
 
-func TestLoadReturnsDefaultsWhenNoFile(t *testing.T) {
+// TestLoadErrorsWhenNoFile verifies that Load() returns an error when no config
+// file exists. A missing config is not a valid state — the caller must run
+// 'go-apply init' first.
+func TestLoadErrorsWhenNoFile(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
 	t.Setenv("GO_APPLY_API_KEY", "")
 
-	cfg, err := config.Load()
-	if err != nil {
-		t.Fatalf("Load() error: %v", err)
-	}
-	if cfg == nil {
-		t.Fatal("cfg is nil")
+	_, err := config.Load()
+	if err == nil {
+		t.Fatal("Load() should return an error when config file does not exist")
 	}
 }
 
