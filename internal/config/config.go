@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -88,7 +89,7 @@ func (c *Config) ResolveEmbeddingDim() int {
 	if c.EmbeddingDim > 0 {
 		return c.EmbeddingDim
 	}
-	return 1536
+	return EmbeddedDefaults().VectorSearch.DefaultEmbeddingDim
 }
 
 func (c *Config) ResolveDBPath() string {
@@ -102,9 +103,12 @@ func Load() (*Config, error) {
 	cfg := &Config{}
 	cfgFile := filepath.Join(ConfigDir(), "config.yaml")
 	data, err := os.ReadFile(cfgFile) // #nosec G304 -- config file path is user-controlled XDG path
+	if err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("read config %s: %w", cfgFile, err)
+	}
 	if err == nil {
 		if err := yaml.Unmarshal(data, cfg); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("parse config %s: %w", cfgFile, err)
 		}
 	}
 	if key := os.Getenv("GO_APPLY_API_KEY"); key != "" {
@@ -116,11 +120,15 @@ func Load() (*Config, error) {
 func (c *Config) Save() error {
 	dir := ConfigDir()
 	if err := os.MkdirAll(dir, 0700); err != nil {
-		return err
+		return fmt.Errorf("create config dir %s: %w", dir, err)
 	}
 	data, err := yaml.Marshal(c)
 	if err != nil {
-		return err
+		return fmt.Errorf("marshal config: %w", err)
 	}
-	return os.WriteFile(filepath.Join(dir, "config.yaml"), data, 0600) // #nosec G306 -- config file, user-owned
+	cfgPath := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(cfgPath, data, 0600); err != nil { // #nosec G306 -- config file, user-owned
+		return fmt.Errorf("write config %s: %w", cfgPath, err)
+	}
+	return nil
 }
