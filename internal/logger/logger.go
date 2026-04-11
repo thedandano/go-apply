@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -27,6 +28,7 @@ func New(logDir string, level slog.Level) (*slog.Logger, func(), error) {
 		return stderrOnly(level), func() {}, nil
 	}
 
+	// Keep maxLogFiles-1 existing files so the new file below brings the total to maxLogFiles.
 	pruneOldLogs(logDir, maxLogFiles-1)
 
 	timestamp := time.Now().UTC().Format("2006-01-02T150405Z")
@@ -42,7 +44,8 @@ func New(logDir string, level slog.Level) (*slog.Logger, func(), error) {
 		stderr: slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}),
 	})
 
-	return log, func() { f.Close() }, nil
+	var once sync.Once
+	return log, func() { once.Do(func() { f.Close() }) }, nil
 }
 
 func stderrOnly(level slog.Level) *slog.Logger {
@@ -85,7 +88,7 @@ func (h *multiHandler) Handle(ctx context.Context, r slog.Record) error {
 		}
 	}
 	if h.stderr.Enabled(ctx, r.Level) {
-		h.stderr.Handle(ctx, r) //nolint:errcheck // stderr write failure is non-fatal
+		h.stderr.Handle(ctx, r.Clone()) //nolint:errcheck // stderr write failure is non-fatal
 	}
 	return nil
 }

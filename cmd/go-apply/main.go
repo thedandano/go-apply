@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -14,7 +15,11 @@ func main() {
 	home, _ := os.UserHomeDir()
 	logDir := filepath.Join(home, ".local", "state", "go-apply", "logs")
 
-	log, cleanup, _ := logger.New(logDir, slog.LevelInfo)
+	log, cleanup, err := logger.New(logDir, slog.LevelInfo)
+	if err != nil {
+		// New() only returns nil errors per API contract; this is a safeguard.
+		fmt.Fprintf(os.Stderr, "logger init: %v\n", err)
+	}
 	defer cleanup()
 
 	root := cli.NewRootCommand()

@@ -75,6 +75,7 @@ func TestNew_FallsBackToStderrWhenDirUnwritable(t *testing.T) {
 	if log == nil {
 		t.Fatal("expected non-nil logger even on fallback")
 	}
+	log.Warn("fallback smoke test") // verifies fallback logger is functional, not just non-nil
 }
 
 func TestNew_DebugLevelFiltersInfo(t *testing.T) {
