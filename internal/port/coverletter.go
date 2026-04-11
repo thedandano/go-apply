@@ -14,5 +14,5 @@ type CoverLetterInput struct {
 }
 
 type CoverLetterGenerator interface {
-	Generate(ctx context.Context, input CoverLetterInput) (model.CoverLetterResult, error)
+	Generate(ctx context.Context, input *CoverLetterInput) (model.CoverLetterResult, error)
 }
