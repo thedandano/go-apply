@@ -21,6 +21,10 @@ type KeywordResult struct {
 	PrefPct       float64  `json:"pref_pct"`
 }
 
+// ReferenceGap describes a mismatch between a skill the JD requires and the closest
+// matching skill in the user's profile. Used by the augment service to decide what
+// to emphasise or reframe in tailored output.
+// Example: JDSkill="Kubernetes", RefSkill="Docker", Priority="high".
 type ReferenceGap struct {
 	JDSkill  string `json:"jd_skill"`
 	RefSkill string `json:"ref_skill"`
