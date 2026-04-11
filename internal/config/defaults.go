@@ -68,7 +68,7 @@ type LLMDefaults struct {
 	BulletRewriteMaxTokens     int     `json:"bullet_rewrite_max_tokens"`
 }
 
-// AppDefaults holds all tunable constants loaded from config/defaults.json.
+// AppDefaults holds all tunable constants loaded from internal/config/defaults.json.
 // Injected into services — never read inline constants from source code.
 type AppDefaults struct {
 	Scoring      ScoringDefaults      `json:"scoring"`
@@ -83,7 +83,7 @@ type AppDefaults struct {
 // defaultsJSON is the embedded defaults.json.
 // Eliminates runtime file lookup — works in installed binaries.
 //
-//go:embed ../../config/defaults.json
+//go:embed defaults.json
 var defaultsJSON []byte
 
 // LoadDefaults reads defaults from the embedded defaults.json.
