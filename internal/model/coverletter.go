@@ -13,5 +13,4 @@ type CoverLetterResult struct {
 	Channel       ChannelType `json:"channel"`
 	WordCount     int         `json:"word_count"`
 	SentenceCount int         `json:"sentence_count"`
-	Degraded      bool        `json:"degraded"`
 }

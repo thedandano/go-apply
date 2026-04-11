@@ -26,11 +26,6 @@ type RiskWarning struct {
 	Message  string `json:"message"`
 }
 
-type DegradedStep struct {
-	Step   string `json:"step"`
-	Reason string `json:"reason"`
-}
-
 type PipelineResult struct {
 	Status  string `json:"status"`
 	Error   string `json:"error,omitempty"`
@@ -49,21 +44,12 @@ type PipelineResult struct {
 	CoverLetter CoverLetterResult `json:"cover_letter"`
 	Warnings    []RiskWarning     `json:"warnings"`
 
-	DegradedSteps  []DegradedStep `json:"degraded_steps,omitempty"`
-	AnalysisTimeMS int64          `json:"analysis_time_ms"`
+	StartTime time.Time `json:"start_time"`
+	EndTime   time.Time `json:"end_time"`
 }
 
 func NewPipelineResult() *PipelineResult {
 	return &PipelineResult{
-		Status: "success",
 		Scores: make(map[string]ScoreResult),
 	}
-}
-
-func (r *PipelineResult) AddDegraded(step, reason string) {
-	r.DegradedSteps = append(r.DegradedSteps, DegradedStep{Step: step, Reason: reason})
-}
-
-func (r *PipelineResult) SetTiming(start time.Time) {
-	r.AnalysisTimeMS = time.Since(start).Milliseconds()
 }

@@ -6,7 +6,7 @@ type UserProfile struct {
 	Location          string
 	LinkedInURL       string
 	YearsOfExperience float64
-	DefaultSeniority  string
+	Seniority         string
 }
 
 type ProfileEmbedding struct {

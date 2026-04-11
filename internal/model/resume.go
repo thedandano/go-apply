@@ -1,8 +1,9 @@
 package model
 
 type ResumeFile struct {
-	Label string
-	Path  string
+	Label    string
+	Path     string
+	FileType string
 }
 
 type TailorTier int

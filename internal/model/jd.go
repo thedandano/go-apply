@@ -18,5 +18,4 @@ type JDData struct {
 	Location      string         `json:"location"`
 	Seniority     SeniorityLevel `json:"seniority"`
 	RequiredYears float64        `json:"required_years"`
-	Degraded      bool           `json:"degraded"`
 }
