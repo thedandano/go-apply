@@ -50,6 +50,19 @@ location: "San Francisco, CA"
 
 > All tunable scoring constants (weights, thresholds, limits) live in `internal/config/defaults.json`.
 
+## Logs
+
+Each invocation writes a timestamped JSON log to `~/.local/state/go-apply/logs/`.
+Format: `go-apply-2026-04-10T150405Z.log` — one file per run, last 50 retained.
+
+```bash
+# Watch latest run live
+tail -f $(ls -t ~/.local/state/go-apply/logs/*.log | head -1) | jq .
+
+# Filter errors only
+cat ~/.local/state/go-apply/logs/go-apply-*.log | jq 'select(.level=="ERROR")'
+```
+
 ## Commands
 
 *(expanded as features are delivered)*

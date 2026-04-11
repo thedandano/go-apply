@@ -1,4 +1,4 @@
-.PHONY: build test test-unit test-integration test-e2e lint fmt vet security clean
+.PHONY: build test test-unit test-integration test-e2e lint fmt vet security check clean
 
 build:
 	go build -o bin/go-apply ./cmd/go-apply/
@@ -24,7 +24,11 @@ vet:
 	go vet ./...
 
 security:
+	govulncheck ./...
 	gosec ./...
+
+# check mirrors what CI runs — use before pushing
+check: vet lint security test-unit
 
 clean:
 	rm -rf bin/

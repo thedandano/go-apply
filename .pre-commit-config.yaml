@@ -1,36 +1,51 @@
 repos:
   - repo: local
     hooks:
+      # --- pre-commit: fast (< 2s) ---
       - id: go-fmt
         name: gofmt
         entry: gofmt -l -w
         language: system
         types: [go]
+        stages: [pre-commit]
 
       - id: go-imports
         name: goimports
         entry: goimports -w
         language: system
         types: [go]
+        stages: [pre-commit]
 
       - id: go-vet
         name: go vet
         entry: go vet ./...
         language: system
         pass_filenames: false
+        stages: [pre-commit]
 
+      # --- pre-push: slower (mirrors CI) ---
       - id: golangci-lint
         name: golangci-lint
         entry: golangci-lint run
         language: system
         pass_filenames: false
+        stages: [pre-push]
+
+      - id: govulncheck
+        name: govulncheck
+        entry: govulncheck ./...
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
 
       - id: gosec
         name: gosec security scan
         entry: gosec ./...
         language: system
         pass_filenames: false
+        stages: [pre-push]
 
+      # --- commit-msg ---
       - id: conventional-commit
         name: conventional commit message
         entry: bash -c 'head -1 "$1" | grep -qE "^(feat|fix|chore|test|docs|refactor|ci|perf|style|build)(\(.+\))?: .{1,100}$" || (echo "commit msg must follow conventional commits: type(scope): description" && exit 1)' --
