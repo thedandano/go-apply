@@ -1,6 +1,8 @@
 package loader
 
 import (
+	"archive/zip"
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,6 +35,9 @@ func TestDispatcherLoadUnsupported(t *testing.T) {
 	if !strings.Contains(err.Error(), "unsupported") {
 		t.Errorf("error %q does not contain 'unsupported'", err.Error())
 	}
+	if !strings.Contains(err.Error(), "file.exe") {
+		t.Errorf("error %q does not contain file path", err.Error())
+	}
 }
 
 func TestTextExtractorLoad(t *testing.T) {
@@ -62,7 +67,6 @@ func TestTextExtractorLoad_MissingFile(t *testing.T) {
 }
 
 func TestDOCXExtractor_extractXMLText(t *testing.T) {
-	// Minimal DOCX document.xml with w:t elements
 	xmlContent := `<?xml version="1.0" encoding="UTF-8"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
   <w:body>
@@ -88,17 +92,14 @@ func TestDOCXExtractor_extractXMLText(t *testing.T) {
 		t.Fatalf("extractXMLText: %v", err)
 	}
 
-	want := "Hello World"
-	if !strings.Contains(got, "Hello") || !strings.Contains(got, "World") {
-		t.Errorf("extractXMLText = %q, want it to contain %q", got, want)
-	}
-	if !strings.Contains(got, "Go Developer") {
-		t.Errorf("extractXMLText = %q, want it to contain 'Go Developer'", got)
+	// Paragraphs must be separated by newlines — not fused together.
+	want := "Hello World\nGo Developer\n"
+	if got != want {
+		t.Errorf("extractXMLText = %q, want %q", got, want)
 	}
 }
 
 func TestDOCXExtractor_extractXMLText_IgnoresNonNamespaced(t *testing.T) {
-	// Elements named "t" but without a namespace should be ignored
 	xmlContent := `<?xml version="1.0" encoding="UTF-8"?>
 <document>
   <body>
@@ -114,11 +115,96 @@ func TestDOCXExtractor_extractXMLText_IgnoresNonNamespaced(t *testing.T) {
 	if err != nil {
 		t.Fatalf("extractXMLText: %v", err)
 	}
-
 	if strings.Contains(got, "should be ignored") {
 		t.Errorf("extractXMLText included non-namespaced <t> content: %q", got)
 	}
 	if !strings.Contains(got, "This should be included") {
 		t.Errorf("extractXMLText = %q, want it to contain 'This should be included'", got)
+	}
+}
+
+// buildMinimalDOCX creates an in-memory DOCX zip with the given document.xml content.
+func buildMinimalDOCX(t *testing.T, docXML string) string {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	f, err := zw.Create("word/document.xml")
+	if err != nil {
+		t.Fatalf("zip.Create: %v", err)
+	}
+	if _, err := f.Write([]byte(docXML)); err != nil {
+		t.Fatalf("zip write: %v", err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("zip close: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "test.docx")
+	if err := os.WriteFile(path, buf.Bytes(), 0600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	return path
+}
+
+func TestDOCXExtractorLoad(t *testing.T) {
+	docXML := `<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body><w:p><w:r><w:t>Test content</w:t></w:r></w:p></w:body>
+</w:document>`
+
+	path := buildMinimalDOCX(t, docXML)
+	d := &DOCXExtractor{}
+	got, err := d.Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !strings.Contains(got, "Test content") {
+		t.Errorf("Load = %q, want it to contain 'Test content'", got)
+	}
+}
+
+func TestDOCXExtractorLoad_MissingDocumentXML(t *testing.T) {
+	// Build a zip that has no word/document.xml
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	f, _ := zw.Create("word/styles.xml")
+	_, _ = f.Write([]byte("<styles/>"))
+	_ = zw.Close()
+
+	path := filepath.Join(t.TempDir(), "empty.docx")
+	if err := os.WriteFile(path, buf.Bytes(), 0600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	d := &DOCXExtractor{}
+	_, err := d.Load(path)
+	if err == nil {
+		t.Fatal("expected error for missing word/document.xml, got nil")
+	}
+	if !strings.Contains(err.Error(), "word/document.xml not found") {
+		t.Errorf("error %q does not mention missing document.xml", err.Error())
+	}
+}
+
+func TestDOCXExtractorLoad_InvalidZip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bad.docx")
+	if err := os.WriteFile(path, []byte("not a zip"), 0600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	d := &DOCXExtractor{}
+	_, err := d.Load(path)
+	if err == nil {
+		t.Fatal("expected error for invalid zip, got nil")
+	}
+}
+
+func TestPDFExtractorLoad_MissingFile(t *testing.T) {
+	p := &PDFExtractor{}
+	_, err := p.Load("/nonexistent/path/resume.pdf")
+	if err == nil {
+		t.Fatal("expected error for missing PDF, got nil")
+	}
+	if !strings.Contains(err.Error(), "/nonexistent/path/resume.pdf") {
+		t.Errorf("error %q does not contain file path", err.Error())
 	}
 }

@@ -64,6 +64,11 @@ func extractXMLText(r io.Reader) (string, error) {
 		case xml.StartElement:
 			inText = t.Name.Local == "t" && t.Name.Space != ""
 		case xml.EndElement:
+			// Emit a newline at paragraph boundaries so paragraphs don't merge.
+			// t.Name.Space != "" ensures we only react to namespaced w:p elements.
+			if t.Name.Local == "p" && t.Name.Space != "" {
+				sb.WriteByte('\n')
+			}
 			if t.Name.Local == "t" {
 				inText = false
 			}
