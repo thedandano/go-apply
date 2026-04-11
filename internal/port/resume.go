@@ -8,7 +8,6 @@ import (
 
 type ResumeRepository interface {
 	ListResumes() ([]model.ResumeFile, error)
-	ExtractText(resume model.ResumeFile) (string, error)
 }
 
 type ResumeChanges struct {
