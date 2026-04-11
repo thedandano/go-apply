@@ -11,7 +11,6 @@ import (
 // calling TailorResume — the port package must not import internal/config.
 type TailorOptions struct {
 	MaxTier2BulletRewrites int
-	MinBlendDelta          float64
 }
 
 type TailorInput struct {
