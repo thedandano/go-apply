@@ -83,7 +83,7 @@ type AppDefaults struct {
 // defaultsJSON is the embedded defaults.json.
 // Eliminates runtime file lookup — works in installed binaries.
 //
-//go:embed ../../config/defaults.json
+//go:embed defaults.json
 var defaultsJSON []byte
 
 // LoadDefaults reads defaults from the embedded defaults.json.
