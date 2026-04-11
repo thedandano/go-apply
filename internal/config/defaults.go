@@ -88,14 +88,11 @@ var defaultsJSON []byte
 
 // LoadDefaults reads defaults from the embedded defaults.json.
 func LoadDefaults() (*AppDefaults, error) {
-	if len(defaultsJSON) > 0 {
-		var d AppDefaults
-		if err := json.Unmarshal(defaultsJSON, &d); err != nil {
-			return nil, fmt.Errorf("parse embedded defaults.json: %w", err)
-		}
-		return &d, nil
+	var d AppDefaults
+	if err := json.Unmarshal(defaultsJSON, &d); err != nil {
+		return nil, fmt.Errorf("parse embedded defaults.json: %w", err)
 	}
-	return EmbeddedDefaults(), nil
+	return &d, nil
 }
 
 // EmbeddedDefaults returns hardcoded defaults — exported so TestDefaultsMatchJSON can compare.

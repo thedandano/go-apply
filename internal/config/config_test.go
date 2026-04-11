@@ -12,7 +12,7 @@ import (
 func TestDefaultsMatchJSON(t *testing.T) {
 	fromFile, err := config.LoadDefaults()
 	if err != nil {
-		t.Skip("defaults.json not found — skipping consistency check")
+		t.Fatalf("LoadDefaults() failed: %v", err)
 	}
 	embedded := config.EmbeddedDefaults()
 	if !reflect.DeepEqual(fromFile, embedded) {
