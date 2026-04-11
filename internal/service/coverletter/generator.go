@@ -16,7 +16,7 @@ var _ port.CoverLetterGenerator = (*Generator)(nil)
 
 // sentenceEnd matches terminal punctuation followed by whitespace or end-of-string.
 // More accurate than counting every '.', '!', '?' — avoids false positives from
-// decimal numbers ("3.5 years"), abbreviations ("Inc.", "U.S."), and ellipses.
+// decimal numbers ("3.5 years") and mid-sentence punctuation clusters.
 var sentenceEnd = regexp.MustCompile(`[.!?]+(\s|$)`)
 
 // Generator produces cover letters by calling an LLM with structured job and candidate context.
