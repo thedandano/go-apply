@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 
 	"github.com/thedandano/go-apply/internal/cli"
+	"github.com/thedandano/go-apply/internal/config"
 	"github.com/thedandano/go-apply/internal/logger"
 )
 
@@ -15,9 +15,7 @@ func main() {
 }
 
 func run() int {
-	// TODO(task-2): replace with config.LogDir() once config package is implemented
-	home, _ := os.UserHomeDir()
-	logDir := filepath.Join(home, ".local", "state", "go-apply", "logs")
+	logDir := config.LogDir()
 
 	log, cleanup, err := logger.New(logDir, slog.LevelInfo)
 	if err != nil {
