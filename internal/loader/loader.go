@@ -47,5 +47,5 @@ func (d *Dispatcher) Load(path string) (string, error) {
 			return e.Load(path)
 		}
 	}
-	return "", fmt.Errorf("unsupported file extension %q", ext)
+	return "", fmt.Errorf("unsupported file extension %q for %s", ext, path)
 }

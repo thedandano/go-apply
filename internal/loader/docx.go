@@ -36,7 +36,10 @@ func (d *DOCXExtractor) Load(path string) (string, error) {
 		}
 		text, xmlErr := extractXMLText(rc)
 		rc.Close()
-		return text, xmlErr
+		if xmlErr != nil {
+			return "", fmt.Errorf("extract text from %s: %w", path, xmlErr)
+		}
+		return text, nil
 	}
 	return "", fmt.Errorf("word/document.xml not found in %s", path)
 }
