@@ -11,6 +11,10 @@ import (
 )
 
 func main() {
+	os.Exit(run())
+}
+
+func run() int {
 	// TODO(task-2): replace with config.LogDir() once config package is implemented
 	home, _ := os.UserHomeDir()
 	logDir := filepath.Join(home, ".local", "state", "go-apply", "logs")
@@ -25,6 +29,7 @@ func main() {
 	root := cli.NewRootCommand()
 	if err := root.Execute(); err != nil {
 		log.Error("command failed", "error", err)
-		os.Exit(1)
+		return 1
 	}
+	return 0
 }

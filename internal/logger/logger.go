@@ -34,7 +34,7 @@ func New(logDir string, level slog.Level) (*slog.Logger, func(), error) {
 	timestamp := time.Now().UTC().Format("2006-01-02T150405Z")
 	logPath := filepath.Join(logDir, logFilePrefix+timestamp+".log")
 
-	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0640)
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600) //nolint:gosec // G304: logPath is constructed from os.UserHomeDir() + fixed internal values
 	if err != nil {
 		return stderrOnly(level), func() {}, nil
 	}
@@ -45,7 +45,7 @@ func New(logDir string, level slog.Level) (*slog.Logger, func(), error) {
 	})
 
 	var once sync.Once
-	return log, func() { once.Do(func() { f.Close() }) }, nil
+	return log, func() { once.Do(func() { _ = f.Close() }) }, nil //nolint:gosec // G104: close error in cleanup is non-fatal
 }
 
 func stderrOnly(level slog.Level) *slog.Logger {
@@ -68,7 +68,7 @@ func pruneOldLogs(logDir string, keep int) {
 		return
 	}
 	for _, old := range logFiles[:len(logFiles)-keep] {
-		os.Remove(old)
+		_ = os.Remove(old) //nolint:gosec // G104: best-effort log rotation deletion
 	}
 }
 
@@ -81,14 +81,14 @@ func (h *multiHandler) Enabled(ctx context.Context, level slog.Level) bool {
 	return h.file.Enabled(ctx, level) || h.stderr.Enabled(ctx, level)
 }
 
-func (h *multiHandler) Handle(ctx context.Context, r slog.Record) error {
+func (h *multiHandler) Handle(ctx context.Context, r slog.Record) error { //nolint:gocritic // hugeParam: slog.Handler interface requires slog.Record by value
 	if h.file.Enabled(ctx, r.Level) {
 		if err := h.file.Handle(ctx, r); err != nil {
 			return fmt.Errorf("file handler: %w", err)
 		}
 	}
 	if h.stderr.Enabled(ctx, r.Level) {
-		h.stderr.Handle(ctx, r.Clone()) //nolint:errcheck // stderr write failure is non-fatal
+		_ = h.stderr.Handle(ctx, r.Clone()) //nolint:gosec // G104: stderr write failure is non-fatal
 	}
 	return nil
 }

@@ -93,7 +93,7 @@ func TestNew_DebugLevelFiltersInfo(t *testing.T) {
 		t.Skip("no log file created")
 	}
 	data, _ := os.ReadFile(filepath.Join(dir, entries[0].Name()))
-	if string(data) == "" {
+	if len(data) == 0 {
 		t.Skip("no log output — file may be empty before flush")
 	}
 	lines := splitLines(string(data))
