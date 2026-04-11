@@ -1,4 +1,8 @@
-.PHONY: build test test-unit test-integration test-e2e lint fmt vet security check clean
+.PHONY: build test test-unit test-integration test-e2e lint fmt vet security check tools clean
+
+# Install dev tools at pinned versions (run once after cloning)
+tools:
+	@bash scripts/install-tools.sh
 
 build:
 	go build -o bin/go-apply ./cmd/go-apply/
@@ -27,7 +31,7 @@ security:
 	govulncheck ./...
 	gosec ./...
 
-# check mirrors what CI runs — use before pushing
+# check mirrors what CI runs — use before pushing (requires: make tools)
 check: vet lint security test-unit
 
 clean:
