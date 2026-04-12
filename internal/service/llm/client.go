@@ -215,17 +215,15 @@ func extractJSON(s string) string {
 
 	// Find outermost JSON object or array.
 	start := -1
-	var openChar, closeChar byte
+	var closeChar byte
 	for i := 0; i < len(stripped); i++ {
 		if stripped[i] == '{' {
 			start = i
-			openChar = '{'
 			closeChar = '}'
 			break
 		}
 		if stripped[i] == '[' {
 			start = i
-			openChar = '['
 			closeChar = ']'
 			break
 		}
@@ -233,8 +231,6 @@ func extractJSON(s string) string {
 	if start == -1 {
 		return s // no JSON found — return original
 	}
-
-	_ = openChar // used implicitly via start index
 
 	// Find the matching closing delimiter from the end.
 	end := -1
