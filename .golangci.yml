@@ -22,6 +22,8 @@ linters-settings:
     enabled-tags:
       - diagnostic
       - performance
+    disabled-checks:
+      - hugeParam  # port interfaces enforce value types; can't pointer-ify without changing the interface
   gosec:
     excludes:
       - G304
