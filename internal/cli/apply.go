@@ -9,6 +9,7 @@ import (
 	"github.com/thedandano/go-apply/internal/config"
 	loaderPkg "github.com/thedandano/go-apply/internal/loader"
 	"github.com/thedandano/go-apply/internal/model"
+	"github.com/thedandano/go-apply/internal/port"
 	"github.com/thedandano/go-apply/internal/presenter/headless"
 	"github.com/thedandano/go-apply/internal/repository/fs"
 	"github.com/thedandano/go-apply/internal/service/augment"
@@ -64,7 +65,10 @@ Output is JSON when --headless is set (default for this release).`,
 			jdCacheRepo := fs.NewJDCacheRepository(cacheDir)
 
 			// ── Augmenter (optional — degrades gracefully if DB unavailable) ──
-			var augmenterSvc *augment.Service
+			// Declared as port.Augmenter (interface) so that a nil value produces
+			// a true nil interface rather than a (*augment.Service)(nil) typed nil,
+			// which would satisfy `augmenter != nil` and panic on the nil receiver call.
+			var augmenterSvc port.Augmenter
 			profileRepo, dbErr := newSQLiteProfile(cfg, defaults)
 			if dbErr == nil {
 				augmenterSvc = augment.New(profileRepo, embedderClient, defaults)
