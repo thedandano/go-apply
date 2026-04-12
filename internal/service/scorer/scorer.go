@@ -11,6 +11,9 @@ import (
 	"github.com/thedandano/go-apply/internal/text"
 )
 
+// wsRe collapses runs of whitespace — compiled once, used in normalize.
+var wsRe = regexp.MustCompile(`\s+`)
+
 // Service scores resumes deterministically against job descriptions.
 // Implements port.Scorer. Pure computation — no I/O.
 type Service struct {
@@ -29,9 +32,9 @@ func New(defaults *config.AppDefaults) *Service {
 func (s *Service) Score(input port.ScorerInput) (model.ScoreResult, error) {
 	kwScore, kwResult := s.scoreKeywordMatch(input.JD.Required, input.JD.Preferred, input.ResumeText)
 	expScore := s.scoreExperienceFit(input.CandidateYears, input.RequiredYears, input.SeniorityMatch)
-	impScore, metricBullets := scoreImpactEvidence(input.ResumeText, s.defaults.Scoring.ImpactBulletTarget)
-	atsScore := scoreATSFormat(input.ResumeText)
-	readScore, fillerPhrases := scoreReadability(input.ResumeText)
+	impScore, metricBullets := s.scoreImpactEvidence(input.ResumeText)
+	atsScore := s.scoreATSFormat(input.ResumeText)
+	readScore, fillerPhrases := s.scoreReadability(input.ResumeText)
 
 	var gaps []model.ReferenceGap
 	if input.ReferenceData != nil {
@@ -87,16 +90,25 @@ var abbreviations = map[string]string{
 
 func normalize(s string) string {
 	s = strings.ToLower(strings.TrimSpace(s))
-	return regexp.MustCompile(`\s+`).ReplaceAllString(s, " ")
+	return wsRe.ReplaceAllString(s, " ")
+}
+
+// wordPresent reports whether term appears in text as a whole word
+// (not as a substring of another word).
+func wordPresent(term, text string) bool {
+	pattern := `(?:[^a-z0-9]|^)` + regexp.QuoteMeta(term) + `(?:[^a-z0-9]|$)`
+	matched, _ := regexp.MatchString(pattern, text)
+	return matched
 }
 
 // expandAbbreviations appends both the abbreviation and its expansion to the
-// text when either is present. Matches the Python expand_abbreviations logic.
-func expandAbbreviations(text string) string {
-	norm := normalize(text)
+// text when either is present as a whole word. Uses word-boundary matching to
+// avoid spurious expansions (e.g. "ai" inside "maintain" must not expand).
+func expandAbbreviations(s string) string {
+	norm := normalize(s)
 	for abbr, expansion := range abbreviations {
-		hasAbbr := strings.Contains(norm, abbr)
-		hasExpansion := strings.Contains(norm, expansion)
+		hasAbbr := wordPresent(abbr, norm)
+		hasExpansion := wordPresent(expansion, norm)
 		if hasAbbr && !hasExpansion {
 			norm += " " + expansion
 		}
@@ -123,8 +135,7 @@ func skillMatched(skill, resumeTextExpanded string) bool {
 	}
 
 	for variant := range variants {
-		pattern := `(?:[^a-z0-9]|^)` + regexp.QuoteMeta(variant) + `(?:[^a-z0-9]|$)`
-		if matched, _ := regexp.MatchString(pattern, resumeNorm); matched {
+		if wordPresent(variant, resumeNorm) {
 			return true
 		}
 	}
@@ -226,7 +237,7 @@ var metricPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)\d+\s*(days|weeks|months)\s*(faster|reduction|improvement|savings)`),
 }
 
-func scoreImpactEvidence(resumeText string, bulletTarget int) (float64, []string) {
+func (s *Service) scoreImpactEvidence(resumeText string) (float64, []string) {
 	bullets := text.ExtractExperienceBullets(resumeText)
 	var metricBullets []string
 	for _, bullet := range bullets {
@@ -238,8 +249,8 @@ func scoreImpactEvidence(resumeText string, bulletTarget int) (float64, []string
 		}
 	}
 	count := float64(len(metricBullets))
-	target := float64(bulletTarget)
-	score := roundTo1(10.0 * math.Min(count/target, 1.0))
+	target := float64(s.defaults.Scoring.ImpactBulletTarget)
+	score := roundTo1(s.defaults.Scoring.Weights.ImpactEvidence * math.Min(count/target, 1.0))
 	return score, nullSafe(metricBullets)
 }
 
@@ -253,7 +264,7 @@ var atsSectionHeaders = []*regexp.Regexp{
 	regexp.MustCompile(`(?im)^(skills|technical skills|core competencies|competencies)`),
 }
 
-func scoreATSFormat(resumeText string) float64 {
+func (s *Service) scoreATSFormat(resumeText string) float64 {
 	if len(strings.TrimSpace(resumeText)) == 0 {
 		return 0
 	}
@@ -263,7 +274,7 @@ func scoreATSFormat(resumeText string) float64 {
 			found++
 		}
 	}
-	return roundTo1(10.0 * float64(found) / float64(len(atsSectionHeaders)))
+	return roundTo1(s.defaults.Scoring.Weights.ATSFormat * float64(found) / float64(len(atsSectionHeaders)))
 }
 
 // ---------------------------------------------------------------------------
@@ -280,7 +291,7 @@ var fillerPhrases = []string{
 	"participated in",
 }
 
-func scoreReadability(resumeText string) (float64, []string) {
+func (s *Service) scoreReadability(resumeText string) (float64, []string) {
 	norm := normalize(resumeText)
 	var found []string
 	for _, phrase := range fillerPhrases {
@@ -288,8 +299,8 @@ func scoreReadability(resumeText string) (float64, []string) {
 			found = append(found, phrase)
 		}
 	}
-	// Each filler phrase costs 2 points; floor at 0.
-	score := math.Max(0, 10.0-float64(len(found))*2.0)
+	penalty := s.defaults.Scoring.ReadabilityFillerPhrasePenalty
+	score := math.Max(0, s.defaults.Scoring.Weights.Readability-float64(len(found))*penalty)
 	return roundTo1(score), nullSafe(found)
 }
 
