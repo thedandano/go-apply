@@ -4,6 +4,7 @@ import (
 	"math"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/thedandano/go-apply/internal/config"
 	"github.com/thedandano/go-apply/internal/model"
@@ -13,6 +14,11 @@ import (
 
 // wsRe collapses runs of whitespace — compiled once, used in normalize.
 var wsRe = regexp.MustCompile(`\s+`)
+
+// wordPatternCache caches compiled word-boundary regexps by term.
+// wordPresent is called O(skills × abbreviations) per Score() invocation;
+// compiling the same pattern repeatedly is unnecessary.
+var wordPatternCache sync.Map
 
 // Service scores resumes deterministically against job descriptions.
 // Implements port.Scorer. Pure computation — no I/O.
@@ -94,11 +100,17 @@ func normalize(s string) string {
 }
 
 // wordPresent reports whether term appears in text as a whole word
-// (not as a substring of another word).
+// (not as a substring of another word). Compiled patterns are cached.
 func wordPresent(term, text string) bool {
 	pattern := `(?:[^a-z0-9]|^)` + regexp.QuoteMeta(term) + `(?:[^a-z0-9]|$)`
-	matched, _ := regexp.MatchString(pattern, text)
-	return matched
+	var re *regexp.Regexp
+	if cached, ok := wordPatternCache.Load(pattern); ok {
+		re = cached.(*regexp.Regexp)
+	} else {
+		re = regexp.MustCompile(pattern)
+		wordPatternCache.Store(pattern, re)
+	}
+	return re.MatchString(text)
 }
 
 // expandAbbreviations appends both the abbreviation and its expansion to the

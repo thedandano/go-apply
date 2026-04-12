@@ -13,7 +13,7 @@ var (
 		`(?im)^(professional\s+experience|work\s+experience|experience|employment)`,
 	)
 	stopHeaders = regexp.MustCompile(
-		`(?im)^(education|skills|projects|certifications|awards|publications|volunteer|interests|summary|objective)`,
+		`(?im)^(education|academic\s+background|skills|technical\s+skills|core\s+competencies|competencies|projects|certifications|awards|publications|volunteer|interests|summary|objective)`,
 	)
 )
 
