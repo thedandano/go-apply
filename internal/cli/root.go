@@ -17,5 +17,7 @@ func NewRootCommand(defaults *config.AppDefaults) *cobra.Command {
 	cmd.AddCommand(newApplyCommand(defaults))
 	cmd.AddCommand(newTailorCommand(defaults))
 	cmd.AddCommand(newServeCommand(defaults))
+	cmd.AddCommand(newOnboardCommand(defaults))
+	cmd.AddCommand(newConfigCommand())
 	return cmd
 }
