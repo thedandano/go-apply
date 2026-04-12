@@ -28,7 +28,7 @@ func newServeCommand(defaults *config.AppDefaults) *cobra.Command {
 		Short: "Start MCP stdio server for Claude Code integration",
 		Long: `serve starts an MCP stdio server that exposes three tools:
   apply_to_job   — full apply pipeline (score + cover letter)
-  get_score      — score resumes against a JD (no cover letter)
+  get_score      — score resumes against a JD and return detailed scores
   tailor_resume  — tailor resume (stub — requires Task 13)`,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			cfg, err := config.Load()
@@ -100,7 +100,7 @@ func newServeCommand(defaults *config.AppDefaults) *cobra.Command {
 			// ── get_score ─────────────────────────────────────────────────────
 			s.AddTool(
 				mcp.NewTool("get_score",
-					mcp.WithDescription("Score resumes against a job description (no cover letter generation)"),
+					mcp.WithDescription("Score resumes against a job description and return detailed scores"),
 					mcp.WithString("jd_url",
 						mcp.Description("Job description URL (mutually exclusive with jd_text)"),
 					),
