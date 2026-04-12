@@ -54,6 +54,10 @@ func (f *GoqueryFetcher) Fetch(ctx context.Context, url string) (string, error) 
 	}
 	defer resp.Body.Close() //nolint:errcheck
 
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("goquery fetch %s: status %d", url, resp.StatusCode)
+	}
+
 	doc, err := goquery.NewDocumentFromReader(resp.Body)
 	if err != nil {
 		return "", fmt.Errorf("goquery fetch %s: parse html: %w", url, err)
@@ -149,28 +153,28 @@ func (f *ChromedpFetcher) Fetch(ctx context.Context, url string) (string, error)
 
 var _ port.JDFetcher = (*FallbackFetcher)(nil)
 
-// FallbackFetcher tries ChromedpFetcher first, then falls back to GoqueryFetcher.
+// FallbackFetcher tries a primary JDFetcher first, then falls back to a secondary.
+// By default constructed with ChromedpFetcher as primary and GoqueryFetcher as fallback.
 type FallbackFetcher struct {
-	chromedp *ChromedpFetcher
-	goquery  *GoqueryFetcher
-	defaults *config.AppDefaults
+	primary   port.JDFetcher
+	secondary port.JDFetcher
 }
 
-// NewFallbackFetcher creates a FallbackFetcher.
+// NewFallbackFetcher creates a FallbackFetcher backed by chromedp (primary) and
+// goquery (fallback).
 func NewFallbackFetcher(defaults *config.AppDefaults) *FallbackFetcher {
 	return &FallbackFetcher{
-		chromedp: NewChromedpFetcher(defaults),
-		goquery:  NewGoqueryFetcher(defaults),
-		defaults: defaults,
+		primary:   NewChromedpFetcher(defaults),
+		secondary: NewGoqueryFetcher(defaults),
 	}
 }
 
-// Fetch tries chromedp first. If chromedp returns an error or content that is
-// too short, falls back to goquery.
+// Fetch tries the primary fetcher. If it returns an error, falls back to the
+// secondary. Both fetchers enforce their own MinJDTextLengthChars check internally.
 func (f *FallbackFetcher) Fetch(ctx context.Context, url string) (string, error) {
-	text, err := f.chromedp.Fetch(ctx, url)
-	if err != nil || len(text) < f.defaults.Fetcher.MinJDTextLengthChars {
-		return f.goquery.Fetch(ctx, url)
+	text, err := f.primary.Fetch(ctx, url)
+	if err != nil {
+		return f.secondary.Fetch(ctx, url)
 	}
 	return text, nil
 }
