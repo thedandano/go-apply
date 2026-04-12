@@ -24,6 +24,7 @@ type ScoringDefaults struct {
 	OverqualificationThresholdMult float64            `json:"overqualification_threshold_multiplier"`
 	OverqualificationPenalty       float64            `json:"overqualification_penalty"`
 	ImpactBulletTarget             int                `json:"impact_bullet_target"`
+	ReadabilityFillerPhrasePenalty float64            `json:"readability_filler_phrase_penalty"`
 }
 
 type ThresholdDefaults struct {
@@ -109,6 +110,7 @@ func EmbeddedDefaults() *AppDefaults {
 			OverqualificationThresholdMult: 2.0,
 			OverqualificationPenalty:       0.85,
 			ImpactBulletTarget:             5,
+			ReadabilityFillerPhrasePenalty: 2.0,
 		},
 		Thresholds:   ThresholdDefaults{ScorePass: 70.0, ScoreBoostMin: 40.0, MaxBoostIterations: 3},
 		CoverLetter:  CoverLetterDefaults{MaxWords: 90, SentenceCount: 3, TargetWords: 75},

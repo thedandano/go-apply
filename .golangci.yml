@@ -22,9 +22,12 @@ linters-settings:
     enabled-tags:
       - diagnostic
       - performance
+    disabled-checks:
+      - hugeParam  # port interfaces enforce value types; can't pointer-ify without changing the interface
   gosec:
     excludes:
       - G304
+      - G501  # crypto/md5 used as cache key (URL → filename), not for security
 
 issues:
   exclude-rules:
