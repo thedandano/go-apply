@@ -15,5 +15,6 @@ func NewRootCommand(defaults *config.AppDefaults) *cobra.Command {
 		Short: "AI-powered job application assistant",
 	}
 	cmd.AddCommand(newApplyCommand(defaults))
+	cmd.AddCommand(newServeCommand(defaults))
 	return cmd
 }
