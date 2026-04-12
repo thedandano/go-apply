@@ -3,6 +3,7 @@ package tailor_test
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/thedandano/go-apply/internal/config"
@@ -145,6 +146,42 @@ func TestTailorResume_Tier2LLMError_Degrades(t *testing.T) {
 	// Tier-1 should still have run.
 	if result.TierApplied < model.TierKeyword {
 		t.Errorf("expected at least TierKeyword after degrade, got %v", result.TierApplied)
+	}
+}
+
+func TestTailorResume_Tier2RewritesBullets(t *testing.T) {
+	stub := &stubLLM{response: "- Designed distributed systems using golang and kubernetes\n"}
+	svc := tailor.New(stub, makeDefaults())
+	resumeText := "Skills\nLanguages: Python\n\nExperience\n- Built microservices\n"
+	input := port.TailorInput{
+		Resume:     model.ResumeFile{Label: "backend"},
+		ResumeText: resumeText,
+		JD:         model.JDData{},
+		ScoreBefore: model.ScoreResult{
+			Keywords: model.KeywordResult{
+				ReqUnmatched: []string{"golang", "kubernetes"},
+			},
+		},
+		AccomplishmentsText: "Led design of distributed Go microservices serving 10M users",
+		Options:             port.TailorOptions{MaxTier2BulletRewrites: 1},
+	}
+	result, err := svc.TailorResume(context.Background(), input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.TierApplied != model.TierBullet {
+		t.Errorf("TierApplied = %v, want TierBullet", result.TierApplied)
+	}
+	if len(result.RewrittenBullets) == 0 {
+		t.Fatal("expected at least one rewritten bullet")
+	}
+	// Verify the marker was preserved (original used "- ")
+	if !strings.Contains(result.TailoredText, "Designed distributed systems") {
+		t.Errorf("tailored text does not contain rewritten content\nText: %s", result.TailoredText)
+	}
+	// Verify original bullet is gone
+	if strings.Contains(result.TailoredText, "Built microservices") {
+		t.Errorf("original bullet still present in tailored text")
 	}
 }
 

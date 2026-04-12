@@ -10,23 +10,28 @@ import (
 	"github.com/thedandano/go-apply/internal/text"
 )
 
-// RewriteBullets uses the LLM to rewrite experience bullets from resumeText,
-// incorporating jdKeywords and grounding rewrites in accomplishmentsText.
+// BulletRewriteInput holds the inputs for a tier-2 bullet rewrite call.
+type BulletRewriteInput struct {
+	ResumeText          string
+	AccomplishmentsText string
+	JDKeywords          []string
+}
+
+// RewriteBullets uses the LLM to rewrite experience bullets from input.ResumeText,
+// incorporating input.JDKeywords and grounding rewrites in input.AccomplishmentsText.
 // Returns the rewritten bullets (lines starting with "-"), capped at
 // defaults.Tailor.MaxTier2BulletRewrites.
 func RewriteBullets(
 	ctx context.Context,
 	llm port.LLMClient,
 	defaults *config.AppDefaults,
-	resumeText string,
-	accomplishmentsText string,
-	jdKeywords []string,
+	input BulletRewriteInput,
 ) ([]string, error) {
-	if accomplishmentsText == "" {
+	if input.AccomplishmentsText == "" {
 		return nil, fmt.Errorf("accomplishmentsText is required for tier-2 bullet rewrites")
 	}
 
-	bullets := text.ExtractExperienceBullets(resumeText)
+	bullets := text.ExtractExperienceBullets(input.ResumeText)
 	if len(bullets) == 0 {
 		return nil, nil
 	}
@@ -36,7 +41,7 @@ func RewriteBullets(
 		bulletList = append(bulletList, "- "+b)
 	}
 
-	keywords := strings.Join(jdKeywords, ", ")
+	keywords := strings.Join(input.JDKeywords, ", ")
 	if keywords == "" {
 		keywords = "(none)"
 	}
@@ -46,7 +51,7 @@ func RewriteBullets(
 	userContent := fmt.Sprintf(
 		"Job description keywords to incorporate: %s\n\nAccomplishments document (source of truth):\n%s\n\nOriginal bullets to rewrite:\n%s",
 		keywords,
-		accomplishmentsText,
+		input.AccomplishmentsText,
 		strings.Join(bulletList, "\n"),
 	)
 

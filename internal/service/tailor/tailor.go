@@ -49,7 +49,11 @@ func (s *Service) TailorResume(ctx context.Context, input port.TailorInput) (mod
 		jdKeywords = append(jdKeywords, input.ScoreBefore.Keywords.ReqUnmatched...)
 		jdKeywords = append(jdKeywords, input.ScoreBefore.Keywords.PrefUnmatched...)
 
-		rewrittenContents, err := RewriteBullets(ctx, s.llm, s.defaults, tailoredText, input.AccomplishmentsText, jdKeywords)
+		rewrittenContents, err := RewriteBullets(ctx, s.llm, s.defaults, BulletRewriteInput{
+				ResumeText:          tailoredText,
+				AccomplishmentsText: input.AccomplishmentsText,
+				JDKeywords:          jdKeywords,
+			})
 		if err != nil {
 			// Tier-2 failed — keep tier-1 result and return without error.
 			result.TailoredText = tailoredText
@@ -88,15 +92,21 @@ func (s *Service) TailorResume(ctx context.Context, input port.TailorInput) (mod
 }
 
 // replaceBulletInText finds the line containing the original bullet content
-// (stripped of its marker) and replaces that whole line with the rewritten bullet.
+// (stripped of its marker) and replaces that whole line with the rewritten bullet,
+// preserving the original bullet marker prefix.
 // Returns the modified text and true if a replacement was made.
 func replaceBulletInText(text, original, rewritten string) (string, bool) {
 	lines := strings.Split(text, "\n")
 	for i, line := range lines {
-		// Strip common bullet markers and spaces to compare content.
-		content := strings.TrimLeft(line, "•-*–▸○ \t")
-		if strings.EqualFold(strings.TrimSpace(content), strings.TrimSpace(original)) {
-			lines[i] = rewritten
+		// Extract marker prefix (any leading bullet chars + spaces).
+		trimmed := strings.TrimLeft(line, "•-*–▸○ \t")
+		if strings.EqualFold(strings.TrimSpace(trimmed), strings.TrimSpace(original)) {
+			// Preserve original marker: everything before the content.
+			prefix := line[:len(line)-len(trimmed)]
+			// Strip any "- " prefix the LLM added to rewritten.
+			rewrittenContent := strings.TrimPrefix(strings.TrimPrefix(rewritten, "- "), "-")
+			rewrittenContent = strings.TrimSpace(rewrittenContent)
+			lines[i] = prefix + rewrittenContent
 			return strings.Join(lines, "\n"), true
 		}
 	}
