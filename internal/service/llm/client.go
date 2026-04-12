@@ -51,9 +51,9 @@ func New(cfg config.LLMProviderConfig, defaults *config.AppDefaults) *HTTPClient
 }
 
 // ChatComplete sends a chat completion request and returns the assistant's reply.
-// It retries on 429 (rate limited) and 503 (service unavailable) with exponential
-// backoff and full jitter. Other non-2xx status codes are returned as errors
-// immediately without retry.
+// It retries on 429 (rate limited), 503 (service unavailable), and transient
+// network/timeout errors with exponential backoff and full jitter. Other non-2xx
+// status codes are returned as errors immediately without retry.
 func (c *HTTPClient) ChatComplete(ctx context.Context, messages []port.ChatMessage, opts port.ChatOptions) (string, error) {
 	type requestBody struct {
 		Model       string             `json:"model"`
@@ -121,8 +121,9 @@ func (c *HTTPClient) Embed(ctx context.Context, text string) ([]float32, error) 
 	return result.Data[0].Embedding, nil
 }
 
-// doWithRetry executes a POST request to the given path, retrying on 429/503.
-// It serializes payload as JSON and deserializes the response into out.
+// doWithRetry executes a POST request to the given path, retrying on 429/503 and
+// transient network errors. It serializes payload as JSON and deserializes the
+// response into out.
 func (c *HTTPClient) doWithRetry(ctx context.Context, path string, payload, out any) error {
 	body, err := json.Marshal(payload)
 	if err != nil {

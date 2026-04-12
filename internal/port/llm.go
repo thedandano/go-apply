@@ -3,8 +3,8 @@ package port
 import "context"
 
 type ChatMessage struct {
-	Role    string
-	Content string
+	Role    string `json:"role"`
+	Content string `json:"content"`
 }
 
 type ChatOptions struct {

@@ -186,6 +186,46 @@ func TestHTTPClient_ChatComplete_ContextCancel(t *testing.T) {
 	}
 }
 
+// TestHTTPClient_ChatComplete_RequestBody verifies that the request body uses
+// lowercase JSON field names as required by the OpenAI-compatible protocol.
+func TestHTTPClient_ChatComplete_RequestBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		var body struct {
+			Model    string `json:"model"`
+			Messages []struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+			t.Errorf("decode request body: %v", err)
+		}
+		if body.Model != "test-model" {
+			t.Errorf("model: want %q, got %q", "test-model", body.Model)
+		}
+		if len(body.Messages) != 1 {
+			t.Fatalf("messages: want 1, got %d", len(body.Messages))
+		}
+		if body.Messages[0].Role != "user" {
+			t.Errorf("role: want %q, got %q", "user", body.Messages[0].Role)
+		}
+		if body.Messages[0].Content != "hello" {
+			t.Errorf("content: want %q, got %q", "hello", body.Messages[0].Content)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(chatResponse("ok"))
+	}))
+	defer server.Close()
+
+	cfg := config.LLMProviderConfig{BaseURL: server.URL, Model: "test-model"}
+	client := llm.New(cfg, testDefaults())
+
+	msgs := []port.ChatMessage{{Role: "user", Content: "hello"}}
+	if _, err := client.ChatComplete(context.Background(), msgs, port.ChatOptions{}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 // TestHTTPClient_ChatComplete_ServerError verifies that a 500 response (not
 // retriable) returns an error immediately without exhausting retries.
 func TestHTTPClient_ChatComplete_ServerError(t *testing.T) {
