@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/thedandano/go-apply/internal/model"
 	"github.com/thedandano/go-apply/internal/port"
 )
 
@@ -25,7 +24,6 @@ type OnboardInput struct {
 	Resumes             map[string]OnboardFile // label → file
 	SkillsText          string                 // empty = skip
 	AccomplishmentsText string                 // empty = skip
-	Profile             *model.UserProfile     // nil = skip config update
 }
 
 // OnboardResult reports what was stored.
@@ -67,12 +65,12 @@ func (s *Service) Run(ctx context.Context, input OnboardInput) (OnboardResult, e
 
 	// Process resumes
 	for label, file := range input.Resumes {
-		destPath := filepath.Join(inputsDir, label+".txt")
-		rel, relErr := filepath.Rel(inputsDir, destPath)
-		if relErr != nil || strings.HasPrefix(rel, "..") {
-			result.Warnings = append(result.Warnings, fmt.Sprintf("skipped resume %q: label resolves outside inputs directory", file.Label))
+		// Reject labels containing path separators or parent-directory references
+		if strings.ContainsAny(file.Label, `/\`) || strings.Contains(file.Label, "..") {
+			result.Warnings = append(result.Warnings, fmt.Sprintf("skipped resume %q: label must not contain path separators or '..'", file.Label))
 			continue
 		}
+		destPath := filepath.Join(inputsDir, file.Label+".txt")
 		if err := os.WriteFile(destPath, []byte(file.PlainText), 0o600); err != nil {
 			result.Warnings = append(result.Warnings, fmt.Sprintf("write resume %s: %v", label, err))
 			continue

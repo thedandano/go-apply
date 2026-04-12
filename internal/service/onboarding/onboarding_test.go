@@ -183,3 +183,48 @@ type failingEmbedder struct{}
 func (f *failingEmbedder) Embed(_ context.Context, _ string) ([]float32, error) {
 	return nil, fmt.Errorf("embed failed")
 }
+
+func TestOnboardingService_RejectsTraversalLabel(t *testing.T) {
+	tmpDir := t.TempDir()
+	svc := onboarding.New(&stubProfileRepo{}, &stubEmbedder{}, tmpDir)
+	input := onboarding.OnboardInput{
+		Resumes: map[string]onboarding.OnboardFile{
+			"../../../etc/evil": {
+				Label:     "../../../etc/evil",
+				PlainText: "malicious content",
+			},
+		},
+	}
+	result, err := svc.Run(context.Background(), input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.ResumesStored) != 0 {
+		t.Errorf("expected no resumes stored, got %v", result.ResumesStored)
+	}
+	if len(result.Warnings) == 0 {
+		t.Error("expected a warning for traversal label, got none")
+	}
+	// Verify nothing was written outside tmpDir
+	escapedPath := filepath.Join(tmpDir, "../../../etc/evil.txt")
+	if _, statErr := os.Stat(escapedPath); statErr == nil {
+		t.Error("file was written outside the data directory")
+	}
+}
+
+func TestOnboardingService_RejectsSlashLabel(t *testing.T) {
+	tmpDir := t.TempDir()
+	svc := onboarding.New(&stubProfileRepo{}, &stubEmbedder{}, tmpDir)
+	input := onboarding.OnboardInput{
+		Resumes: map[string]onboarding.OnboardFile{
+			"foo/bar": {Label: "foo/bar", PlainText: "content"},
+		},
+	}
+	result, _ := svc.Run(context.Background(), input)
+	if len(result.Warnings) == 0 {
+		t.Error("expected warning for slash label, got none")
+	}
+	if len(result.ResumesStored) != 0 {
+		t.Errorf("expected no resume stored for slash label, got %v", result.ResumesStored)
+	}
+}

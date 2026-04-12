@@ -142,7 +142,7 @@ func newServeCommand(defaults *config.AppDefaults) *cobra.Command {
 					mcp.WithString("accomplishments_content", mcp.Description("Plain text of the accomplishments document (optional)")),
 				),
 				func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-					return handleOnboardUser(ctx, req, cfg, defaults)
+					return handleOnboardUser(ctx, req, defaults)
 				},
 			)
 
@@ -155,7 +155,7 @@ func newServeCommand(defaults *config.AppDefaults) *cobra.Command {
 					mcp.WithString("format", mcp.Description("File format of the resume (e.g. '.pdf')")),
 				),
 				func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-					return handleAddResume(ctx, req, cfg, defaults)
+					return handleAddResume(ctx, req, defaults)
 				},
 			)
 
@@ -236,7 +236,7 @@ func handleApplyToJob(ctx context.Context, req mcp.CallToolRequest, build pipeli
 
 // handleOnboardUser handles the onboard_user MCP tool.
 // Accepts pre-extracted text for resume, skills, and accomplishments.
-func handleOnboardUser(ctx context.Context, req mcp.CallToolRequest, _ *config.Config, defaults *config.AppDefaults) (*mcp.CallToolResult, error) {
+func handleOnboardUser(ctx context.Context, req mcp.CallToolRequest, defaults *config.AppDefaults) (*mcp.CallToolResult, error) {
 	resumeContent := req.GetString("resume_content", "")
 	resumeLabel := req.GetString("resume_label", "")
 	resumeFormat := req.GetString("resume_format", "")
@@ -289,7 +289,7 @@ func handleOnboardUser(ctx context.Context, req mcp.CallToolRequest, _ *config.C
 
 // handleAddResume handles the add_resume MCP tool.
 // Indexes a single resume into the profile database.
-func handleAddResume(ctx context.Context, req mcp.CallToolRequest, _ *config.Config, defaults *config.AppDefaults) (*mcp.CallToolResult, error) {
+func handleAddResume(ctx context.Context, req mcp.CallToolRequest, defaults *config.AppDefaults) (*mcp.CallToolResult, error) {
 	content := req.GetString("content", "")
 	label := req.GetString("label", "")
 	format := req.GetString("format", "")

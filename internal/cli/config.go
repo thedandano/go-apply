@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -99,5 +100,5 @@ func newConfigShowCommand() *cobra.Command {
 
 // isAPIKey returns true if the config key refers to an API key field.
 func isAPIKey(key string) bool {
-	return key == "orchestrator.api_key" || key == "embedder.api_key"
+	return strings.HasSuffix(key, ".api_key")
 }
