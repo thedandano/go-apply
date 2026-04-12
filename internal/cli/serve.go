@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -53,7 +54,7 @@ func newServeCommand(defaults *config.AppDefaults) *cobra.Command {
 			// buildPipeline creates a pipeline with a fresh MCP presenter for the given resume dir.
 			buildPipeline := func(resumeDir string) (*pipeline.ApplyPipeline, *mcpPres.Presenter) {
 				pres := mcpPres.New()
-				cacheDir := config.DataDir() + "/jd_cache"
+				cacheDir := filepath.Join(config.DataDir(), "jd_cache")
 				jdCacheRepo := fs.NewJDCacheRepository(cacheDir)
 				p := pipeline.New(
 					fetcherSvc,

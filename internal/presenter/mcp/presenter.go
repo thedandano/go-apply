@@ -22,7 +22,6 @@ type Presenter struct {
 	result *model.PipelineResult
 	tailor *model.TailorResult
 	err    error
-	events []any
 }
 
 // New returns a new capturing Presenter.
@@ -30,19 +29,8 @@ func New() *Presenter {
 	return &Presenter{}
 }
 
-// OnEvent records a pipeline step lifecycle event.
-// Unknown event types are silently ignored and never cause a panic.
-func (p *Presenter) OnEvent(event any) {
-	if event == nil {
-		return
-	}
-	switch event.(type) {
-	case model.StepStartedEvent, model.StepCompletedEvent, model.StepFailedEvent:
-		p.mu.Lock()
-		p.events = append(p.events, event)
-		p.mu.Unlock()
-	}
-}
+// OnEvent satisfies port.Presenter. Unknown event types are silently ignored.
+func (p *Presenter) OnEvent(_ any) {}
 
 // ShowResult stores the pipeline result in memory.
 func (p *Presenter) ShowResult(result *model.PipelineResult) error {
