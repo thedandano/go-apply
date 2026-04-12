@@ -19,7 +19,8 @@
     },
     "overqualification_threshold_multiplier": 2.0,
     "overqualification_penalty":              0.85,
-    "impact_bullet_target": 5
+    "impact_bullet_target": 5,
+    "readability_filler_phrase_penalty": 2.0
   },
   "thresholds": {
     "score_pass":     70.0,
