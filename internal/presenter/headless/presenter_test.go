@@ -132,14 +132,15 @@ func TestPresenter_OnEvent_Unknown_NoPanic(t *testing.T) {
 }
 
 func TestPresenter_ShowError(t *testing.T) {
-	var out bytes.Buffer
-	p := headless.New(&out)
+	var out, events bytes.Buffer
+	p := headless.NewWithEventWriter(&out, &events)
 
 	p.ShowError(errors.New("something went wrong"))
 
-	data := out.Bytes()
+	// errors go to stderr (events writer), not stdout
+	data := events.Bytes()
 	if len(data) == 0 {
-		t.Fatal("ShowError wrote nothing")
+		t.Fatal("ShowError wrote nothing to stderr")
 	}
 
 	var got map[string]any
@@ -149,6 +150,11 @@ func TestPresenter_ShowError(t *testing.T) {
 
 	if got["error"] != "something went wrong" {
 		t.Errorf("error: got %q, want %q", got["error"], "something went wrong")
+	}
+
+	// stdout must remain empty — errors must not pollute the JSON result stream
+	if out.Len() != 0 {
+		t.Errorf("ShowError wrote %d bytes to stdout (expected 0)", out.Len())
 	}
 }
 

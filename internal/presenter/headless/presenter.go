@@ -103,12 +103,12 @@ func (p *Presenter) ShowTailorResult(result *model.TailorResult) error {
 	return err
 }
 
-// ShowError writes {"error":"<message>"} to p.out.
+// ShowError writes {"error":"<message>"} to p.events (stderr).
 func (p *Presenter) ShowError(err error) {
 	type errJSON struct {
 		Error string `json:"error"`
 	}
-	p.writeJSON(p.out, errJSON{Error: err.Error()})
+	p.writeJSON(p.events, errJSON{Error: err.Error()})
 }
 
 // writeJSON marshals v and writes the result followed by a newline. Errors are silently discarded.

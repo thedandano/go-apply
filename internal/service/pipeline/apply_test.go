@@ -296,8 +296,58 @@ func TestApplyPipeline_Run_CoverLetterDegrades(t *testing.T) {
 	if len(presenter.ResultCalled.Warnings) == 0 {
 		t.Error("expected at least one warning for cover letter failure")
 	}
+	if presenter.ResultCalled.Status != "degraded" {
+		t.Errorf("status: got %q, want %q", presenter.ResultCalled.Status, "degraded")
+	}
 	// Cover letter text should be empty (degraded)
 	if presenter.ResultCalled.CoverLetter.Text != "" {
 		t.Errorf("expected empty cover letter text on failure, got %q", presenter.ResultCalled.CoverLetter.Text)
+	}
+}
+
+// stubFailAugmenter always returns an error to test degraded mode.
+type stubFailAugmenter struct{}
+
+var _ port.Augmenter = (*stubFailAugmenter)(nil)
+
+func (s *stubFailAugmenter) AugmentResumeText(_ context.Context, _ port.AugmentInput) (string, *port.ReferenceData, error) {
+	return "", nil, errors.New("embedding unavailable")
+}
+
+// TestApplyPipeline_Run_AugmentDegrades verifies that augmentation failure adds a
+// warning, sets status to "degraded", and continues the pipeline with the original text.
+func TestApplyPipeline_Run_AugmentDegrades(t *testing.T) {
+	pres := &stubPresenter{}
+
+	p := pipeline.New(
+		&stubFetcher{},
+		&stubLLM{},
+		&stubScorer{},
+		&stubCoverLetter{},
+		&stubResumeRepo{resumes: makeTestResumes()},
+		&stubJDCache{},
+		&stubFailAugmenter{},
+		&stubLoader{},
+		pres,
+		makeDefaults(),
+		makeCfg(),
+	)
+
+	err := p.Run(context.Background(), pipeline.RunInput{
+		Text:    "Senior Go Engineer requiring Kubernetes experience",
+		Channel: model.ChannelCold,
+	})
+
+	if err != nil {
+		t.Fatalf("Run should not return error on augment failure, got: %v", err)
+	}
+	if pres.ResultCalled == nil {
+		t.Fatal("ShowResult was not called")
+	}
+	if len(pres.ResultCalled.Warnings) == 0 {
+		t.Error("expected at least one warning for augmentation failure")
+	}
+	if pres.ResultCalled.Status != "degraded" {
+		t.Errorf("status: got %q, want %q", pres.ResultCalled.Status, "degraded")
 	}
 }

@@ -22,11 +22,10 @@ import (
 // newApplyCommand returns the `apply` cobra command wired with all services.
 func newApplyCommand(defaults *config.AppDefaults) *cobra.Command {
 	var (
-		jdURL        string
-		jdText       string
-		headlessMode bool
-		channel      string
-		resumeDir    string
+		jdURL     string
+		jdText    string
+		channel   string
+		resumeDir string
 	)
 
 	cmd := &cobra.Command{
@@ -35,7 +34,7 @@ func newApplyCommand(defaults *config.AppDefaults) *cobra.Command {
 		Long: `apply scores all resumes in the resume directory against a job description,
 ranks them, optionally augments the best one, and generates a cover letter.
 
-Output is JSON when --headless is set (default for this release).`,
+Output is JSON (headless mode). TUI mode will be added in a future release.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if jdURL == "" && jdText == "" {
 				return fmt.Errorf("either --url or --text must be provided")
@@ -57,8 +56,6 @@ Output is JSON when --headless is set (default for this release).`,
 			}
 
 			// ── Presenter ──────────────────────────────────────────────────────
-			// headlessMode flag is reserved for future TUI support; for now always headless.
-			_ = headlessMode
 			pres := headless.New(os.Stdout)
 
 			// ── Clients ────────────────────────────────────────────────────────
@@ -114,7 +111,6 @@ Output is JSON when --headless is set (default for this release).`,
 
 	cmd.Flags().StringVar(&jdURL, "url", "", "Job description URL to fetch")
 	cmd.Flags().StringVar(&jdText, "text", "", "Job description text (use instead of --url)")
-	cmd.Flags().BoolVar(&headlessMode, "headless", true, "JSON output mode (default true; TUI not yet available)")
 	cmd.Flags().StringVar(&channel, "channel", "COLD", "Application channel: COLD, REFERRAL, or RECRUITER")
 	cmd.Flags().StringVar(&resumeDir, "resume-dir", ".", "Directory to scan for resumes (.pdf, .docx, .txt)")
 

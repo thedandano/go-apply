@@ -106,7 +106,12 @@ func (p *ApplyPipeline) Run(ctx context.Context, input RunInput) error {
 
 	// ── Step 3: cache JD ──────────────────────────────────────────────────────
 	if input.URL != "" && result.Status != "degraded" {
-		_ = p.jdCache.Put(input.URL, jdText, jd)
+		if err := p.jdCache.Put(input.URL, jdText, jd); err != nil {
+			result.Warnings = append(result.Warnings, model.RiskWarning{
+				Severity: "warn",
+				Message:  fmt.Sprintf("JD cache write failed: %v", err),
+			})
+		}
 	}
 
 	// ── Step 4: resumes ───────────────────────────────────────────────────────
@@ -300,6 +305,7 @@ func (p *ApplyPipeline) stepAugment(ctx context.Context, bestResume model.Resume
 			Severity: "warn",
 			Message:  fmt.Sprintf("augmentation failed for %s: %v", bestResume.Label, err),
 		})
+		result.Status = "degraded"
 		return bestText
 	}
 
@@ -311,8 +317,8 @@ func (p *ApplyPipeline) stepAugment(ctx context.Context, bestResume model.Resume
 	return augmented
 }
 
-func (p *ApplyPipeline) stepCoverLetter(ctx context.Context, jd model.JDData, channel model.ChannelType, resumeText string, result *model.PipelineResult) {
-	_ = resumeText // CoverLetterInput does not yet accept resume text; retained for future wiring when port.CoverLetterInput is extended
+// TODO: wire resumeText into port.CoverLetterInput once the interface is extended.
+func (p *ApplyPipeline) stepCoverLetter(ctx context.Context, jd model.JDData, channel model.ChannelType, _ string, result *model.PipelineResult) {
 	start := time.Now()
 	p.presenter.OnEvent(model.StepStartedEvent{StepID: "cover_letter", Label: "Generating cover letter"})
 
@@ -337,6 +343,7 @@ func (p *ApplyPipeline) stepCoverLetter(ctx context.Context, jd model.JDData, ch
 			Severity: "warn",
 			Message:  fmt.Sprintf("cover letter generation failed: %v", err),
 		})
+		result.Status = "degraded"
 		return
 	}
 
