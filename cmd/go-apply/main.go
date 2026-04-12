@@ -24,7 +24,13 @@ func run() int {
 	}
 	defer cleanup()
 
-	root := cli.NewRootCommand()
+	defaults, err := config.LoadDefaults()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "load defaults: %v\n", err)
+		return 1
+	}
+
+	root := cli.NewRootCommand(defaults)
 	if err := root.Execute(); err != nil {
 		log.Error("command failed", "error", err)
 		return 1
