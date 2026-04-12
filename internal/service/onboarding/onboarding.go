@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/thedandano/go-apply/internal/model"
 	"github.com/thedandano/go-apply/internal/port"
@@ -67,6 +68,11 @@ func (s *Service) Run(ctx context.Context, input OnboardInput) (OnboardResult, e
 	// Process resumes
 	for label, file := range input.Resumes {
 		destPath := filepath.Join(inputsDir, label+".txt")
+		rel, relErr := filepath.Rel(inputsDir, destPath)
+		if relErr != nil || strings.HasPrefix(rel, "..") {
+			result.Warnings = append(result.Warnings, fmt.Sprintf("skipped resume %q: label resolves outside inputs directory", file.Label))
+			continue
+		}
 		if err := os.WriteFile(destPath, []byte(file.PlainText), 0o600); err != nil {
 			result.Warnings = append(result.Warnings, fmt.Sprintf("write resume %s: %v", label, err))
 			continue

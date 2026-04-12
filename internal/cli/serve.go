@@ -263,6 +263,10 @@ func handleOnboardUser(ctx context.Context, req mcp.CallToolRequest, _ *config.C
 		AccomplishmentsText: accomplishmentsContent,
 	}
 
+	if (resumeContent == "") != (resumeLabel == "") {
+		return mcp.NewToolResultText(`{"error":"resume_content and resume_label must both be provided or both omitted"}`), nil
+	}
+
 	if resumeContent != "" && resumeLabel != "" {
 		input.Resumes[resumeLabel] = onboarding.OnboardFile{
 			Label:     resumeLabel,
