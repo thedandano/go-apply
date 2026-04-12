@@ -131,21 +131,21 @@ func happyBuilder(t *testing.T) pipelineBuilder {
 	cfg := makeHandlerCfg()
 	return func(_ string) (*pipeline.ApplyPipeline, *mcpPres.Presenter) {
 		pres := mcpPres.New()
-		p := pipeline.New(
-			&handlerStubFetcher{},
-			&handlerStubLLM{},
-			&handlerStubScorer{},
-			&handlerStubCoverLetter{},
-			&handlerStubResumeRepo{resumes: []model.ResumeFile{
+		p := pipeline.New(pipeline.Config{
+			Fetcher: &handlerStubFetcher{},
+			LLM:     &handlerStubLLM{},
+			Scorer:  &handlerStubScorer{},
+			CLGen:   &handlerStubCoverLetter{},
+			Resumes: &handlerStubResumeRepo{resumes: []model.ResumeFile{
 				{Label: "test.pdf", Path: "/tmp/test.pdf", FileType: ".pdf"},
 			}},
-			&handlerStubJDCache{},
-			nil, // augmenter nil — degrades gracefully
-			&handlerStubLoader{},
-			pres,
-			defaults,
-			cfg,
-		)
+			JDCache:   &handlerStubJDCache{},
+			Augmenter: nil,
+			DocLoader: &handlerStubLoader{},
+			Presenter: pres,
+			Defaults:  defaults,
+			Cfg:       cfg,
+		})
 		return p, pres
 	}
 }
@@ -158,19 +158,19 @@ func errorBuilder(t *testing.T) pipelineBuilder {
 	cfg := makeHandlerCfg()
 	return func(_ string) (*pipeline.ApplyPipeline, *mcpPres.Presenter) {
 		pres := mcpPres.New()
-		p := pipeline.New(
-			&handlerStubFetcher{},
-			&handlerStubLLM{},
-			&handlerStubScorer{},
-			&handlerStubCoverLetter{},
-			&handlerStubResumeRepo{resumes: []model.ResumeFile{}}, // empty — fatal
-			&handlerStubJDCache{},
-			nil,
-			&handlerStubLoader{},
-			pres,
-			defaults,
-			cfg,
-		)
+		p := pipeline.New(pipeline.Config{
+			Fetcher:   &handlerStubFetcher{},
+			LLM:       &handlerStubLLM{},
+			Scorer:    &handlerStubScorer{},
+			CLGen:     &handlerStubCoverLetter{},
+			Resumes:   &handlerStubResumeRepo{resumes: []model.ResumeFile{}},
+			JDCache:   &handlerStubJDCache{},
+			Augmenter: nil,
+			DocLoader: &handlerStubLoader{},
+			Presenter: pres,
+			Defaults:  defaults,
+			Cfg:       cfg,
+		})
 		return p, pres
 	}
 }

@@ -26,12 +26,12 @@ import (
 func newServeCommand(defaults *config.AppDefaults) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "serve",
-		Short: "Start MCP stdio server for Claude Code integration",
+		Short: "Start MCP stdio server for AI agent integration",
 		Long: `serve starts an MCP stdio server that exposes three tools:
   apply_to_job   — full apply pipeline (score + cover letter)
   get_score      — score resumes against a JD and return detailed scores
   tailor_resume  — tailor resume (stub — requires Task 13)`,
-		RunE: func(_ *cobra.Command, _ []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			cfg, err := config.Load()
 			if err != nil {
 				return fmt.Errorf("load config: %w", err)
@@ -56,19 +56,19 @@ func newServeCommand(defaults *config.AppDefaults) *cobra.Command {
 				pres := mcpPres.New()
 				cacheDir := filepath.Join(config.DataDir(), "jd_cache")
 				jdCacheRepo := fs.NewJDCacheRepository(cacheDir)
-				p := pipeline.New(
-					fetcherSvc,
-					llmClient,
-					scorerSvc,
-					clGen,
-					fs.NewResumeRepository(resumeDir),
-					jdCacheRepo,
-					augmenterSvc,
-					docLoader,
-					pres,
-					defaults,
-					cfg,
-				)
+				p := pipeline.New(pipeline.Config{
+					Fetcher:   fetcherSvc,
+					LLM:       llmClient,
+					Scorer:    scorerSvc,
+					CLGen:     clGen,
+					Resumes:   fs.NewResumeRepository(resumeDir),
+					JDCache:   jdCacheRepo,
+					Augmenter: augmenterSvc,
+					DocLoader: docLoader,
+					Presenter: pres,
+					Defaults:  defaults,
+					Cfg:       cfg,
+				})
 				return p, pres
 			}
 
