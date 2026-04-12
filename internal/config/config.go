@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -136,6 +137,96 @@ func Load() (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// SetField sets a config field by dot-notation key.
+// Supported keys: orchestrator.model, orchestrator.base_url, orchestrator.api_key,
+// embedder.model, embedder.base_url, embedder.api_key, log_level,
+// years_of_experience, default_seniority, user_name, occupation, location,
+// linkedin_url, embedding_dim, db_path.
+func (c *Config) SetField(key, value string) error {
+	switch key {
+	case "orchestrator.model":
+		c.Orchestrator.Model = value
+	case "orchestrator.base_url":
+		c.Orchestrator.BaseURL = value
+	case "orchestrator.api_key":
+		c.Orchestrator.APIKey = value
+	case "embedder.model":
+		c.Embedder.Model = value
+	case "embedder.base_url":
+		c.Embedder.BaseURL = value
+	case "embedder.api_key":
+		c.Embedder.APIKey = value
+	case "log_level":
+		c.LogLevel = value
+	case "years_of_experience":
+		v, err := strconv.ParseFloat(value, 64)
+		if err != nil {
+			return fmt.Errorf("years_of_experience must be a number: %w", err)
+		}
+		c.YearsOfExperience = v
+	case "default_seniority":
+		c.DefaultSeniority = value
+	case "user_name":
+		c.UserName = value
+	case "occupation":
+		c.Occupation = value
+	case "location":
+		c.Location = value
+	case "linkedin_url":
+		c.LinkedInURL = value
+	case "embedding_dim":
+		v, err := strconv.Atoi(value)
+		if err != nil {
+			return fmt.Errorf("embedding_dim must be an integer: %w", err)
+		}
+		c.EmbeddingDim = v
+	case "db_path":
+		c.DBPath = value
+	default:
+		return fmt.Errorf("unknown config key %q", key)
+	}
+	return nil
+}
+
+// GetField returns a config field value by dot-notation key.
+// API key fields are returned as-is (redaction is the caller's responsibility).
+func (c *Config) GetField(key string) (string, error) {
+	switch key {
+	case "orchestrator.model":
+		return c.Orchestrator.Model, nil
+	case "orchestrator.base_url":
+		return c.Orchestrator.BaseURL, nil
+	case "orchestrator.api_key":
+		return c.Orchestrator.APIKey, nil
+	case "embedder.model":
+		return c.Embedder.Model, nil
+	case "embedder.base_url":
+		return c.Embedder.BaseURL, nil
+	case "embedder.api_key":
+		return c.Embedder.APIKey, nil
+	case "log_level":
+		return c.LogLevel, nil
+	case "years_of_experience":
+		return strconv.FormatFloat(c.YearsOfExperience, 'f', -1, 64), nil
+	case "default_seniority":
+		return c.DefaultSeniority, nil
+	case "user_name":
+		return c.UserName, nil
+	case "occupation":
+		return c.Occupation, nil
+	case "location":
+		return c.Location, nil
+	case "linkedin_url":
+		return c.LinkedInURL, nil
+	case "embedding_dim":
+		return strconv.Itoa(c.EmbeddingDim), nil
+	case "db_path":
+		return c.DBPath, nil
+	default:
+		return "", fmt.Errorf("unknown config key %q", key)
+	}
 }
 
 func (c *Config) Save() error {

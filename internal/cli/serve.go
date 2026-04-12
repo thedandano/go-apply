@@ -19,6 +19,7 @@ import (
 	"github.com/thedandano/go-apply/internal/service/augment"
 	"github.com/thedandano/go-apply/internal/service/coverletter"
 	"github.com/thedandano/go-apply/internal/service/fetcher"
+	"github.com/thedandano/go-apply/internal/service/onboarding"
 	"github.com/thedandano/go-apply/internal/service/pipeline"
 	"github.com/thedandano/go-apply/internal/service/scorer"
 )
@@ -31,7 +32,7 @@ func newServeCommand(defaults *config.AppDefaults) *cobra.Command {
   apply_to_job   — full apply pipeline (score + cover letter)
   get_score      — score resumes against a JD and return detailed scores
   tailor_resume  — tailor resume (stub — requires Task 13)`,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		RunE: func(_ *cobra.Command, _ []string) error {
 			cfg, err := config.Load()
 			if err != nil {
 				return fmt.Errorf("load config: %w", err)
@@ -130,6 +131,57 @@ func newServeCommand(defaults *config.AppDefaults) *cobra.Command {
 				},
 			)
 
+			// ── onboard_user ──────────────────────────────────────────────────
+			s.AddTool(
+				mcp.NewTool("onboard_user",
+					mcp.WithDescription("Index a resume and optional skills/accomplishments into the profile database"),
+					mcp.WithString("resume_content", mcp.Description("Plain text of the resume")),
+					mcp.WithString("resume_label", mcp.Description("Label for the resume (e.g. 'backend')")),
+					mcp.WithString("resume_format", mcp.Description("File format of the resume (e.g. '.pdf')")),
+					mcp.WithString("skills_content", mcp.Description("Plain text of the skills reference document (optional)")),
+					mcp.WithString("accomplishments_content", mcp.Description("Plain text of the accomplishments document (optional)")),
+				),
+				func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+					return handleOnboardUser(ctx, req, cfg, defaults)
+				},
+			)
+
+			// ── add_resume ────────────────────────────────────────────────────
+			s.AddTool(
+				mcp.NewTool("add_resume",
+					mcp.WithDescription("Index a single resume into the profile database"),
+					mcp.WithString("content", mcp.Description("Plain text of the resume")),
+					mcp.WithString("label", mcp.Description("Label for the resume (e.g. 'backend')")),
+					mcp.WithString("format", mcp.Description("File format of the resume (e.g. '.pdf')")),
+				),
+				func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+					return handleAddResume(ctx, req, cfg, defaults)
+				},
+			)
+
+			// ── update_config ─────────────────────────────────────────────────
+			s.AddTool(
+				mcp.NewTool("update_config",
+					mcp.WithDescription("Set a go-apply config field by dot-notation key"),
+					mcp.WithString("key", mcp.Description("Config key (e.g. 'orchestrator.model')")),
+					mcp.WithString("value", mcp.Description("Value to set")),
+				),
+				func(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+					return handleUpdateConfig(req)
+				},
+			)
+
+			// ── get_config ────────────────────────────────────────────────────
+			s.AddTool(
+				mcp.NewTool("get_config",
+					mcp.WithDescription("Get go-apply config field(s). Omit key to return full config."),
+					mcp.WithString("key", mcp.Description("Config key (optional; empty = return all)")),
+				),
+				func(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+					return handleGetConfig(req)
+				},
+			)
+
 			return server.ServeStdio(s)
 		},
 	}
@@ -176,6 +228,155 @@ func handleApplyToJob(ctx context.Context, req mcp.CallToolRequest, build pipeli
 	}
 
 	data, err := json.Marshal(pres.Result())
+	if err != nil {
+		return mcp.NewToolResultText(fmt.Sprintf(`{"error":%q}`, err.Error())), nil
+	}
+	return mcp.NewToolResultText(string(data)), nil
+}
+
+// handleOnboardUser handles the onboard_user MCP tool.
+// Accepts pre-extracted text for resume, skills, and accomplishments.
+func handleOnboardUser(ctx context.Context, req mcp.CallToolRequest, cfg *config.Config, defaults *config.AppDefaults) (*mcp.CallToolResult, error) {
+	resumeContent := req.GetString("resume_content", "")
+	resumeLabel := req.GetString("resume_label", "")
+	resumeFormat := req.GetString("resume_format", "")
+	skillsContent := req.GetString("skills_content", "")
+	accomplishmentsContent := req.GetString("accomplishments_content", "")
+
+	profileRepo, err := newSQLiteProfile(cfg, defaults)
+	if err != nil {
+		return mcp.NewToolResultText(fmt.Sprintf(`{"error":%q}`, err.Error())), nil
+	}
+
+	embedderClient := newEmbedderClient(cfg, defaults)
+	dataDir := config.DataDir()
+	svc := onboarding.New(profileRepo, embedderClient, dataDir)
+
+	input := onboarding.OnboardInput{
+		Resumes:             make(map[string]onboarding.OnboardFile),
+		SkillsText:          skillsContent,
+		AccomplishmentsText: accomplishmentsContent,
+	}
+
+	if resumeContent != "" && resumeLabel != "" {
+		input.Resumes[resumeLabel] = onboarding.OnboardFile{
+			Label:     resumeLabel,
+			PlainText: resumeContent,
+			Format:    resumeFormat,
+		}
+	}
+
+	result, err := svc.Run(ctx, input)
+	if err != nil {
+		return mcp.NewToolResultText(fmt.Sprintf(`{"error":%q}`, err.Error())), nil
+	}
+
+	data, err := json.Marshal(result)
+	if err != nil {
+		return mcp.NewToolResultText(fmt.Sprintf(`{"error":%q}`, err.Error())), nil
+	}
+	return mcp.NewToolResultText(string(data)), nil
+}
+
+// handleAddResume handles the add_resume MCP tool.
+// Indexes a single resume into the profile database.
+func handleAddResume(ctx context.Context, req mcp.CallToolRequest, cfg *config.Config, defaults *config.AppDefaults) (*mcp.CallToolResult, error) {
+	content := req.GetString("content", "")
+	label := req.GetString("label", "")
+	format := req.GetString("format", "")
+
+	if content == "" || label == "" {
+		return mcp.NewToolResultText(`{"error":"content and label are required"}`), nil
+	}
+
+	profileRepo, err := newSQLiteProfile(cfg, defaults)
+	if err != nil {
+		return mcp.NewToolResultText(fmt.Sprintf(`{"error":%q}`, err.Error())), nil
+	}
+
+	embedderClient := newEmbedderClient(cfg, defaults)
+	dataDir := config.DataDir()
+	svc := onboarding.New(profileRepo, embedderClient, dataDir)
+
+	input := onboarding.OnboardInput{
+		Resumes: map[string]onboarding.OnboardFile{
+			label: {
+				Label:     label,
+				PlainText: content,
+				Format:    format,
+			},
+		},
+	}
+
+	result, err := svc.Run(ctx, input)
+	if err != nil {
+		return mcp.NewToolResultText(fmt.Sprintf(`{"error":%q}`, err.Error())), nil
+	}
+
+	data, err := json.Marshal(result)
+	if err != nil {
+		return mcp.NewToolResultText(fmt.Sprintf(`{"error":%q}`, err.Error())), nil
+	}
+	return mcp.NewToolResultText(string(data)), nil
+}
+
+// handleUpdateConfig handles the update_config MCP tool.
+func handleUpdateConfig(req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	key := req.GetString("key", "")
+	value := req.GetString("value", "")
+
+	if key == "" {
+		return mcp.NewToolResultText(`{"error":"key is required"}`), nil
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		return mcp.NewToolResultText(fmt.Sprintf(`{"error":%q}`, err.Error())), nil
+	}
+
+	if err := cfg.SetField(key, value); err != nil {
+		return mcp.NewToolResultText(fmt.Sprintf(`{"error":%q}`, err.Error())), nil
+	}
+
+	if err := cfg.Save(); err != nil {
+		return mcp.NewToolResultText(fmt.Sprintf(`{"error":%q}`, err.Error())), nil
+	}
+
+	return mcp.NewToolResultText(`{"ok":true}`), nil
+}
+
+// handleGetConfig handles the get_config MCP tool.
+// If key is empty, returns the full redacted config. Otherwise returns the field value.
+func handleGetConfig(req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	key := req.GetString("key", "")
+
+	cfg, err := config.Load()
+	if err != nil {
+		return mcp.NewToolResultText(fmt.Sprintf(`{"error":%q}`, err.Error())), nil
+	}
+
+	if key != "" {
+		val, err := cfg.GetField(key)
+		if err != nil {
+			return mcp.NewToolResultText(fmt.Sprintf(`{"error":%q}`, err.Error())), nil
+		}
+		if isAPIKey(key) && val != "" {
+			val = "[redacted]"
+		}
+		data, _ := json.Marshal(map[string]string{"key": key, "value": val})
+		return mcp.NewToolResultText(string(data)), nil
+	}
+
+	// Return full config with API keys redacted
+	redacted := *cfg
+	if redacted.Orchestrator.APIKey != "" {
+		redacted.Orchestrator.APIKey = "[redacted]"
+	}
+	if redacted.Embedder.APIKey != "" {
+		redacted.Embedder.APIKey = "[redacted]"
+	}
+
+	data, err := json.Marshal(redacted)
 	if err != nil {
 		return mcp.NewToolResultText(fmt.Sprintf(`{"error":%q}`, err.Error())), nil
 	}
