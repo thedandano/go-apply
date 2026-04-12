@@ -11,12 +11,11 @@ import (
 
 // newSQLiteProfile opens the SQLite profile database.
 // Returns an error rather than panicking — callers must handle the error gracefully.
-func newSQLiteProfile(cfg *config.Config, defaults *config.AppDefaults) (port.ProfileRepository, error) {
+func newSQLiteProfile(cfg *config.Config, _ *config.AppDefaults) (port.ProfileRepository, error) {
 	repo, err := sqlite.NewProfileRepository(cfg.ResolveDBPath(), cfg.ResolveEmbeddingDim())
 	if err != nil {
 		return nil, fmt.Errorf("open profile db %s: %w", cfg.ResolveDBPath(), err)
 	}
-	_ = defaults
 	return repo, nil
 }
 

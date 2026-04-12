@@ -132,7 +132,7 @@ func (p *ApplyPipeline) Run(ctx context.Context, input RunInput) error {
 
 // ── step helpers ──────────────────────────────────────────────────────────────
 
-func (p *ApplyPipeline) stepFetch(ctx context.Context, input RunInput, result *model.PipelineResult) (string, error) {
+func (p *ApplyPipeline) stepFetch(ctx context.Context, input RunInput, _ *model.PipelineResult) (string, error) {
 	start := time.Now()
 	p.presenter.OnEvent(model.StepStartedEvent{StepID: "fetch", Label: "Fetching job description"})
 
@@ -165,7 +165,6 @@ func (p *ApplyPipeline) stepFetch(ctx context.Context, input RunInput, result *m
 		Label:     "Fetching job description",
 		ElapsedMS: time.Since(start).Milliseconds(),
 	})
-	_ = result // result not mutated in this step
 	return jdText, nil
 }
 
@@ -192,7 +191,7 @@ func (p *ApplyPipeline) stepKeywords(ctx context.Context, jdText string, result 
 	return jd
 }
 
-func (p *ApplyPipeline) stepResumes(result *model.PipelineResult) ([]model.ResumeFile, error) {
+func (p *ApplyPipeline) stepResumes(_ *model.PipelineResult) ([]model.ResumeFile, error) {
 	start := time.Now()
 	p.presenter.OnEvent(model.StepStartedEvent{StepID: "resumes", Label: "Loading resumes"})
 
@@ -212,7 +211,6 @@ func (p *ApplyPipeline) stepResumes(result *model.PipelineResult) ([]model.Resum
 		Label:     "Loading resumes",
 		ElapsedMS: time.Since(start).Milliseconds(),
 	})
-	_ = result
 	return files, nil
 }
 
@@ -265,6 +263,14 @@ func (p *ApplyPipeline) stepScore(jd model.JDData, resumeFiles []model.ResumeFil
 	result.BestScore = bestTotal
 	result.BestResume = bestFile.Label
 
+	if len(result.Scores) == 0 {
+		result.Warnings = append(result.Warnings, model.RiskWarning{
+			Severity: "warn",
+			Message:  "all resumes failed to load or score — no scores available",
+		})
+		result.Status = "degraded"
+	}
+
 	p.presenter.OnEvent(model.StepCompletedEvent{
 		StepID:    "score",
 		Label:     "Scoring resumes",
@@ -305,7 +311,8 @@ func (p *ApplyPipeline) stepAugment(ctx context.Context, bestResume model.Resume
 	return augmented
 }
 
-func (p *ApplyPipeline) stepCoverLetter(ctx context.Context, jd model.JDData, channel model.ChannelType, _ string, result *model.PipelineResult) {
+func (p *ApplyPipeline) stepCoverLetter(ctx context.Context, jd model.JDData, channel model.ChannelType, resumeText string, result *model.PipelineResult) {
+	_ = resumeText // CoverLetterInput does not yet accept resume text; retained for future wiring when port.CoverLetterInput is extended
 	start := time.Now()
 	p.presenter.OnEvent(model.StepStartedEvent{StepID: "cover_letter", Label: "Generating cover letter"})
 

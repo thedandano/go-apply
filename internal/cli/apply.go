@@ -44,6 +44,13 @@ Output is JSON when --headless is set (default for this release).`,
 				return fmt.Errorf("--url and --text are mutually exclusive")
 			}
 
+			switch model.ChannelType(channel) {
+			case model.ChannelCold, model.ChannelReferral, model.ChannelRecruiter:
+				// valid
+			default:
+				return fmt.Errorf("invalid --channel %q: must be COLD, REFERRAL, or RECRUITER", channel)
+			}
+
 			cfg, err := config.Load()
 			if err != nil {
 				return fmt.Errorf("load config: %w", err)
