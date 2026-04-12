@@ -39,35 +39,39 @@ type ApplyPipeline struct {
 	cfg       *config.Config
 }
 
+// Config holds the dependencies and configuration for an ApplyPipeline.
+// All service fields are interfaces; wire concrete adapters at the CLI layer only.
+type Config struct {
+	Fetcher   port.JDFetcher
+	LLM       port.LLMClient
+	Scorer    port.Scorer
+	CLGen     port.CoverLetterGenerator
+	Resumes   port.ResumeRepository
+	JDCache   port.JDCacheRepository
+	Augmenter port.Augmenter // may be nil — pipeline degrades gracefully
+	DocLoader port.DocumentLoader
+	Presenter port.Presenter
+	Defaults  *config.AppDefaults
+	Cfg       *config.Config
+}
+
 // New constructs an ApplyPipeline. All fields are interfaces; no concrete adapters
 // are constructed here. Wire at internal/cli layer only.
 //
-// augmenter may be nil; the pipeline degrades gracefully when it is.
-func New(
-	fetcher port.JDFetcher,
-	llm port.LLMClient,
-	scorer port.Scorer,
-	clGen port.CoverLetterGenerator,
-	resumes port.ResumeRepository,
-	jdCache port.JDCacheRepository,
-	augmenter port.Augmenter,
-	docLoader port.DocumentLoader,
-	presenter port.Presenter,
-	defaults *config.AppDefaults,
-	cfg *config.Config,
-) *ApplyPipeline {
+// cfg.Augmenter may be nil; the pipeline degrades gracefully when it is.
+func New(cfg Config) *ApplyPipeline {
 	return &ApplyPipeline{
-		fetcher:   fetcher,
-		llm:       llm,
-		scorer:    scorer,
-		clGen:     clGen,
-		resumes:   resumes,
-		jdCache:   jdCache,
-		augmenter: augmenter,
-		loader:    docLoader,
-		presenter: presenter,
-		defaults:  defaults,
-		cfg:       cfg,
+		fetcher:   cfg.Fetcher,
+		llm:       cfg.LLM,
+		scorer:    cfg.Scorer,
+		clGen:     cfg.CLGen,
+		resumes:   cfg.Resumes,
+		jdCache:   cfg.JDCache,
+		augmenter: cfg.Augmenter,
+		loader:    cfg.DocLoader,
+		presenter: cfg.Presenter,
+		defaults:  cfg.Defaults,
+		cfg:       cfg.Cfg,
 	}
 }
 

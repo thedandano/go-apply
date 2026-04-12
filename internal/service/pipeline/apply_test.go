@@ -159,19 +159,19 @@ func makeTestResumes() []model.ResumeFile {
 // and calls presenter.ShowResult with a non-zero BestScore.
 func TestApplyPipeline_Run_TextInput(t *testing.T) {
 	presenter := &stubPresenter{}
-	p := pipeline.New(
-		&stubFetcher{},
-		&stubLLM{},
-		&stubScorer{},
-		&stubCoverLetter{},
-		&stubResumeRepo{resumes: makeTestResumes()},
-		&stubJDCache{},
-		nil, // augmenter nil — degrades gracefully
-		&stubLoader{},
-		presenter,
-		makeDefaults(),
-		makeCfg(),
-	)
+	p := pipeline.New(pipeline.Config{
+		Fetcher:   &stubFetcher{},
+		LLM:       &stubLLM{},
+		Scorer:    &stubScorer{},
+		CLGen:     &stubCoverLetter{},
+		Resumes:   &stubResumeRepo{resumes: makeTestResumes()},
+		JDCache:   &stubJDCache{},
+		Augmenter: nil,
+		DocLoader: &stubLoader{},
+		Presenter: presenter,
+		Defaults:  makeDefaults(),
+		Cfg:       makeCfg(),
+	})
 
 	err := p.Run(context.Background(), pipeline.RunInput{
 		Text:    "Senior Go Engineer requiring Kubernetes experience",
@@ -196,19 +196,19 @@ func TestApplyPipeline_Run_TextInput(t *testing.T) {
 // ShowError and returns an error.
 func TestApplyPipeline_Run_NoResumes(t *testing.T) {
 	presenter := &stubPresenter{}
-	p := pipeline.New(
-		&stubFetcher{},
-		&stubLLM{},
-		&stubScorer{},
-		&stubCoverLetter{},
-		&stubResumeRepo{resumes: []model.ResumeFile{}}, // empty
-		&stubJDCache{},
-		nil,
-		&stubLoader{},
-		presenter,
-		makeDefaults(),
-		makeCfg(),
-	)
+	p := pipeline.New(pipeline.Config{
+		Fetcher:   &stubFetcher{},
+		LLM:       &stubLLM{},
+		Scorer:    &stubScorer{},
+		CLGen:     &stubCoverLetter{},
+		Resumes:   &stubResumeRepo{resumes: []model.ResumeFile{}},
+		JDCache:   &stubJDCache{},
+		Augmenter: nil,
+		DocLoader: &stubLoader{},
+		Presenter: presenter,
+		Defaults:  makeDefaults(),
+		Cfg:       makeCfg(),
+	})
 
 	err := p.Run(context.Background(), pipeline.RunInput{
 		Text:    "Some job posting",
@@ -230,19 +230,19 @@ func TestApplyPipeline_Run_NoResumes(t *testing.T) {
 // keyword extraction does not kill the pipeline — a warning is added and scoring proceeds.
 func TestApplyPipeline_Run_KeywordExtractionDegrades(t *testing.T) {
 	presenter := &stubPresenter{}
-	p := pipeline.New(
-		&stubFetcher{},
-		&stubLLM{err: errors.New("LLM unavailable")},
-		&stubScorer{},
-		&stubCoverLetter{},
-		&stubResumeRepo{resumes: makeTestResumes()},
-		&stubJDCache{},
-		nil,
-		&stubLoader{},
-		presenter,
-		makeDefaults(),
-		makeCfg(),
-	)
+	p := pipeline.New(pipeline.Config{
+		Fetcher:   &stubFetcher{},
+		LLM:       &stubLLM{err: errors.New("LLM unavailable")},
+		Scorer:    &stubScorer{},
+		CLGen:     &stubCoverLetter{},
+		Resumes:   &stubResumeRepo{resumes: makeTestResumes()},
+		JDCache:   &stubJDCache{},
+		Augmenter: nil,
+		DocLoader: &stubLoader{},
+		Presenter: presenter,
+		Defaults:  makeDefaults(),
+		Cfg:       makeCfg(),
+	})
 
 	err := p.Run(context.Background(), pipeline.RunInput{
 		Text:    "Senior Go Engineer requiring Kubernetes experience",
@@ -268,19 +268,19 @@ func TestApplyPipeline_Run_KeywordExtractionDegrades(t *testing.T) {
 // adds a warning but still returns a result.
 func TestApplyPipeline_Run_CoverLetterDegrades(t *testing.T) {
 	presenter := &stubPresenter{}
-	p := pipeline.New(
-		&stubFetcher{},
-		&stubLLM{},
-		&stubScorer{},
-		&stubCoverLetter{err: errors.New("cover letter LLM error")},
-		&stubResumeRepo{resumes: makeTestResumes()},
-		&stubJDCache{},
-		nil,
-		&stubLoader{},
-		presenter,
-		makeDefaults(),
-		makeCfg(),
-	)
+	p := pipeline.New(pipeline.Config{
+		Fetcher:   &stubFetcher{},
+		LLM:       &stubLLM{},
+		Scorer:    &stubScorer{},
+		CLGen:     &stubCoverLetter{err: errors.New("cover letter LLM error")},
+		Resumes:   &stubResumeRepo{resumes: makeTestResumes()},
+		JDCache:   &stubJDCache{},
+		Augmenter: nil,
+		DocLoader: &stubLoader{},
+		Presenter: presenter,
+		Defaults:  makeDefaults(),
+		Cfg:       makeCfg(),
+	})
 
 	err := p.Run(context.Background(), pipeline.RunInput{
 		Text:    "Senior Go Engineer requiring Kubernetes experience",
@@ -319,19 +319,19 @@ func (s *stubFailAugmenter) AugmentResumeText(_ context.Context, _ port.AugmentI
 func TestApplyPipeline_Run_AugmentDegrades(t *testing.T) {
 	pres := &stubPresenter{}
 
-	p := pipeline.New(
-		&stubFetcher{},
-		&stubLLM{},
-		&stubScorer{},
-		&stubCoverLetter{},
-		&stubResumeRepo{resumes: makeTestResumes()},
-		&stubJDCache{},
-		&stubFailAugmenter{},
-		&stubLoader{},
-		pres,
-		makeDefaults(),
-		makeCfg(),
-	)
+	p := pipeline.New(pipeline.Config{
+		Fetcher:   &stubFetcher{},
+		LLM:       &stubLLM{},
+		Scorer:    &stubScorer{},
+		CLGen:     &stubCoverLetter{},
+		Resumes:   &stubResumeRepo{resumes: makeTestResumes()},
+		JDCache:   &stubJDCache{},
+		Augmenter: &stubFailAugmenter{},
+		DocLoader: &stubLoader{},
+		Presenter: pres,
+		Defaults:  makeDefaults(),
+		Cfg:       makeCfg(),
+	})
 
 	err := p.Run(context.Background(), pipeline.RunInput{
 		Text:    "Senior Go Engineer requiring Kubernetes experience",

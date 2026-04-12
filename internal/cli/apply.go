@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 
@@ -65,7 +66,7 @@ Output is JSON (headless mode). TUI mode will be added in a future release.`,
 			// ── Repositories ───────────────────────────────────────────────────
 			resumeRepo := fs.NewResumeRepository(resumeDir)
 
-			cacheDir := config.DataDir() + "/jd_cache"
+			cacheDir := filepath.Join(config.DataDir(), "jd_cache")
 			jdCacheRepo := fs.NewJDCacheRepository(cacheDir)
 
 			// ── Augmenter (optional — degrades gracefully if DB unavailable) ──
@@ -85,19 +86,19 @@ Output is JSON (headless mode). TUI mode will be added in a future release.`,
 			docLoader := loaderPkg.New()
 
 			// ── Pipeline ───────────────────────────────────────────────────────
-			p := pipeline.New(
-				fetcherSvc,
-				llmClient,
-				scorerSvc,
-				clGen,
-				resumeRepo,
-				jdCacheRepo,
-				augmenterSvc, // may be nil
-				docLoader,
-				pres,
-				defaults,
-				cfg,
-			)
+			p := pipeline.New(pipeline.Config{
+				Fetcher:   fetcherSvc,
+				LLM:       llmClient,
+				Scorer:    scorerSvc,
+				CLGen:     clGen,
+				Resumes:   resumeRepo,
+				JDCache:   jdCacheRepo,
+				Augmenter: augmenterSvc,
+				DocLoader: docLoader,
+				Presenter: pres,
+				Defaults:  defaults,
+				Cfg:       cfg,
+			})
 
 			ch := model.ChannelType(channel)
 
