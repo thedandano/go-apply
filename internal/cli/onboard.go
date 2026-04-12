@@ -78,6 +78,10 @@ func runOnboard(ctx context.Context, resumePaths []string, label, skillsPath, ac
 			resolvedLabel = strings.TrimSuffix(base, ext)
 		}
 
+		if _, exists := input.Resumes[resolvedLabel]; exists {
+			return fmt.Errorf("duplicate resume label %q: use --label to assign unique labels", resolvedLabel)
+		}
+
 		text, loadErr := docLoader.Load(path)
 		if loadErr != nil {
 			return fmt.Errorf("load resume %s: %w", path, loadErr)

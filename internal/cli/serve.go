@@ -236,12 +236,17 @@ func handleApplyToJob(ctx context.Context, req mcp.CallToolRequest, build pipeli
 
 // handleOnboardUser handles the onboard_user MCP tool.
 // Accepts pre-extracted text for resume, skills, and accomplishments.
-func handleOnboardUser(ctx context.Context, req mcp.CallToolRequest, cfg *config.Config, defaults *config.AppDefaults) (*mcp.CallToolResult, error) {
+func handleOnboardUser(ctx context.Context, req mcp.CallToolRequest, _ *config.Config, defaults *config.AppDefaults) (*mcp.CallToolResult, error) {
 	resumeContent := req.GetString("resume_content", "")
 	resumeLabel := req.GetString("resume_label", "")
 	resumeFormat := req.GetString("resume_format", "")
 	skillsContent := req.GetString("skills_content", "")
 	accomplishmentsContent := req.GetString("accomplishments_content", "")
+
+	cfg, err := config.Load()
+	if err != nil {
+		return mcp.NewToolResultText(fmt.Sprintf(`{"error":%q}`, err.Error())), nil
+	}
 
 	profileRepo, err := newSQLiteProfile(cfg, defaults)
 	if err != nil {
@@ -280,13 +285,18 @@ func handleOnboardUser(ctx context.Context, req mcp.CallToolRequest, cfg *config
 
 // handleAddResume handles the add_resume MCP tool.
 // Indexes a single resume into the profile database.
-func handleAddResume(ctx context.Context, req mcp.CallToolRequest, cfg *config.Config, defaults *config.AppDefaults) (*mcp.CallToolResult, error) {
+func handleAddResume(ctx context.Context, req mcp.CallToolRequest, _ *config.Config, defaults *config.AppDefaults) (*mcp.CallToolResult, error) {
 	content := req.GetString("content", "")
 	label := req.GetString("label", "")
 	format := req.GetString("format", "")
 
 	if content == "" || label == "" {
 		return mcp.NewToolResultText(`{"error":"content and label are required"}`), nil
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		return mcp.NewToolResultText(fmt.Sprintf(`{"error":%q}`, err.Error())), nil
 	}
 
 	profileRepo, err := newSQLiteProfile(cfg, defaults)
