@@ -78,5 +78,6 @@ func (s *Service) TailorResume(ctx context.Context, input port.TailorInput) (mod
 		}
 	}
 
+	result.TailoredText = tailoredText
 	return result, nil
 }

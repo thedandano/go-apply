@@ -119,9 +119,12 @@ func (p *TailorPipeline) Run(ctx context.Context, req TailorRequest) error {
 	})
 
 	// ── Step 7: re-score tailored text ────────────────────────────────────────
-	// Build the tailored text by applying keyword additions to augText for re-scoring.
-	// We re-score using the same augmented text as baseline for the new score.
-	newScore, scoreErr := p.tailorStepScore("score_after", "Re-scoring tailored resume", resume, augText, jd, req.Cfg)
+	// Re-score using the post-tailoring text so the before/after delta is meaningful.
+	rescoreText := tailorResult.TailoredText
+	if rescoreText == "" {
+		rescoreText = augText // fallback if tailor made no changes
+	}
+	newScore, scoreErr := p.tailorStepScore("score_after", "Re-scoring tailored resume", resume, rescoreText, jd, req.Cfg)
 	if scoreErr == nil {
 		tailorResult.NewScore = newScore
 	}

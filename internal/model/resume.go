@@ -26,4 +26,5 @@ type TailorResult struct {
 	RewrittenBullets []BulletChange `json:"rewritten_bullets,omitempty"`
 	OutputPath       string         `json:"output_path"`
 	NewScore         ScoreResult    `json:"new_score"`
+	TailoredText     string         `json:"-"` // internal: post-tailoring text for re-scoring
 }
