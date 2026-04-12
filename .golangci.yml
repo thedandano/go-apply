@@ -27,6 +27,7 @@ linters-settings:
   gosec:
     excludes:
       - G304
+      - G501  # crypto/md5 used as cache key (URL → filename), not for security
 
 issues:
   exclude-rules:
