@@ -58,10 +58,11 @@ func NewTailorPipeline(cfg TailorConfig) *TailorPipeline {
 
 // TailorRequest is the per-invocation input to TailorPipeline.Run.
 type TailorRequest struct {
-	ResumeLabel string
-	URL         string
-	Text        string
-	Cfg         *config.Config
+	ResumeLabel         string
+	URL                 string
+	Text                string
+	AccomplishmentsPath string // optional; enables Tier 2 bullet rewrites when set
+	Cfg                 *config.Config
 }
 
 // Run executes the full tailor pipeline for the given request.
@@ -93,15 +94,25 @@ func (p *TailorPipeline) Run(ctx context.Context, req TailorRequest) error {
 		return err
 	}
 
+	// ── Step 5b: load accomplishments (optional) ─────────────────────────────
+	var accomplishmentsText string
+	if req.AccomplishmentsPath != "" {
+		if loaded, loadErr := p.loader.Load(req.AccomplishmentsPath); loadErr == nil {
+			accomplishmentsText = loaded
+		}
+		// Silently degrade on load failure — tier-2 simply won't run.
+	}
+
 	// ── Step 6: tailor ────────────────────────────────────────────────────────
 	start := time.Now()
 	p.presenter.OnEvent(model.StepStartedEvent{StepID: "tailor", Label: "Tailoring resume"})
 
 	tailorInput := port.TailorInput{
-		Resume:      resume,
-		ResumeText:  augText,
-		JD:          jd,
-		ScoreBefore: scoreBefore,
+		Resume:              resume,
+		ResumeText:          augText,
+		JD:                  jd,
+		ScoreBefore:         scoreBefore,
+		AccomplishmentsText: accomplishmentsText,
 		Options: port.TailorOptions{
 			MaxTier2BulletRewrites: p.defaults.Tailor.MaxTier2BulletRewrites,
 		},

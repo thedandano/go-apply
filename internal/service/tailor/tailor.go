@@ -2,7 +2,6 @@ package tailor
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"github.com/thedandano/go-apply/internal/config"
@@ -52,7 +51,9 @@ func (s *Service) TailorResume(ctx context.Context, input port.TailorInput) (mod
 
 		rewrittenContents, err := RewriteBullets(ctx, s.llm, s.defaults, tailoredText, input.AccomplishmentsText, jdKeywords)
 		if err != nil {
-			return result, fmt.Errorf("tier-2 bullet rewrite: %w", err)
+			// Tier-2 failed — keep tier-1 result and return without error.
+			result.TailoredText = tailoredText
+			return result, nil
 		}
 
 		if len(rewrittenContents) > 0 {
@@ -64,14 +65,18 @@ func (s *Service) TailorResume(ctx context.Context, input port.TailorInput) (mod
 				if i < len(originalBullets) {
 					original = originalBullets[i]
 				}
-				changes = append(changes, model.BulletChange{
+				change := model.BulletChange{
 					Original:  original,
 					Rewritten: rewritten,
-				})
-				// Replace original bullet in text with the rewritten one.
-				if original != "" {
-					tailoredText = strings.Replace(tailoredText, "- "+original, "- "+rewritten, 1)
 				}
+				if original != "" {
+					var replaced bool
+					tailoredText, replaced = replaceBulletInText(tailoredText, original, rewritten)
+					if !replaced {
+						change.Original = ""
+					}
+				}
+				changes = append(changes, change)
 			}
 			result.RewrittenBullets = changes
 			result.TierApplied = model.TierBullet
@@ -80,4 +85,20 @@ func (s *Service) TailorResume(ctx context.Context, input port.TailorInput) (mod
 
 	result.TailoredText = tailoredText
 	return result, nil
+}
+
+// replaceBulletInText finds the line containing the original bullet content
+// (stripped of its marker) and replaces that whole line with the rewritten bullet.
+// Returns the modified text and true if a replacement was made.
+func replaceBulletInText(text, original, rewritten string) (string, bool) {
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		// Strip common bullet markers and spaces to compare content.
+		content := strings.TrimLeft(line, "•-*–▸○ \t")
+		if strings.EqualFold(strings.TrimSpace(content), strings.TrimSpace(original)) {
+			lines[i] = rewritten
+			return strings.Join(lines, "\n"), true
+		}
+	}
+	return text, false
 }

@@ -22,10 +22,11 @@ import (
 // newTailorCommand returns the `tailor` cobra command wired with all services.
 func newTailorCommand(defaults *config.AppDefaults) *cobra.Command {
 	var (
-		resumeLabel string
-		jdURL       string
-		jdText      string
-		resumeDir   string
+		resumeLabel         string
+		jdURL               string
+		jdText              string
+		resumeDir           string
+		accomplishmentsPath string
 	)
 
 	cmd := &cobra.Command{
@@ -93,10 +94,11 @@ Output is JSON (headless mode).`,
 			})
 
 			return pl.Run(cmd.Context(), pipeline.TailorRequest{
-				ResumeLabel: resumeLabel,
-				URL:         jdURL,
-				Text:        jdText,
-				Cfg:         cfg,
+				ResumeLabel:         resumeLabel,
+				URL:                 jdURL,
+				Text:                jdText,
+				AccomplishmentsPath: accomplishmentsPath,
+				Cfg:                 cfg,
 			})
 		},
 	}
@@ -105,6 +107,7 @@ Output is JSON (headless mode).`,
 	cmd.Flags().StringVar(&jdURL, "url", "", "Job description URL to fetch")
 	cmd.Flags().StringVar(&jdText, "text", "", "Job description text (use instead of --url)")
 	cmd.Flags().StringVar(&resumeDir, "resume-dir", ".", "Directory to scan for resumes (.pdf, .docx, .txt)")
+	cmd.Flags().StringVar(&accomplishmentsPath, "accomplishments", "", "Path to accomplishments document for Tier 2 bullet rewrites")
 
 	if err := cmd.MarkFlagRequired("resume"); err != nil {
 		panic(fmt.Sprintf("failed to mark --resume as required: %v", err))

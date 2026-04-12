@@ -1,10 +1,38 @@
 package tailor_test
 
 import (
+	"context"
+	"fmt"
 	"testing"
 
+	"github.com/thedandano/go-apply/internal/config"
+	"github.com/thedandano/go-apply/internal/model"
+	"github.com/thedandano/go-apply/internal/port"
 	"github.com/thedandano/go-apply/internal/service/tailor"
 )
+
+// stubLLM is a test double that returns a fixed response.
+type stubLLM struct{ response string }
+
+var _ port.LLMClient = (*stubLLM)(nil)
+
+func (s *stubLLM) ChatComplete(_ context.Context, _ []port.ChatMessage, _ port.ChatOptions) (string, error) {
+	return s.response, nil
+}
+
+// errLLM always returns an error.
+type errLLM struct{}
+
+var _ port.LLMClient = (*errLLM)(nil)
+
+func (e *errLLM) ChatComplete(_ context.Context, _ []port.ChatMessage, _ port.ChatOptions) (string, error) {
+	return "", fmt.Errorf("llm error")
+}
+
+func makeDefaults() *config.AppDefaults {
+	d, _ := config.LoadDefaults()
+	return d
+}
 
 const resumeWithSkills = `Dan Sedano
 Software Engineer
@@ -74,6 +102,49 @@ Experience
 	}
 	if len(added) != 0 {
 		t.Errorf("expected no added keywords, got %v", added)
+	}
+}
+
+func TestTailorResume_Tier1Only(t *testing.T) {
+	svc := tailor.New(&stubLLM{}, makeDefaults())
+	input := port.TailorInput{
+		Resume:     model.ResumeFile{Label: "backend"},
+		ResumeText: "Skills\nLanguages: Python\n",
+		JD:         model.JDData{},
+		ScoreBefore: model.ScoreResult{
+			Keywords: model.KeywordResult{ReqUnmatched: []string{"golang"}},
+		},
+		Options: port.TailorOptions{MaxTier2BulletRewrites: 0},
+	}
+	result, err := svc.TailorResume(context.Background(), input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.TierApplied != model.TierKeyword {
+		t.Errorf("TierApplied = %v, want TierKeyword", result.TierApplied)
+	}
+	if len(result.AddedKeywords) == 0 {
+		t.Error("expected keywords to be added")
+	}
+}
+
+func TestTailorResume_Tier2LLMError_Degrades(t *testing.T) {
+	svc := tailor.New(&errLLM{}, makeDefaults())
+	input := port.TailorInput{
+		Resume:              model.ResumeFile{Label: "backend"},
+		ResumeText:          "Skills\nLanguages: Python\n\nExperience\n- Built systems\n",
+		JD:                  model.JDData{},
+		ScoreBefore:         model.ScoreResult{Keywords: model.KeywordResult{ReqUnmatched: []string{"golang"}}},
+		AccomplishmentsText: "Led a team to deliver Go microservices",
+		Options:             port.TailorOptions{MaxTier2BulletRewrites: 2},
+	}
+	result, err := svc.TailorResume(context.Background(), input)
+	if err != nil {
+		t.Fatalf("LLM error should degrade, not fail: %v", err)
+	}
+	// Tier-1 should still have run.
+	if result.TierApplied < model.TierKeyword {
+		t.Errorf("expected at least TierKeyword after degrade, got %v", result.TierApplied)
 	}
 }
 
