@@ -7,10 +7,11 @@ import (
 )
 
 type CoverLetterInput struct {
-	JD      model.JDData
-	Scores  map[string]model.ScoreResult
-	Channel model.ChannelType
-	Profile model.UserProfile
+	JD        model.JDData
+	JDRawText string // full job description text for richer prompt context
+	Scores    map[string]model.ScoreResult
+	Channel   model.ChannelType
+	Profile   model.UserProfile
 }
 
 type CoverLetterGenerator interface {

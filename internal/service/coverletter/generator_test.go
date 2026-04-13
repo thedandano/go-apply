@@ -194,6 +194,29 @@ func TestGenerate_EmptyScores(t *testing.T) {
 	}
 }
 
+func TestGenerate_PromptIncludesJDRawText(t *testing.T) {
+	stub := &stubLLMClient{response: "Cover letter."}
+	gen := coverletter.New(stub, testDefaults())
+
+	input := port.CoverLetterInput{
+		JD:        model.JDData{Title: "SRE", Company: "CloudCo"},
+		JDRawText: "We are looking for a site reliability engineer with expertise in Kubernetes and Terraform.",
+		Scores:    map[string]model.ScoreResult{"r": {ResumeLabel: "r"}},
+		Channel:   model.ChannelCold,
+		Profile:   model.UserProfile{Name: "Test"},
+	}
+
+	_, err := gen.Generate(context.Background(), &input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	userMsg := stub.recorded[len(stub.recorded)-1].Content
+	if !strings.Contains(userMsg, input.JDRawText) {
+		t.Error("prompt does not contain JDRawText — LLM cannot tailor to job-specific details")
+	}
+}
+
 func TestGenerate_EmptyLLMResponse(t *testing.T) {
 	stub := &stubLLMClient{response: ""}
 	gen := coverletter.New(stub, testDefaults())

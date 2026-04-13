@@ -86,40 +86,54 @@ func bestScore(scores map[string]model.ScoreResult) model.ScoreResult {
 	return best
 }
 
-// buildPrompt constructs the user message for the LLM with job, candidate, and match context.
+// buildPrompt composes the LLM user message from focused sub-sections.
 func buildPrompt(input *port.CoverLetterInput, best *model.ScoreResult, defaults *config.AppDefaults) string {
-	var sb strings.Builder
+	return buildJobSection(input) +
+		buildCandidateSection(input.Profile) +
+		buildMatchSection(best) +
+		buildInstruction(defaults)
+}
 
+// buildJobSection formats the job details and full JD text (when available).
+func buildJobSection(input *port.CoverLetterInput) string {
+	var sb strings.Builder
 	sb.WriteString("Job Details:\n")
 	sb.WriteString(fmt.Sprintf("  Title:    %s\n", input.JD.Title))
 	sb.WriteString(fmt.Sprintf("  Company:  %s\n", input.JD.Company))
 	sb.WriteString(fmt.Sprintf("  Location: %s\n", input.JD.Location))
 	sb.WriteString(fmt.Sprintf("  Channel:  %s\n", string(input.Channel)))
-
 	if len(input.JD.Required) > 0 {
-		sb.WriteString("\nJob Required Skills:\n")
-		sb.WriteString("  " + strings.Join(input.JD.Required, ", ") + "\n")
+		sb.WriteString("\nRequired Skills:\n  " + strings.Join(input.JD.Required, ", ") + "\n")
 	}
 	if len(input.JD.Preferred) > 0 {
-		sb.WriteString("\nJob Preferred Skills:\n")
-		sb.WriteString("  " + strings.Join(input.JD.Preferred, ", ") + "\n")
+		sb.WriteString("\nPreferred Skills:\n  " + strings.Join(input.JD.Preferred, ", ") + "\n")
 	}
+	if input.JDRawText != "" {
+		sb.WriteString("\nFull Job Description:\n" + input.JDRawText + "\n")
+	}
+	return sb.String()
+}
 
+// buildCandidateSection formats the candidate profile fields.
+func buildCandidateSection(profile model.UserProfile) string {
+	var sb strings.Builder
 	sb.WriteString("\nCandidate:\n")
-	sb.WriteString(fmt.Sprintf("  Name:       %s\n", input.Profile.Name))
-	sb.WriteString(fmt.Sprintf("  Occupation: %s\n", input.Profile.Occupation))
-	sb.WriteString(fmt.Sprintf("  Location:   %s\n", input.Profile.Location))
-	sb.WriteString(fmt.Sprintf("  Experience: %.0f years\n", input.Profile.YearsOfExperience))
+	sb.WriteString(fmt.Sprintf("  Name:       %s\n", profile.Name))
+	sb.WriteString(fmt.Sprintf("  Occupation: %s\n", profile.Occupation))
+	sb.WriteString(fmt.Sprintf("  Location:   %s\n", profile.Location))
+	sb.WriteString(fmt.Sprintf("  Experience: %.0f years\n", profile.YearsOfExperience))
+	return sb.String()
+}
 
+// buildMatchSection formats the matched keywords and score breakdown from the best resume.
+func buildMatchSection(best *model.ScoreResult) string {
+	var sb strings.Builder
 	if len(best.Keywords.ReqMatched) > 0 {
-		sb.WriteString("\nMatched Required Keywords:\n")
-		sb.WriteString("  " + strings.Join(best.Keywords.ReqMatched, ", ") + "\n")
+		sb.WriteString("\nMatched Required Keywords:\n  " + strings.Join(best.Keywords.ReqMatched, ", ") + "\n")
 	}
 	if len(best.Keywords.PrefMatched) > 0 {
-		sb.WriteString("\nMatched Preferred Keywords:\n")
-		sb.WriteString("  " + strings.Join(best.Keywords.PrefMatched, ", ") + "\n")
+		sb.WriteString("\nMatched Preferred Keywords:\n  " + strings.Join(best.Keywords.PrefMatched, ", ") + "\n")
 	}
-
 	sb.WriteString("\nScore Breakdown:\n")
 	sb.WriteString(fmt.Sprintf("  Keyword Match:   %.1f\n", best.Breakdown.KeywordMatch))
 	sb.WriteString(fmt.Sprintf("  Experience Fit:  %.1f\n", best.Breakdown.ExperienceFit))
@@ -127,15 +141,20 @@ func buildPrompt(input *port.CoverLetterInput, best *model.ScoreResult, defaults
 	sb.WriteString(fmt.Sprintf("  ATS Format:      %.1f\n", best.Breakdown.ATSFormat))
 	sb.WriteString(fmt.Sprintf("  Readability:     %.1f\n", best.Breakdown.Readability))
 	sb.WriteString(fmt.Sprintf("  Total:           %.1f\n", best.Breakdown.Total()))
+	return sb.String()
+}
 
-	sb.WriteString(fmt.Sprintf(
-		"\nWrite a concise, authentic cover letter for this candidate and role. Target %d words, maximum %d words, approximately %d sentences.",
+// buildInstruction returns the final cover letter writing directive.
+func buildInstruction(defaults *config.AppDefaults) string {
+	return fmt.Sprintf(
+		"\nWrite a cover letter: target %d words (max %d), approximately %d sentences. "+
+			"Sound human -- avoid corporate jargon and cliches. "+
+			"Reference specific details from the job description above. "+
+			"Do not use em-dashes; use a comma or rewrite the sentence instead.",
 		defaults.CoverLetter.TargetWords,
 		defaults.CoverLetter.MaxWords,
 		defaults.CoverLetter.SentenceCount,
-	))
-
-	return sb.String()
+	)
 }
 
 // countWords returns the number of whitespace-delimited tokens in text.
