@@ -230,10 +230,13 @@ func TestGenerate_WarnWhenJDRawTextMissing(t *testing.T) {
 // capturingHandler is a minimal slog.Handler that calls fn for each record.
 type capturingHandler struct{ fn func(slog.Record) }
 
-func (h *capturingHandler) Enabled(_ context.Context, _ slog.Level) bool  { return true }
-func (h *capturingHandler) Handle(_ context.Context, r slog.Record) error { h.fn(r); return nil }
-func (h *capturingHandler) WithAttrs(_ []slog.Attr) slog.Handler          { return h }
-func (h *capturingHandler) WithGroup(_ string) slog.Handler               { return h }
+func (h *capturingHandler) Enabled(_ context.Context, _ slog.Level) bool { return true }
+func (h *capturingHandler) Handle(_ context.Context, r slog.Record) error { //nolint:gocritic // hugeParam: slog.Handler interface requires slog.Record by value
+	h.fn(r)
+	return nil
+}
+func (h *capturingHandler) WithAttrs(_ []slog.Attr) slog.Handler { return h }
+func (h *capturingHandler) WithGroup(_ string) slog.Handler      { return h }
 
 func TestGenerate_PromptIncludesJDRawText(t *testing.T) {
 	stub := &stubLLMClient{response: "Cover letter."}
