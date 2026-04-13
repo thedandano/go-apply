@@ -36,12 +36,12 @@ func NewProfileRepository(dbPath string, dim int) (*ProfileRepository, error) {
 
 	// SQLite performs best with a single writer connection; WAL mode improves concurrency.
 	if _, err := db.Exec("PRAGMA journal_mode=WAL;"); err != nil {
-		db.Close()
+		_ = db.Close() //nolint:gosec // G104: cleanup close on error path; original error takes precedence
 		return nil, fmt.Errorf("set WAL journal mode: %w", err)
 	}
 
 	if err := migrate(db, dim); err != nil {
-		db.Close()
+		_ = db.Close() //nolint:gosec // G104: cleanup close on error path; original error takes precedence
 		return nil, fmt.Errorf("migrate profile db: %w", err)
 	}
 

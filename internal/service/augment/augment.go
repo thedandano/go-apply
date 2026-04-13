@@ -12,23 +12,23 @@ import (
 )
 
 // Compile-time interface satisfaction check.
-var _ port.Augmenter = (*AugmentService)(nil)
+var _ port.Augmenter = (*Service)(nil)
 
 const profileHeader = "\n\n--- Profile Reference ---\n"
 
-// AugmentService composes ProfileRepository and EmbeddingClient.
+// Service composes ProfileRepository and EmbeddingClient.
 // It embeds JD keywords, retrieves similar profile document chunks,
 // filters by similarity threshold, and appends relevant chunks to the resume text.
-type AugmentService struct {
+type Service struct {
 	profile  port.ProfileRepository
 	embedder port.EmbeddingClient
 	defaults *config.AppDefaults
 	log      *slog.Logger
 }
 
-// New constructs an AugmentService with the provided dependencies.
-func New(profile port.ProfileRepository, embedder port.EmbeddingClient, defaults *config.AppDefaults, log *slog.Logger) *AugmentService {
-	return &AugmentService{
+// New constructs a Service with the provided dependencies.
+func New(profile port.ProfileRepository, embedder port.EmbeddingClient, defaults *config.AppDefaults, log *slog.Logger) *Service {
+	return &Service{
 		profile:  profile,
 		embedder: embedder,
 		defaults: defaults,
@@ -40,7 +40,7 @@ func New(profile port.ProfileRepository, embedder port.EmbeddingClient, defaults
 // and appends matching chunks above the similarity threshold to the resume text.
 // Failures in embedding or similarity search degrade gracefully — the original
 // text is returned without error so the pipeline can continue.
-func (s *AugmentService) AugmentResumeText(ctx context.Context, input port.AugmentInput) (string, *port.ReferenceData, error) {
+func (s *Service) AugmentResumeText(ctx context.Context, input port.AugmentInput) (string, *port.ReferenceData, error) {
 	inputWords := len(strings.Fields(input.ResumeText))
 	s.log.DebugContext(ctx, "augment started", "input_words", inputWords, "keyword_count", len(input.JDKeywords))
 
