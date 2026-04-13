@@ -6,14 +6,7 @@ import (
 	"github.com/thedandano/go-apply/internal/model"
 )
 
-type CoverLetterInput struct {
-	JD        model.JDData
-	JDRawText string // full job description text for richer prompt context
-	Scores    map[string]model.ScoreResult
-	Channel   model.ChannelType
-	Profile   model.UserProfile
-}
-
+// CoverLetterGenerator produces a cover letter from job and candidate context.
 type CoverLetterGenerator interface {
-	Generate(ctx context.Context, input *CoverLetterInput) (model.CoverLetterResult, error)
+	Generate(ctx context.Context, input *model.CoverLetterInput) (model.CoverLetterResult, error)
 }

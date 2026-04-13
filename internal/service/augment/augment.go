@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/thedandano/go-apply/internal/config"
+	"github.com/thedandano/go-apply/internal/model"
 	"github.com/thedandano/go-apply/internal/port"
 )
 
@@ -52,7 +53,7 @@ func New(profile port.ProfileRepository, cache port.KeywordCacheRepository, embe
 
 // AugmentResumeText retrieves relevant profile document chunks and incorporates them
 // into the resume text via LLM. Returns an error if retrieval or incorporation fails.
-func (s *Service) AugmentResumeText(ctx context.Context, input port.AugmentInput) (string, *port.ReferenceData, error) {
+func (s *Service) AugmentResumeText(ctx context.Context, input model.AugmentInput) (string, *model.ReferenceData, error) {
 	s.log.DebugContext(ctx, "augment started", "input_words", len(strings.Fields(input.ResumeText)), "keyword_count", len(input.JDKeywords))
 
 	if len(input.JDKeywords) == 0 {
@@ -204,12 +205,12 @@ func (s *Service) incorporateChunks(ctx context.Context, resumeText string, chun
 		fmt.Fprintf(&sb, "Chunk %d [%s]:\n%s\n\n", i+1, c.Source, c.Text)
 	}
 
-	messages := []port.ChatMessage{
+	messages := []model.ChatMessage{
 		{Role: "system", Content: incorporationSystemPrompt},
 		{Role: "user", Content: fmt.Sprintf(incorporationUserPromptFmt, resumeText, sb.String(), strings.Join(keywords, ", "))},
 	}
 
-	result, err := s.llm.ChatComplete(ctx, messages, port.ChatOptions{
+	result, err := s.llm.ChatComplete(ctx, messages, model.ChatOptions{
 		Temperature: s.defaults.Augment.IncorporationTemp,
 		MaxTokens:   s.defaults.Augment.IncorporationMaxTokens,
 	})

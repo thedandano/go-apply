@@ -27,3 +27,26 @@ type TailorResult struct {
 	OutputPath       string         `json:"output_path"`
 	NewScore         ScoreResult    `json:"new_score"`
 }
+
+// ResumeChanges describes the mutations the tailor service applied to a resume.
+type ResumeChanges struct {
+	AddedKeywords    []string
+	RewrittenBullets []BulletChange
+}
+
+// TailorOptions carries behaviour-controlling limits for the tailor service.
+// Values come from AppDefaults; extracted by the CLI/MCP layer before calling TailorResume.
+type TailorOptions struct {
+	MaxTier2BulletRewrites int
+}
+
+// TailorInput groups all inputs for a single tailor pass.
+type TailorInput struct {
+	Resume              ResumeFile
+	ResumeText          string // pre-extracted by the pipeline before calling TailorResume
+	JD                  JDData
+	ScoreBefore         ScoreResult
+	AccomplishmentsText string
+	SkillsRefText       string
+	Options             TailorOptions
+}

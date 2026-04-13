@@ -38,7 +38,7 @@ func New(llm port.LLMClient, defaults *config.AppDefaults, log *slog.Logger) *Ge
 
 // Generate selects the highest-scoring resume, builds a prompt, calls the LLM, and returns
 // a CoverLetterResult with the generated text plus word and sentence counts.
-func (g *Generator) Generate(ctx context.Context, input *port.CoverLetterInput) (model.CoverLetterResult, error) {
+func (g *Generator) Generate(ctx context.Context, input *model.CoverLetterInput) (model.CoverLetterResult, error) {
 	g.log.DebugContext(ctx, "cover letter generate started",
 		"job_title", input.JD.Title,
 		"company", input.JD.Company,
@@ -60,7 +60,7 @@ func (g *Generator) Generate(ctx context.Context, input *port.CoverLetterInput) 
 	best := bestScore(input.Scores)
 	prompt := buildPrompt(input, &best, g.defaults)
 
-	messages := []port.ChatMessage{
+	messages := []model.ChatMessage{
 		{
 			Role:    "system",
 			Content: "You are an expert cover letter writer. Write concise, authentic cover letters tailored to the job and candidate.",
@@ -71,7 +71,7 @@ func (g *Generator) Generate(ctx context.Context, input *port.CoverLetterInput) 
 		},
 	}
 
-	opts := port.ChatOptions{
+	opts := model.ChatOptions{
 		Temperature: g.defaults.LLM.CoverLetterTemp,
 		MaxTokens:   g.defaults.LLM.CoverLetterMaxTokens,
 	}
@@ -120,7 +120,7 @@ func bestScore(scores map[string]model.ScoreResult) model.ScoreResult {
 }
 
 // buildPrompt composes the LLM user message from focused sub-sections.
-func buildPrompt(input *port.CoverLetterInput, best *model.ScoreResult, defaults *config.AppDefaults) string {
+func buildPrompt(input *model.CoverLetterInput, best *model.ScoreResult, defaults *config.AppDefaults) string {
 	return buildJobSection(input) +
 		buildCandidateSection(&input.Profile) +
 		buildMatchSection(best) +
@@ -128,7 +128,7 @@ func buildPrompt(input *port.CoverLetterInput, best *model.ScoreResult, defaults
 }
 
 // buildJobSection formats the job details and full JD text (when available).
-func buildJobSection(input *port.CoverLetterInput) string {
+func buildJobSection(input *model.CoverLetterInput) string {
 	var sb strings.Builder
 	sb.WriteString("Job Details:\n")
 	sb.WriteString(fmt.Sprintf("  Title:    %s\n", input.JD.Title))
