@@ -69,7 +69,7 @@ func extractXMLText(r io.Reader) (string, error) {
 			if t.Name.Local == "p" && t.Name.Space != "" {
 				sb.WriteByte('\n')
 			}
-			if t.Name.Local == "t" {
+			if t.Name.Local == "t" && t.Name.Space != "" {
 				inText = false
 			}
 		case xml.CharData:
