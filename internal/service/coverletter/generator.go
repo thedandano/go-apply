@@ -89,7 +89,7 @@ func bestScore(scores map[string]model.ScoreResult) model.ScoreResult {
 // buildPrompt composes the LLM user message from focused sub-sections.
 func buildPrompt(input *port.CoverLetterInput, best *model.ScoreResult, defaults *config.AppDefaults) string {
 	return buildJobSection(input) +
-		buildCandidateSection(input.Profile) +
+		buildCandidateSection(&input.Profile) +
 		buildMatchSection(best) +
 		buildInstruction(defaults)
 }
@@ -115,7 +115,7 @@ func buildJobSection(input *port.CoverLetterInput) string {
 }
 
 // buildCandidateSection formats the candidate profile fields.
-func buildCandidateSection(profile model.UserProfile) string {
+func buildCandidateSection(profile *model.UserProfile) string {
 	var sb strings.Builder
 	sb.WriteString("\nCandidate:\n")
 	sb.WriteString(fmt.Sprintf("  Name:       %s\n", profile.Name))
