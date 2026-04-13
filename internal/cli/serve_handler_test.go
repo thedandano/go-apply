@@ -210,6 +210,65 @@ func resultText(t *testing.T, result *mcp.CallToolResult) string {
 	return text.Text
 }
 
+// ─── tailor stub ─────────────────────────────────────────────────────────────
+
+type handlerStubTailor struct{}
+
+var _ port.Tailor = (*handlerStubTailor)(nil)
+
+func (s *handlerStubTailor) TailorResume(_ context.Context, input port.TailorInput) (model.TailorResult, error) {
+	return model.TailorResult{
+		ResumeLabel:   input.Resume.Label,
+		TierApplied:   model.TierKeyword,
+		AddedKeywords: []string{"Go", "Kubernetes"},
+		TailoredText:  input.ResumeText + " [tailored]",
+	}, nil
+}
+
+// ─── tailor pipeline builder factories ───────────────────────────────────────
+
+// tailorHappyBuilder returns a tailorPipelineBuilder wired with successful stubs.
+func tailorHappyBuilder(t *testing.T) tailorPipelineBuilder {
+	t.Helper()
+	defaults := makeHandlerDefaults(t)
+	return func(_ string, pres port.Presenter) *pipeline.TailorPipeline {
+		return pipeline.NewTailorPipeline(pipeline.TailorConfig{
+			Fetcher: &handlerStubFetcher{},
+			LLM:     &handlerStubLLM{},
+			Scorer:  &handlerStubScorer{},
+			Tailor:  &handlerStubTailor{},
+			Resumes: &handlerStubResumeRepo{resumes: []model.ResumeFile{
+				{Label: "backend", Path: "/tmp/backend.pdf", FileType: ".pdf"},
+			}},
+			JDCache:   &handlerStubJDCache{},
+			Augmenter: nil,
+			DocLoader: &handlerStubLoader{},
+			Presenter: pres,
+			Defaults:  defaults,
+		})
+	}
+}
+
+// tailorErrorBuilder returns a tailorPipelineBuilder that fails (empty resume repo).
+func tailorErrorBuilder(t *testing.T) tailorPipelineBuilder {
+	t.Helper()
+	defaults := makeHandlerDefaults(t)
+	return func(_ string, pres port.Presenter) *pipeline.TailorPipeline {
+		return pipeline.NewTailorPipeline(pipeline.TailorConfig{
+			Fetcher:   &handlerStubFetcher{},
+			LLM:       &handlerStubLLM{},
+			Scorer:    &handlerStubScorer{},
+			Tailor:    &handlerStubTailor{},
+			Resumes:   &handlerStubResumeRepo{resumes: []model.ResumeFile{}},
+			JDCache:   &handlerStubJDCache{},
+			Augmenter: nil,
+			DocLoader: &handlerStubLoader{},
+			Presenter: pres,
+			Defaults:  defaults,
+		})
+	}
+}
+
 // ─── handleApplyToJob tests ───────────────────────────────────────────────────
 
 // TestHandleApplyToJob_BothEmpty verifies that omitting both jd_url and jd_text
@@ -377,5 +436,106 @@ func TestHandleGetScore_HappyPath(t *testing.T) {
 	bestScore, ok := m["best_score"].(float64)
 	if !ok || bestScore == 0 {
 		t.Errorf("expected non-zero best_score, got: %v", m["best_score"])
+	}
+}
+
+// ─── handleTailorResume tests ─────────────────────────────────────────────────
+
+// TestHandleTailorResume_MissingResumeLabel verifies that omitting resume_label
+// returns a validation error JSON mentioning "resume_label".
+func TestHandleTailorResume_MissingResumeLabel(t *testing.T) {
+	req := makeReq(map[string]any{
+		"jd_text": "some job description",
+		// resume_label omitted
+	})
+	cfg := makeHandlerCfg()
+	result, err := handleTailorResume(context.Background(), req, cfg, tailorHappyBuilder(t))
+	if err != nil {
+		t.Fatalf("expected nil Go error, got: %v", err)
+	}
+	got := errorJSON(t, result)
+	if !strings.Contains(got, "resume_label") {
+		t.Errorf("error %q does not mention 'resume_label'", got)
+	}
+}
+
+// TestHandleTailorResume_BothJDEmpty verifies that omitting both jd_url and jd_text
+// returns a validation error JSON mentioning "exactly one".
+func TestHandleTailorResume_BothJDEmpty(t *testing.T) {
+	req := makeReq(map[string]any{
+		"resume_label": "backend",
+		// jd_url and jd_text omitted
+	})
+	cfg := makeHandlerCfg()
+	result, err := handleTailorResume(context.Background(), req, cfg, tailorHappyBuilder(t))
+	if err != nil {
+		t.Fatalf("expected nil Go error, got: %v", err)
+	}
+	got := errorJSON(t, result)
+	if !strings.Contains(got, "exactly one") {
+		t.Errorf("error %q does not mention 'exactly one'", got)
+	}
+}
+
+// TestHandleTailorResume_BothJDProvided verifies that supplying both jd_url and jd_text
+// returns a mutual-exclusion error JSON.
+func TestHandleTailorResume_BothJDProvided(t *testing.T) {
+	req := makeReq(map[string]any{
+		"resume_label": "backend",
+		"jd_url":       "https://example.com/job",
+		"jd_text":      "some raw text",
+	})
+	cfg := makeHandlerCfg()
+	result, err := handleTailorResume(context.Background(), req, cfg, tailorHappyBuilder(t))
+	if err != nil {
+		t.Fatalf("expected nil Go error, got: %v", err)
+	}
+	got := errorJSON(t, result)
+	if !strings.Contains(got, "mutually exclusive") {
+		t.Errorf("error %q does not mention 'mutually exclusive'", got)
+	}
+}
+
+// TestHandleTailorResume_PipelineError verifies that a fatal pipeline error
+// (e.g. resume not found in empty repo) surfaces as a JSON error response.
+func TestHandleTailorResume_PipelineError(t *testing.T) {
+	req := makeReq(map[string]any{
+		"resume_label": "backend",
+		"jd_text":      "some job description",
+	})
+	cfg := makeHandlerCfg()
+	result, err := handleTailorResume(context.Background(), req, cfg, tailorErrorBuilder(t))
+	if err != nil {
+		t.Fatalf("expected nil Go error (business errors are JSON), got: %v", err)
+	}
+	got := errorJSON(t, result)
+	if got == "" {
+		t.Error("expected non-empty error in JSON, got empty string")
+	}
+}
+
+// TestHandleTailorResume_HappyPath verifies that a successful run returns a valid
+// JSON object with a resume_label field and no error field.
+func TestHandleTailorResume_HappyPath(t *testing.T) {
+	req := makeReq(map[string]any{
+		"resume_label": "backend",
+		"jd_text":      "Senior Go Engineer requiring Kubernetes experience",
+	})
+	cfg := makeHandlerCfg()
+	result, err := handleTailorResume(context.Background(), req, cfg, tailorHappyBuilder(t))
+	if err != nil {
+		t.Fatalf("expected nil Go error, got: %v", err)
+	}
+	raw := resultText(t, result)
+
+	var m map[string]any
+	if err := json.Unmarshal([]byte(raw), &m); err != nil {
+		t.Fatalf("result is not valid JSON: %v\nbody: %s", err, raw)
+	}
+	if _, hasErr := m["error"]; hasErr {
+		t.Errorf("unexpected error in result JSON: %s", raw)
+	}
+	if m["resume_label"] == nil {
+		t.Errorf("expected resume_label in result, got: %s", raw)
 	}
 }
