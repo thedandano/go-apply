@@ -52,10 +52,18 @@ func (s *Service) AugmentResumeText(ctx context.Context, input port.AugmentInput
 		return input.ResumeText, input.RefData, nil
 	}
 
-	vector, err := s.embedWithCache(ctx, input.JDKeywords)
+	vector, stored, err := s.embedWithCache(ctx, input.JDKeywords)
 	if err != nil {
 		s.log.WarnContext(ctx, "augment: embedding failed — returning original text", "error", err)
 		return input.ResumeText, input.RefData, nil
+	}
+	if !stored {
+		cacheKey := strings.Join(input.JDKeywords, " ")
+		if setErr := s.cache.SetVector(ctx, cacheKey, vector); setErr != nil {
+			// Cache write failure is non-fatal — the vector was obtained successfully.
+			// The next call for the same keywords will simply embed again.
+			s.log.WarnContext(ctx, "augment: failed to store vector in cache — continuing", "error", setErr)
+		}
 	}
 
 	docs, err := s.findRelevantDocs(ctx, vector)
@@ -79,32 +87,25 @@ func (s *Service) AugmentResumeText(ctx context.Context, input port.AugmentInput
 	return augmented, input.RefData, nil
 }
 
-// embedWithCache joins keywords into a single query string, checks the cache for a
-// pre-computed embedding vector, and falls back to calling the embedding API on a miss.
-// On a cache miss the resulting vector is stored in the cache; SetVector failures are
-// logged as warnings but do not abort the pipeline.
-func (s *Service) embedWithCache(ctx context.Context, keywords []string) ([]float32, error) {
+// embedWithCache joins keywords into a single query string and checks the cache.
+// Returns (vector, true, nil) on a cache hit, or (vector, false, nil) on a cache miss
+// after calling the embedding API. The caller is responsible for storing misses in cache.
+func (s *Service) embedWithCache(ctx context.Context, keywords []string) ([]float32, bool, error) {
 	cacheKey := strings.Join(keywords, " ")
 
 	if s.cache != nil {
 		if cached, ok, err := s.cache.GetVector(ctx, cacheKey); err == nil && ok {
 			s.log.DebugContext(ctx, "augment: keyword vector cache hit", "key_len", len(cacheKey))
-			return cached, nil
+			return cached, true, nil
 		}
 	}
 
 	vector, err := s.embedder.Embed(ctx, cacheKey)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
-	if s.cache != nil {
-		if setErr := s.cache.SetVector(ctx, cacheKey, vector); setErr != nil {
-			s.log.WarnContext(ctx, "augment: failed to store vector in cache — continuing", "error", setErr)
-		}
-	}
-
-	return vector, nil
+	return vector, false, nil
 }
 
 // findRelevantDocs retrieves the top-k similar profile document chunks and filters

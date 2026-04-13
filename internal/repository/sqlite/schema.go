@@ -11,8 +11,8 @@ CREATE TABLE IF NOT EXISTS profile_docs (
 );
 `
 
-const keywordCacheSQL = `
-CREATE TABLE IF NOT EXISTS keyword_vector_cache (
+const skillVectorCacheSQL = `
+CREATE TABLE IF NOT EXISTS skill_vector_cache (
     keyword    TEXT NOT NULL PRIMARY KEY,
     vector     BLOB NOT NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS keyword_vector_cache (
 
 func vecTableSQL(dim int) string {
 	return fmt.Sprintf(`
-CREATE VIRTUAL TABLE IF NOT EXISTS profile_embeddings USING vec0(
+CREATE VIRTUAL TABLE IF NOT EXISTS profile_skill_embeddings USING vec0(
     doc_id    INTEGER PRIMARY KEY,
     embedding FLOAT[%d] distance_metric=cosine
 );`, dim)

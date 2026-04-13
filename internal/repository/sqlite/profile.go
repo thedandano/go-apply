@@ -55,17 +55,17 @@ func migrate(db *sql.DB, dim int) error {
 		return fmt.Errorf("create profile_docs table: %w", err)
 	}
 	if _, err := db.Exec(vecTableSQL(dim)); err != nil {
-		return fmt.Errorf("create profile_embeddings virtual table: %w", err)
+		return fmt.Errorf("create profile_skill_embeddings virtual table: %w", err)
 	}
-	if _, err := db.Exec(keywordCacheSQL); err != nil {
-		return fmt.Errorf("create keyword_vector_cache table: %w", err)
+	if _, err := db.Exec(skillVectorCacheSQL); err != nil {
+		return fmt.Errorf("create skill_vector_cache table: %w", err)
 	}
 	return nil
 }
 
 // UpsertDocument stores or replaces the document text and its embedding vector.
 // It runs inside a transaction: upserts profile_docs (returning the row id), then
-// deletes+inserts the embedding row in profile_embeddings (vec0 does not support
+// deletes+inserts the embedding row in profile_skill_embeddings (vec0 does not support
 // ON CONFLICT, so we must delete first).
 func (r *ProfileRepository) UpsertDocument(ctx context.Context, sourceDoc string, text string, vector []float32) error {
 	blob, err := serializeFloat32(vector)
@@ -91,10 +91,10 @@ func (r *ProfileRepository) UpsertDocument(ctx context.Context, sourceDoc string
 	}
 
 	// vec0 virtual tables do not support ON CONFLICT — delete first, then insert.
-	if _, err := tx.ExecContext(ctx, `DELETE FROM profile_embeddings WHERE doc_id = ?`, docID); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM profile_skill_embeddings WHERE doc_id = ?`, docID); err != nil {
 		return fmt.Errorf("delete old embedding: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO profile_embeddings(doc_id, embedding) VALUES(?, ?)`, docID, blob); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO profile_skill_embeddings(doc_id, embedding) VALUES(?, ?)`, docID, blob); err != nil {
 		return fmt.Errorf("insert embedding: %w", err)
 	}
 
@@ -115,7 +115,7 @@ func (r *ProfileRepository) FindSimilar(ctx context.Context, queryVector []float
 
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT pd.id, pd.source, pd.chunk, pe.distance
-		FROM profile_embeddings pe
+		FROM profile_skill_embeddings pe
 		JOIN profile_docs pd ON pe.doc_id = pd.id
 		WHERE pe.embedding MATCH ?
 		  AND k = ?
@@ -146,7 +146,7 @@ func (r *ProfileRepository) FindSimilar(ctx context.Context, queryVector []float
 func (r *ProfileRepository) GetVector(ctx context.Context, keyword string) ([]float32, bool, error) {
 	var blob []byte
 	err := r.db.QueryRowContext(ctx,
-		`SELECT vector FROM keyword_vector_cache WHERE keyword = ?`, keyword,
+		`SELECT vector FROM skill_vector_cache WHERE keyword = ?`, keyword,
 	).Scan(&blob)
 	if err == sql.ErrNoRows {
 		return nil, false, nil
@@ -168,7 +168,7 @@ func (r *ProfileRepository) SetVector(ctx context.Context, keyword string, vecto
 		return fmt.Errorf("serialize keyword vector: %w", err)
 	}
 	_, err = r.db.ExecContext(ctx,
-		`INSERT OR REPLACE INTO keyword_vector_cache(keyword, vector) VALUES(?, ?)`,
+		`INSERT OR REPLACE INTO skill_vector_cache(keyword, vector) VALUES(?, ?)`,
 		keyword, blob,
 	)
 	if err != nil {
@@ -192,12 +192,15 @@ func serializeFloat32(vector []float32) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+// float32Bytes is the byte size of a single float32 value (IEEE 754, 32-bit).
+const float32Bytes = 4
+
 // deserializeFloat32 decodes a little-endian binary blob back into a float32 slice.
 func deserializeFloat32(blob []byte) ([]float32, error) {
-	if len(blob)%4 != 0 {
-		return nil, fmt.Errorf("invalid blob length %d: must be a multiple of 4", len(blob))
+	if len(blob)%float32Bytes != 0 {
+		return nil, fmt.Errorf("invalid blob length %d: must be a multiple of %d", len(blob), float32Bytes)
 	}
-	vec := make([]float32, len(blob)/4)
+	vec := make([]float32, len(blob)/float32Bytes)
 	if err := binary.Read(bytes.NewReader(blob), binary.LittleEndian, vec); err != nil {
 		return nil, err
 	}

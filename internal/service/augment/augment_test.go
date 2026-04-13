@@ -143,6 +143,9 @@ func TestAugmentResumeText_ReturnsOriginalWhenEmbeddingFails(t *testing.T) {
 		JDKeywords: []string{"golang", "kubernetes"},
 	}
 
+	// Embedding failure is a degraded-mode path: augmentation is best-effort enrichment,
+	// not a hard requirement. Returning the original text lets the apply pipeline continue
+	// without augmentation rather than aborting the entire job application run.
 	got, _, err := svc.AugmentResumeText(context.Background(), input)
 	if err != nil {
 		t.Fatalf("expected graceful degradation (no error), got: %v", err)
