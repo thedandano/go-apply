@@ -56,5 +56,11 @@
     "cover_letter_max_tokens":       200,
     "bullet_rewrite_temp":           0.2,
     "bullet_rewrite_max_tokens":     800
+  },
+  "augment": {
+    "incorporation_temp": 0.2,
+    "incorporation_max_tokens": 2000,
+    "keyword_match_min_count": 1,
+    "max_chunks_to_incorporate": 5
   }
 }

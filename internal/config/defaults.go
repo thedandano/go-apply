@@ -68,6 +68,13 @@ type LLMDefaults struct {
 	BulletRewriteMaxTokens     int     `json:"bullet_rewrite_max_tokens"`
 }
 
+type AugmentDefaults struct {
+	IncorporationTemp      float64 `json:"incorporation_temp"`
+	IncorporationMaxTokens int     `json:"incorporation_max_tokens"`
+	KeywordMatchMinCount   int     `json:"keyword_match_min_count"`
+	MaxChunksToIncorporate int     `json:"max_chunks_to_incorporate"`
+}
+
 // AppDefaults holds all tunable constants loaded from internal/config/defaults.json.
 // Injected into services — never read inline constants from source code.
 type AppDefaults struct {
@@ -78,6 +85,7 @@ type AppDefaults struct {
 	Fetcher      FetcherDefaults      `json:"fetcher"`
 	VectorSearch VectorSearchDefaults `json:"vector_search"`
 	LLM          LLMDefaults          `json:"llm"`
+	Augment      AugmentDefaults      `json:"augment"`
 }
 
 // defaultsJSON is the embedded defaults.json.
@@ -123,6 +131,12 @@ func EmbeddedDefaults() *AppDefaults {
 			CoverLetterMaxTokens:       200,
 			BulletRewriteTemp:          0.2,
 			BulletRewriteMaxTokens:     800,
+		},
+		Augment: AugmentDefaults{
+			IncorporationTemp:      0.2,
+			IncorporationMaxTokens: 2000,
+			KeywordMatchMinCount:   1,
+			MaxChunksToIncorporate: 5,
 		},
 	}
 }

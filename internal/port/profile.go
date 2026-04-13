@@ -19,4 +19,7 @@ type ProfileRepository interface {
 	// FindSimilar returns the top-k document chunks most similar to the query vector.
 	// Uses sqlite-vec's vec_distance_cosine under the hood.
 	FindSimilar(ctx context.Context, queryVector []float32, k int) ([]model.ProfileEmbedding, error)
+
+	// ListDocuments returns all stored document chunks for keyword-based fallback retrieval.
+	ListDocuments(ctx context.Context) ([]model.ProfileDocument, error)
 }
