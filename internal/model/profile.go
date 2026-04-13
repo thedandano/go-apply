@@ -15,3 +15,11 @@ type ProfileEmbedding struct {
 	Term      string
 	Weight    float64
 }
+
+// ProfileDocument is a stored document chunk without embedding metadata.
+// Used by the keyword fallback retrieval path.
+type ProfileDocument struct {
+	ID     int64
+	Source string
+	Text   string
+}

@@ -41,7 +41,7 @@ func NewProfileRepository(dbPath string, dim int) (*ProfileRepository, error) {
 		return nil, fmt.Errorf("set WAL journal mode: %w", err)
 	}
 
-	if err := migrate(db, dim); err != nil {
+	if err := migrateDB(db, dim); err != nil {
 		_ = db.Close() //nolint:gosec // G104: cleanup close on error path; original error takes precedence
 		return nil, fmt.Errorf("migrate profile db: %w", err)
 	}
@@ -49,23 +49,23 @@ func NewProfileRepository(dbPath string, dim int) (*ProfileRepository, error) {
 	return &ProfileRepository{db: db}, nil
 }
 
-// migrate runs all schema creation statements in order.
-func migrate(db *sql.DB, dim int) error {
+// migrateDB runs all schema creation statements in order.
+func migrateDB(db *sql.DB, dim int) error {
 	if _, err := db.Exec(schemaSQL); err != nil {
 		return fmt.Errorf("create profile_docs table: %w", err)
 	}
 	if _, err := db.Exec(vecTableSQL(dim)); err != nil {
-		return fmt.Errorf("create profile_skill_embeddings virtual table: %w", err)
+		return fmt.Errorf("create profile_docs_embeddings virtual table: %w", err)
 	}
-	if _, err := db.Exec(skillVectorCacheSQL); err != nil {
-		return fmt.Errorf("create skill_vector_cache table: %w", err)
+	if _, err := db.Exec(keywordEmbeddingsCacheSQL); err != nil {
+		return fmt.Errorf("create keyword_embeddings_cache table: %w", err)
 	}
 	return nil
 }
 
 // UpsertDocument stores or replaces the document text and its embedding vector.
 // It runs inside a transaction: upserts profile_docs (returning the row id), then
-// deletes+inserts the embedding row in profile_skill_embeddings (vec0 does not support
+// deletes+inserts the embedding row in profile_docs_embeddings (vec0 does not support
 // ON CONFLICT, so we must delete first).
 func (r *ProfileRepository) UpsertDocument(ctx context.Context, sourceDoc string, text string, vector []float32) error {
 	blob, err := serializeFloat32(vector)
@@ -91,10 +91,10 @@ func (r *ProfileRepository) UpsertDocument(ctx context.Context, sourceDoc string
 	}
 
 	// vec0 virtual tables do not support ON CONFLICT — delete first, then insert.
-	if _, err := tx.ExecContext(ctx, `DELETE FROM profile_skill_embeddings WHERE doc_id = ?`, docID); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM profile_docs_embeddings WHERE doc_id = ?`, docID); err != nil {
 		return fmt.Errorf("delete old embedding: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO profile_skill_embeddings(doc_id, embedding) VALUES(?, ?)`, docID, blob); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO profile_docs_embeddings(doc_id, embedding) VALUES(?, ?)`, docID, blob); err != nil {
 		return fmt.Errorf("insert embedding: %w", err)
 	}
 
@@ -115,7 +115,7 @@ func (r *ProfileRepository) FindSimilar(ctx context.Context, queryVector []float
 
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT pd.id, pd.source, pd.chunk, pe.distance
-		FROM profile_skill_embeddings pe
+		FROM profile_docs_embeddings pe
 		JOIN profile_docs pd ON pe.doc_id = pd.id
 		WHERE pe.embedding MATCH ?
 		  AND k = ?
@@ -146,7 +146,7 @@ func (r *ProfileRepository) FindSimilar(ctx context.Context, queryVector []float
 func (r *ProfileRepository) GetVector(ctx context.Context, keyword string) ([]float32, bool, error) {
 	var blob []byte
 	err := r.db.QueryRowContext(ctx,
-		`SELECT vector FROM skill_vector_cache WHERE keyword = ?`, keyword,
+		`SELECT vector FROM keyword_embeddings_cache WHERE keyword = ?`, keyword,
 	).Scan(&blob)
 	if err == sql.ErrNoRows {
 		return nil, false, nil
@@ -168,13 +168,34 @@ func (r *ProfileRepository) SetVector(ctx context.Context, keyword string, vecto
 		return fmt.Errorf("serialize keyword vector: %w", err)
 	}
 	_, err = r.db.ExecContext(ctx,
-		`INSERT OR REPLACE INTO skill_vector_cache(keyword, vector) VALUES(?, ?)`,
+		`INSERT OR REPLACE INTO keyword_embeddings_cache(keyword, vector) VALUES(?, ?)`,
 		keyword, blob,
 	)
 	if err != nil {
 		return fmt.Errorf("set keyword vector: %w", err)
 	}
 	return nil
+}
+
+// ListDocuments returns all stored document chunks for keyword-based fallback retrieval.
+func (r *ProfileRepository) ListDocuments(ctx context.Context) ([]model.ProfileDocument, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT id, source, chunk FROM profile_docs ORDER BY id`)
+	if err != nil {
+		return nil, fmt.Errorf("augment: list profile documents: %w", err)
+	}
+	defer rows.Close()
+	var docs []model.ProfileDocument
+	for rows.Next() {
+		var d model.ProfileDocument
+		if err := rows.Scan(&d.ID, &d.Source, &d.Text); err != nil {
+			return nil, fmt.Errorf("augment: scan profile document: %w", err)
+		}
+		docs = append(docs, d)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("augment: iterate profile documents: %w", err)
+	}
+	return docs, nil
 }
 
 // Close releases the underlying database connection.
