@@ -33,14 +33,49 @@ func (s *stubProfileRepository) FindSimilar(_ context.Context, _ []float32, _ in
 
 // stubEmbeddingClient returns a fixed vector or an error for unit tests.
 type stubEmbeddingClient struct {
-	vector []float32
-	err    error
+	vector    []float32
+	err       error
+	callCount int
 }
 
 var _ port.EmbeddingClient = (*stubEmbeddingClient)(nil)
 
 func (s *stubEmbeddingClient) Embed(_ context.Context, _ string) ([]float32, error) {
+	s.callCount++
 	return s.vector, s.err
+}
+
+// stubKeywordCacheRepository is a no-op keyword cache for unit tests.
+type stubKeywordCacheRepository struct {
+	stored   map[string][]float32
+	getCalls int
+	setCalls int
+	getErr   error
+	setErr   error
+}
+
+var _ port.KeywordCacheRepository = (*stubKeywordCacheRepository)(nil)
+
+func newStubCache() *stubKeywordCacheRepository {
+	return &stubKeywordCacheRepository{stored: make(map[string][]float32)}
+}
+
+func (s *stubKeywordCacheRepository) GetVector(_ context.Context, keyword string) ([]float32, bool, error) {
+	s.getCalls++
+	if s.getErr != nil {
+		return nil, false, s.getErr
+	}
+	v, ok := s.stored[keyword]
+	return v, ok, nil
+}
+
+func (s *stubKeywordCacheRepository) SetVector(_ context.Context, keyword string, vector []float32) error {
+	s.setCalls++
+	if s.setErr != nil {
+		return s.setErr
+	}
+	s.stored[keyword] = vector
+	return nil
 }
 
 // --- helpers ---
@@ -67,6 +102,7 @@ func TestAugmentResumeText_ReturnsOriginalWhenKeywordsEmpty(t *testing.T) {
 
 	svc := augment.New(
 		&stubProfileRepository{},
+		newStubCache(),
 		&stubEmbeddingClient{vector: fakeVector()},
 		testDefaults(),
 		testLogger(),
@@ -95,6 +131,7 @@ func TestAugmentResumeText_ReturnsOriginalWhenEmbeddingFails(t *testing.T) {
 
 	svc := augment.New(
 		&stubProfileRepository{},
+		newStubCache(),
 		&stubEmbeddingClient{err: errors.New("embedding service unavailable")},
 		testDefaults(),
 		testLogger(),
@@ -120,6 +157,7 @@ func TestAugmentResumeText_ReturnsOriginalWhenNoSimilarDocs(t *testing.T) {
 
 	svc := augment.New(
 		&stubProfileRepository{results: nil, err: nil},
+		newStubCache(),
 		&stubEmbeddingClient{vector: fakeVector()},
 		testDefaults(),
 		testLogger(),
@@ -151,6 +189,7 @@ func TestAugmentResumeText_AppendsMatchingDocsAboveThreshold(t *testing.T) {
 
 	svc := augment.New(
 		&stubProfileRepository{results: []model.ProfileEmbedding{aboveThreshold}},
+		newStubCache(),
 		&stubEmbeddingClient{vector: fakeVector()},
 		testDefaults(),
 		testLogger(),
@@ -178,6 +217,7 @@ func TestAugmentResumeText_ReturnsOriginalWhenFindSimilarFails(t *testing.T) {
 
 	svc := augment.New(
 		&stubProfileRepository{err: errors.New("db unavailable")},
+		newStubCache(),
 		&stubEmbeddingClient{vector: fakeVector()},
 		testDefaults(),
 		testLogger(),
@@ -213,6 +253,7 @@ func TestAugmentResumeText_FiltersOutDocsBelowThreshold(t *testing.T) {
 
 	svc := augment.New(
 		&stubProfileRepository{results: []model.ProfileEmbedding{belowThreshold}},
+		newStubCache(),
 		&stubEmbeddingClient{vector: fakeVector()},
 		testDefaults(),
 		testLogger(),
@@ -232,5 +273,86 @@ func TestAugmentResumeText_FiltersOutDocsBelowThreshold(t *testing.T) {
 	}
 	if strings.Contains(got, "Irrelevant content") {
 		t.Errorf("expected below-threshold doc to be filtered out")
+	}
+}
+
+func TestAugmentResumeText_UsesCachedVector(t *testing.T) {
+	t.Parallel()
+
+	// Pre-populate cache with the expected joined keyword key.
+	cache := newStubCache()
+	cachedVector := []float32{0.9, 0.8, 0.7}
+	_ = cache.SetVector(context.Background(), "golang kubernetes", cachedVector)
+	// Reset setCalls after seeding so we can verify no new SetVector is called.
+	cache.setCalls = 0
+
+	embedder := &stubEmbeddingClient{vector: fakeVector()}
+
+	aboveThreshold := model.ProfileEmbedding{
+		ID: 1, SourceDoc: "resume:backend", Term: "Backend systems work", Weight: 0.9,
+	}
+	svc := augment.New(
+		&stubProfileRepository{results: []model.ProfileEmbedding{aboveThreshold}},
+		cache,
+		embedder,
+		testDefaults(),
+		testLogger(),
+	)
+
+	input := port.AugmentInput{
+		ResumeText: "experienced software engineer",
+		JDKeywords: []string{"golang", "kubernetes"},
+	}
+
+	got, _, err := svc.AugmentResumeText(context.Background(), input)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if embedder.callCount != 0 {
+		t.Errorf("expected no embedding API call on cache hit, got %d calls", embedder.callCount)
+	}
+	if !strings.Contains(got, "Backend systems work") {
+		t.Errorf("expected augmented text with cached vector result, got: %s", got)
+	}
+}
+
+func TestAugmentResumeText_StoresMissInCache(t *testing.T) {
+	t.Parallel()
+
+	cache := newStubCache() // empty cache → miss
+	embedder := &stubEmbeddingClient{vector: fakeVector()}
+
+	aboveThreshold := model.ProfileEmbedding{
+		ID: 1, SourceDoc: "resume:backend", Term: "Backend systems work", Weight: 0.9,
+	}
+	svc := augment.New(
+		&stubProfileRepository{results: []model.ProfileEmbedding{aboveThreshold}},
+		cache,
+		embedder,
+		testDefaults(),
+		testLogger(),
+	)
+
+	input := port.AugmentInput{
+		ResumeText: "experienced software engineer",
+		JDKeywords: []string{"golang", "kubernetes"},
+	}
+
+	_, _, err := svc.AugmentResumeText(context.Background(), input)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if embedder.callCount != 1 {
+		t.Errorf("expected exactly 1 embedding API call on cache miss, got %d", embedder.callCount)
+	}
+	if cache.setCalls != 1 {
+		t.Errorf("expected SetVector to be called once for cache miss, got %d calls", cache.setCalls)
+	}
+	stored, ok, _ := cache.GetVector(context.Background(), "golang kubernetes")
+	if !ok {
+		t.Error("expected vector to be stored in cache after miss")
+	}
+	if len(stored) == 0 {
+		t.Error("expected non-empty stored vector")
 	}
 }

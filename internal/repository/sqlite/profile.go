@@ -16,8 +16,9 @@ import (
 	"github.com/thedandano/go-apply/internal/port"
 )
 
-// Compile-time interface satisfaction check.
+// Compile-time interface satisfaction checks.
 var _ port.ProfileRepository = (*ProfileRepository)(nil)
+var _ port.KeywordCacheRepository = (*ProfileRepository)(nil)
 
 // ProfileRepository stores resume/profile document chunks alongside their embedding vectors
 // in a local SQLite database using the sqlite-vec virtual table extension.
@@ -55,6 +56,9 @@ func migrate(db *sql.DB, dim int) error {
 	}
 	if _, err := db.Exec(vecTableSQL(dim)); err != nil {
 		return fmt.Errorf("create profile_embeddings virtual table: %w", err)
+	}
+	if _, err := db.Exec(keywordCacheSQL); err != nil {
+		return fmt.Errorf("create keyword_vector_cache table: %w", err)
 	}
 	return nil
 }
@@ -138,6 +142,41 @@ func (r *ProfileRepository) FindSimilar(ctx context.Context, queryVector []float
 	return results, nil
 }
 
+// GetVector returns the cached embedding vector for keyword, or (nil, false, nil) on cache miss.
+func (r *ProfileRepository) GetVector(ctx context.Context, keyword string) ([]float32, bool, error) {
+	var blob []byte
+	err := r.db.QueryRowContext(ctx,
+		`SELECT vector FROM keyword_vector_cache WHERE keyword = ?`, keyword,
+	).Scan(&blob)
+	if err == sql.ErrNoRows {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("get keyword vector: %w", err)
+	}
+	vec, err := deserializeFloat32(blob)
+	if err != nil {
+		return nil, false, fmt.Errorf("deserialize cached vector: %w", err)
+	}
+	return vec, true, nil
+}
+
+// SetVector stores the embedding vector for keyword, overwriting any existing entry.
+func (r *ProfileRepository) SetVector(ctx context.Context, keyword string, vector []float32) error {
+	blob, err := serializeFloat32(vector)
+	if err != nil {
+		return fmt.Errorf("serialize keyword vector: %w", err)
+	}
+	_, err = r.db.ExecContext(ctx,
+		`INSERT OR REPLACE INTO keyword_vector_cache(keyword, vector) VALUES(?, ?)`,
+		keyword, blob,
+	)
+	if err != nil {
+		return fmt.Errorf("set keyword vector: %w", err)
+	}
+	return nil
+}
+
 // Close releases the underlying database connection.
 func (r *ProfileRepository) Close() error {
 	return r.db.Close()
@@ -151,4 +190,16 @@ func serializeFloat32(vector []float32) ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+// deserializeFloat32 decodes a little-endian binary blob back into a float32 slice.
+func deserializeFloat32(blob []byte) ([]float32, error) {
+	if len(blob)%4 != 0 {
+		return nil, fmt.Errorf("invalid blob length %d: must be a multiple of 4", len(blob))
+	}
+	vec := make([]float32, len(blob)/4)
+	if err := binary.Read(bytes.NewReader(blob), binary.LittleEndian, vec); err != nil {
+		return nil, err
+	}
+	return vec, nil
 }

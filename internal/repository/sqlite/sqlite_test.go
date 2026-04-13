@@ -60,6 +60,75 @@ func TestProfileRepository_UpsertAndFindSimilar(t *testing.T) {
 	}
 }
 
+// TestKeywordCache_SetAndGet verifies the keyword vector cache round-trip against
+// a real SQLite database.
+func TestKeywordCache_SetAndGet(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(t.TempDir(), "test-cache.db")
+	const dim = 4
+
+	repo, err := sqlite.NewProfileRepository(dbPath, dim)
+	if err != nil {
+		t.Fatalf("NewProfileRepository: %v", err)
+	}
+	defer repo.Close()
+
+	ctx := context.Background()
+	keyword := "golang kubernetes distributed"
+	vector := []float32{0.1, 0.2, 0.3, 0.4}
+
+	// Cache miss before any set.
+	got, ok, err := repo.GetVector(ctx, keyword)
+	if err != nil {
+		t.Fatalf("GetVector (miss): %v", err)
+	}
+	if ok {
+		t.Fatal("expected cache miss, got hit")
+	}
+	if got != nil {
+		t.Errorf("expected nil vector on miss, got %v", got)
+	}
+
+	// Store then retrieve.
+	if err := repo.SetVector(ctx, keyword, vector); err != nil {
+		t.Fatalf("SetVector: %v", err)
+	}
+
+	got, ok, err = repo.GetVector(ctx, keyword)
+	if err != nil {
+		t.Fatalf("GetVector (hit): %v", err)
+	}
+	if !ok {
+		t.Fatal("expected cache hit after SetVector, got miss")
+	}
+	if len(got) != len(vector) {
+		t.Fatalf("expected vector length %d, got %d", len(vector), len(got))
+	}
+	for i, v := range vector {
+		if got[i] != v {
+			t.Errorf("vector[%d]: expected %f, got %f", i, v, got[i])
+		}
+	}
+
+	// Overwrite with new vector.
+	newVector := []float32{0.9, 0.8, 0.7, 0.6}
+	if err := repo.SetVector(ctx, keyword, newVector); err != nil {
+		t.Fatalf("SetVector (overwrite): %v", err)
+	}
+
+	got, ok, err = repo.GetVector(ctx, keyword)
+	if err != nil {
+		t.Fatalf("GetVector (after overwrite): %v", err)
+	}
+	if !ok {
+		t.Fatal("expected cache hit after overwrite")
+	}
+	if got[0] != newVector[0] {
+		t.Errorf("expected overwritten vector, got[0]=%f", got[0])
+	}
+}
+
 // TestProfileRepository_UpsertDocument_IdempotentUpdate verifies that upserting
 // the same sourceDoc twice updates the text and embedding rather than creating a duplicate.
 func TestProfileRepository_UpsertDocument_IdempotentUpdate(t *testing.T) {
