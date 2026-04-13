@@ -15,6 +15,6 @@ func vecTableSQL(dim int) string {
 	return fmt.Sprintf(`
 CREATE VIRTUAL TABLE IF NOT EXISTS profile_embeddings USING vec0(
     doc_id    INTEGER PRIMARY KEY,
-    embedding FLOAT[%d]
+    embedding FLOAT[%d] distance_metric=cosine
 );`, dim)
 }

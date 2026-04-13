@@ -173,6 +173,34 @@ func TestAugmentResumeText_AppendsMatchingDocsAboveThreshold(t *testing.T) {
 	}
 }
 
+func TestAugmentResumeText_ReturnsOriginalWhenFindSimilarFails(t *testing.T) {
+	t.Parallel()
+
+	svc := augment.New(
+		&stubProfileRepository{err: errors.New("db unavailable")},
+		&stubEmbeddingClient{vector: fakeVector()},
+		testDefaults(),
+		testLogger(),
+	)
+
+	input := port.AugmentInput{
+		ResumeText: "experienced software engineer",
+		RefData:    nil,
+		JDKeywords: []string{"golang", "kubernetes"},
+	}
+
+	got, refData, err := svc.AugmentResumeText(context.Background(), input)
+	if err != nil {
+		t.Fatalf("expected graceful degradation (no error), got: %v", err)
+	}
+	if got != input.ResumeText {
+		t.Errorf("expected original text on FindSimilar failure, got %q", got)
+	}
+	if refData != input.RefData {
+		t.Errorf("expected ref data to be unchanged on FindSimilar failure")
+	}
+}
+
 func TestAugmentResumeText_FiltersOutDocsBelowThreshold(t *testing.T) {
 	t.Parallel()
 
