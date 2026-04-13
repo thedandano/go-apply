@@ -3,6 +3,8 @@ package coverletter_test
 import (
 	"context"
 	"errors"
+	"io"
+	"log/slog"
 	"strings"
 	"testing"
 
@@ -30,12 +32,16 @@ func testDefaults() *config.AppDefaults {
 	return config.EmbeddedDefaults()
 }
 
+func discardLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
 func TestGenerate_ReturnsResult(t *testing.T) {
 	stub := &stubLLMClient{
 		response: "Dear Hiring Manager, I am excited to apply for this role. My skills align well with your requirements. Thank you for your consideration.",
 	}
 
-	gen := coverletter.New(stub, testDefaults())
+	gen := coverletter.New(stub, testDefaults(), discardLogger())
 
 	input := port.CoverLetterInput{
 		JD: model.JDData{
@@ -80,7 +86,7 @@ func TestGenerate_ReturnsResult(t *testing.T) {
 
 func TestGenerate_PromptIncludesJDSkills(t *testing.T) {
 	stub := &stubLLMClient{response: "Cover letter."}
-	gen := coverletter.New(stub, testDefaults())
+	gen := coverletter.New(stub, testDefaults(), discardLogger())
 
 	input := port.CoverLetterInput{
 		JD: model.JDData{
@@ -109,7 +115,7 @@ func TestGenerate_PromptIncludesJDSkills(t *testing.T) {
 
 func TestGenerate_PromptIncludesWordTargets(t *testing.T) {
 	stub := &stubLLMClient{response: "Cover letter."}
-	gen := coverletter.New(stub, testDefaults())
+	gen := coverletter.New(stub, testDefaults(), discardLogger())
 
 	input := port.CoverLetterInput{
 		JD:      model.JDData{Title: "Eng", Company: "Co"},
@@ -135,7 +141,7 @@ func TestGenerate_PromptIncludesWordTargets(t *testing.T) {
 
 func TestGenerate_UsesHighestScoringResume(t *testing.T) {
 	stub := &stubLLMClient{response: "Cover letter text."}
-	gen := coverletter.New(stub, testDefaults())
+	gen := coverletter.New(stub, testDefaults(), discardLogger())
 
 	input := port.CoverLetterInput{
 		JD:      model.JDData{Title: "Data Engineer", Company: "DataCo"},
@@ -175,7 +181,7 @@ func TestGenerate_UsesHighestScoringResume(t *testing.T) {
 
 func TestGenerate_EmptyScores(t *testing.T) {
 	stub := &stubLLMClient{response: "Cover letter with no score context."}
-	gen := coverletter.New(stub, testDefaults())
+	gen := coverletter.New(stub, testDefaults(), discardLogger())
 
 	input := port.CoverLetterInput{
 		JD:      model.JDData{Title: "Engineer", Company: "Corp"},
@@ -194,9 +200,44 @@ func TestGenerate_EmptyScores(t *testing.T) {
 	}
 }
 
+func TestGenerate_WarnWhenJDRawTextMissing(t *testing.T) {
+	var warnFired bool
+	handler := &capturingHandler{fn: func(r slog.Record) {
+		if r.Level == slog.LevelWarn && strings.Contains(r.Message, "JDRawText") {
+			warnFired = true
+		}
+	}}
+	log := slog.New(handler)
+
+	stub := &stubLLMClient{response: "Cover letter."}
+	gen := coverletter.New(stub, testDefaults(), log)
+
+	input := port.CoverLetterInput{
+		JD:      model.JDData{Title: "SWE", Company: "Acme"},
+		Scores:  map[string]model.ScoreResult{"r": {ResumeLabel: "r"}},
+		Channel: model.ChannelCold,
+		Profile: model.UserProfile{Name: "Test"},
+		// JDRawText intentionally omitted
+	}
+	if _, err := gen.Generate(context.Background(), &input); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !warnFired {
+		t.Error("expected Warn log for missing JDRawText, none recorded")
+	}
+}
+
+// capturingHandler is a minimal slog.Handler that calls fn for each record.
+type capturingHandler struct{ fn func(slog.Record) }
+
+func (h *capturingHandler) Enabled(_ context.Context, _ slog.Level) bool  { return true }
+func (h *capturingHandler) Handle(_ context.Context, r slog.Record) error { h.fn(r); return nil }
+func (h *capturingHandler) WithAttrs(_ []slog.Attr) slog.Handler          { return h }
+func (h *capturingHandler) WithGroup(_ string) slog.Handler               { return h }
+
 func TestGenerate_PromptIncludesJDRawText(t *testing.T) {
 	stub := &stubLLMClient{response: "Cover letter."}
-	gen := coverletter.New(stub, testDefaults())
+	gen := coverletter.New(stub, testDefaults(), discardLogger())
 
 	input := port.CoverLetterInput{
 		JD:        model.JDData{Title: "SRE", Company: "CloudCo"},
@@ -219,7 +260,7 @@ func TestGenerate_PromptIncludesJDRawText(t *testing.T) {
 
 func TestGenerate_EmptyLLMResponse(t *testing.T) {
 	stub := &stubLLMClient{response: ""}
-	gen := coverletter.New(stub, testDefaults())
+	gen := coverletter.New(stub, testDefaults(), discardLogger())
 
 	input := port.CoverLetterInput{
 		JD:      model.JDData{Title: "Engineer", Company: "Corp"},
@@ -239,7 +280,7 @@ func TestGenerate_EmptyLLMResponse(t *testing.T) {
 
 func TestGenerate_LLMError(t *testing.T) {
 	stub := &stubLLMClient{err: errors.New("connection refused")}
-	gen := coverletter.New(stub, testDefaults())
+	gen := coverletter.New(stub, testDefaults(), discardLogger())
 
 	input := port.CoverLetterInput{
 		JD:      model.JDData{Title: "Engineer", Company: "Corp"},

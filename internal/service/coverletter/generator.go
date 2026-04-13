@@ -3,6 +3,7 @@ package coverletter
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"strings"
 
@@ -23,19 +24,39 @@ var sentenceEnd = regexp.MustCompile(`[.!?]+(\s|$)`)
 type Generator struct {
 	llm      port.LLMClient
 	defaults *config.AppDefaults
+	log      *slog.Logger
 }
 
-// New constructs a Generator with the provided LLM client and application defaults.
-func New(llm port.LLMClient, defaults *config.AppDefaults) *Generator {
+// New constructs a Generator with the provided LLM client, application defaults, and logger.
+func New(llm port.LLMClient, defaults *config.AppDefaults, log *slog.Logger) *Generator {
 	return &Generator{
 		llm:      llm,
 		defaults: defaults,
+		log:      log,
 	}
 }
 
 // Generate selects the highest-scoring resume, builds a prompt, calls the LLM, and returns
 // a CoverLetterResult with the generated text plus word and sentence counts.
 func (g *Generator) Generate(ctx context.Context, input *port.CoverLetterInput) (model.CoverLetterResult, error) {
+	g.log.DebugContext(ctx, "cover letter generate started",
+		"job_title", input.JD.Title,
+		"company", input.JD.Company,
+		"channel", input.Channel,
+	)
+
+	if input.JDRawText == "" {
+		g.log.WarnContext(ctx, "JDRawText is empty — prompt will lack full job description context; cover letter quality may be reduced",
+			"job_title", input.JD.Title,
+			"company", input.JD.Company,
+		)
+	}
+	if len(input.Scores) == 0 {
+		g.log.WarnContext(ctx, "no resume scores provided — prompt will lack keyword match context",
+			"job_title", input.JD.Title,
+		)
+	}
+
 	best := bestScore(input.Scores)
 	prompt := buildPrompt(input, &best, g.defaults)
 
@@ -57,11 +78,23 @@ func (g *Generator) Generate(ctx context.Context, input *port.CoverLetterInput) 
 
 	text, err := g.llm.ChatComplete(ctx, messages, opts)
 	if err != nil {
+		g.log.ErrorContext(ctx, "cover letter LLM call failed",
+			"job_title", input.JD.Title,
+			"error", err,
+		)
 		return model.CoverLetterResult{}, fmt.Errorf("cover letter llm call: %w", err)
 	}
 	if strings.TrimSpace(text) == "" {
+		g.log.ErrorContext(ctx, "cover letter LLM returned empty response",
+			"job_title", input.JD.Title,
+		)
 		return model.CoverLetterResult{}, fmt.Errorf("cover letter llm call: empty response")
 	}
+
+	g.log.DebugContext(ctx, "cover letter generated",
+		"word_count", countWords(text),
+		"sentence_count", countSentences(text),
+	)
 
 	return model.CoverLetterResult{
 		Text:          text,
