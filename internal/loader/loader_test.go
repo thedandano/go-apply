@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/thedandano/go-apply/internal/config"
 )
 
 func TestDispatcherSupports(t *testing.T) {
@@ -44,7 +46,7 @@ func TestTextExtractorLoad(t *testing.T) {
 	dir := t.TempDir()
 	content := "Hello, world!\nThis is a test resume."
 	path := filepath.Join(dir, "resume.txt")
-	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+	if err := os.WriteFile(path, []byte(content), config.FilePerm); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
@@ -139,7 +141,7 @@ func buildMinimalDOCX(t *testing.T, docXML string) string {
 		t.Fatalf("zip close: %v", err)
 	}
 	path := filepath.Join(t.TempDir(), "test.docx")
-	if err := os.WriteFile(path, buf.Bytes(), 0600); err != nil {
+	if err := os.WriteFile(path, buf.Bytes(), config.FilePerm); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 	return path
@@ -171,7 +173,7 @@ func TestDOCXExtractorLoad_MissingDocumentXML(t *testing.T) {
 	_ = zw.Close()
 
 	path := filepath.Join(t.TempDir(), "empty.docx")
-	if err := os.WriteFile(path, buf.Bytes(), 0600); err != nil {
+	if err := os.WriteFile(path, buf.Bytes(), config.FilePerm); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
@@ -187,7 +189,7 @@ func TestDOCXExtractorLoad_MissingDocumentXML(t *testing.T) {
 
 func TestDOCXExtractorLoad_InvalidZip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "bad.docx")
-	if err := os.WriteFile(path, []byte("not a zip"), 0600); err != nil {
+	if err := os.WriteFile(path, []byte("not a zip"), config.FilePerm); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
