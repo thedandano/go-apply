@@ -14,7 +14,6 @@ import (
 	"github.com/thedandano/go-apply/internal/config"
 	"github.com/thedandano/go-apply/internal/model"
 	"github.com/thedandano/go-apply/internal/port"
-	mcpPres "github.com/thedandano/go-apply/internal/presenter/mcp"
 	"github.com/thedandano/go-apply/internal/service/pipeline"
 )
 
@@ -129,9 +128,8 @@ func happyBuilder(t *testing.T) pipelineBuilder {
 	t.Helper()
 	defaults := makeHandlerDefaults(t)
 	cfg := makeHandlerCfg()
-	return func(_ string) (*pipeline.ApplyPipeline, *mcpPres.Presenter) {
-		pres := mcpPres.New()
-		p := pipeline.New(pipeline.Config{
+	return func(_ string, pres port.Presenter) *pipeline.ApplyPipeline {
+		return pipeline.New(pipeline.Config{
 			Fetcher: &handlerStubFetcher{},
 			LLM:     &handlerStubLLM{},
 			Scorer:  &handlerStubScorer{},
@@ -146,7 +144,6 @@ func happyBuilder(t *testing.T) pipelineBuilder {
 			Defaults:  defaults,
 			Cfg:       cfg,
 		})
-		return p, pres
 	}
 }
 
@@ -156,9 +153,8 @@ func errorBuilder(t *testing.T) pipelineBuilder {
 	t.Helper()
 	defaults := makeHandlerDefaults(t)
 	cfg := makeHandlerCfg()
-	return func(_ string) (*pipeline.ApplyPipeline, *mcpPres.Presenter) {
-		pres := mcpPres.New()
-		p := pipeline.New(pipeline.Config{
+	return func(_ string, pres port.Presenter) *pipeline.ApplyPipeline {
+		return pipeline.New(pipeline.Config{
 			Fetcher:   &handlerStubFetcher{},
 			LLM:       &handlerStubLLM{},
 			Scorer:    &handlerStubScorer{},
@@ -171,7 +167,6 @@ func errorBuilder(t *testing.T) pipelineBuilder {
 			Defaults:  defaults,
 			Cfg:       cfg,
 		})
-		return p, pres
 	}
 }
 

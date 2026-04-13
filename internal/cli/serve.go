@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -14,7 +15,7 @@ import (
 	loaderPkg "github.com/thedandano/go-apply/internal/loader"
 	"github.com/thedandano/go-apply/internal/model"
 	"github.com/thedandano/go-apply/internal/port"
-	mcpPres "github.com/thedandano/go-apply/internal/presenter/mcp"
+	"github.com/thedandano/go-apply/internal/presenter/headless"
 	"github.com/thedandano/go-apply/internal/repository/fs"
 	"github.com/thedandano/go-apply/internal/service/augment"
 	"github.com/thedandano/go-apply/internal/service/coverletter"
@@ -22,17 +23,22 @@ import (
 	"github.com/thedandano/go-apply/internal/service/onboarding"
 	"github.com/thedandano/go-apply/internal/service/pipeline"
 	"github.com/thedandano/go-apply/internal/service/scorer"
+	tailorSvc "github.com/thedandano/go-apply/internal/service/tailor"
 )
 
 func newServeCommand(defaults *config.AppDefaults) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "serve",
 		Short: "Start MCP stdio server for AI agent integration",
-		Long: `serve starts an MCP stdio server that exposes three tools:
+		Long: `serve starts an MCP stdio server that exposes seven tools:
   apply_to_job   — full apply pipeline (score + cover letter)
   get_score      — score resumes against a JD and return detailed scores
-  tailor_resume  — tailor resume (stub — requires Task 13)`,
-		RunE: func(_ *cobra.Command, _ []string) error {
+  tailor_resume  — tailor resume via two-tier keyword/bullet cascade
+  onboard_user   — index resume, skills, and accomplishments into profile DB
+  add_resume     — index a single resume into profile DB
+  update_config  — set a config field by dot-notation key
+  get_config     — get config field(s), API keys redacted`,
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			cfg, err := config.Load()
 			if err != nil {
 				return fmt.Errorf("load config: %w", err)
@@ -52,12 +58,11 @@ func newServeCommand(defaults *config.AppDefaults) *cobra.Command {
 			fetcherSvc := fetcher.NewFallbackFetcher(defaults)
 			docLoader := loaderPkg.New()
 
-			// buildPipeline creates a pipeline with a fresh MCP presenter for the given resume dir.
-			buildPipeline := func(resumeDir string) (*pipeline.ApplyPipeline, *mcpPres.Presenter) {
-				pres := mcpPres.New()
+			// buildPipeline creates an apply pipeline with the given presenter for the given resume dir.
+			buildPipeline := func(resumeDir string, pres port.Presenter) *pipeline.ApplyPipeline {
 				cacheDir := filepath.Join(config.DataDir(), "jd_cache")
 				jdCacheRepo := fs.NewJDCacheRepository(cacheDir)
-				p := pipeline.New(pipeline.Config{
+				return pipeline.New(pipeline.Config{
 					Fetcher:   fetcherSvc,
 					LLM:       llmClient,
 					Scorer:    scorerSvc,
@@ -70,7 +75,24 @@ func newServeCommand(defaults *config.AppDefaults) *cobra.Command {
 					Defaults:  defaults,
 					Cfg:       cfg,
 				})
-				return p, pres
+			}
+
+			// buildTailorPipeline creates a tailor pipeline with the given presenter for the given resume dir.
+			buildTailorPipeline := func(resumeDir string, pres port.Presenter) *pipeline.TailorPipeline {
+				cacheDir := filepath.Join(config.DataDir(), "jd_cache")
+				jdCacheRepo := fs.NewJDCacheRepository(cacheDir)
+				return pipeline.NewTailorPipeline(pipeline.TailorConfig{
+					Fetcher:   fetcherSvc,
+					LLM:       llmClient,
+					Scorer:    scorerSvc,
+					Tailor:    tailorSvc.New(llmClient, defaults),
+					Resumes:   fs.NewResumeRepository(resumeDir),
+					JDCache:   jdCacheRepo,
+					Augmenter: augmenterSvc,
+					DocLoader: docLoader,
+					Presenter: pres,
+					Defaults:  defaults,
+				})
 			}
 
 			s := server.NewMCPServer("go-apply", "0.1.0",
@@ -118,16 +140,29 @@ func newServeCommand(defaults *config.AppDefaults) *cobra.Command {
 				},
 			)
 
-			// ── tailor_resume (stub) ──────────────────────────────────────────
+			// ── tailor_resume ─────────────────────────────────────────────────
 			s.AddTool(
 				mcp.NewTool("tailor_resume",
-					mcp.WithDescription("Tailor resume to a job description (stub — requires Task 13)"),
-					mcp.WithString("jd_url", mcp.Description("Job description URL")),
-					mcp.WithString("jd_text", mcp.Description("Raw job description text")),
-					mcp.WithString("resume_path", mcp.Description("Path to the resume file")),
+					mcp.WithDescription("Tailor a resume to a job description via two-tier keyword/bullet cascade"),
+					mcp.WithString("resume_label",
+						mcp.Required(),
+						mcp.Description("Label of the resume to tailor (e.g. 'backend')"),
+					),
+					mcp.WithString("jd_url",
+						mcp.Description("Job description URL (mutually exclusive with jd_text)"),
+					),
+					mcp.WithString("jd_text",
+						mcp.Description("Raw job description text (mutually exclusive with jd_url)"),
+					),
+					mcp.WithString("resume_dir",
+						mcp.Description("Directory to scan for resumes (default: current directory)"),
+					),
+					mcp.WithString("accomplishments_path",
+						mcp.Description("Path to accomplishments document for Tier 2 bullet rewrites (optional)"),
+					),
 				),
-				func(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-					return mcp.NewToolResultText(`{"error":"tailor_resume not yet implemented — requires Task 13"}`), nil
+				func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+					return handleTailorResume(ctx, req, cfg, buildTailorPipeline)
 				},
 			)
 
@@ -188,7 +223,9 @@ func newServeCommand(defaults *config.AppDefaults) *cobra.Command {
 	return cmd
 }
 
-type pipelineBuilder func(resumeDir string) (*pipeline.ApplyPipeline, *mcpPres.Presenter)
+type pipelineBuilder func(resumeDir string, pres port.Presenter) *pipeline.ApplyPipeline
+
+type tailorPipelineBuilder func(resumeDir string, pres port.Presenter) *pipeline.TailorPipeline
 
 // handleApplyToJob handles the apply_to_job MCP tool.
 // Validates inputs, runs the pipeline, and returns the result as JSON.
@@ -213,25 +250,18 @@ func handleApplyToJob(ctx context.Context, req mcp.CallToolRequest, build pipeli
 		return mcp.NewToolResultText(fmt.Sprintf(`{"error":"invalid channel %q: must be COLD, REFERRAL, or RECRUITER"}`, channel)), nil
 	}
 
-	p, pres := build(resumeDir)
+	var buf bytes.Buffer
+	pres := headless.New(&buf)
+	p := build(resumeDir, pres)
 
-	if runErr := p.Run(ctx, pipeline.RunInput{
+	if err := p.Run(ctx, pipeline.RunInput{
 		URL:     jdURL,
 		Text:    jdText,
 		Channel: model.ChannelType(channel),
-	}); runErr != nil && pres.Err() == nil {
-		return mcp.NewToolResultText(fmt.Sprintf(`{"error":%q}`, runErr.Error())), nil
-	}
-
-	if presErr := pres.Err(); presErr != nil {
-		return mcp.NewToolResultText(fmt.Sprintf(`{"error":%q}`, presErr.Error())), nil
-	}
-
-	data, err := json.Marshal(pres.Result())
-	if err != nil {
+	}); err != nil {
 		return mcp.NewToolResultText(fmt.Sprintf(`{"error":%q}`, err.Error())), nil
 	}
-	return mcp.NewToolResultText(string(data)), nil
+	return mcp.NewToolResultText(buf.String()), nil
 }
 
 // handleOnboardUser handles the onboard_user MCP tool.
@@ -359,6 +389,41 @@ func handleUpdateConfig(req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return mcp.NewToolResultText(`{"ok":true}`), nil
 }
 
+// handleTailorResume handles the tailor_resume MCP tool.
+// Validates inputs, runs the tailor pipeline, and returns the result as JSON.
+func handleTailorResume(ctx context.Context, req mcp.CallToolRequest, cfg *config.Config, build tailorPipelineBuilder) (*mcp.CallToolResult, error) {
+	resumeLabel := req.GetString("resume_label", "")
+	jdURL := req.GetString("jd_url", "")
+	jdText := req.GetString("jd_text", "")
+	resumeDir := req.GetString("resume_dir", ".")
+	accomplishmentsPath := req.GetString("accomplishments_path", "")
+
+	if resumeLabel == "" {
+		return mcp.NewToolResultText(`{"error":"resume_label is required"}`), nil
+	}
+	if jdURL == "" && jdText == "" {
+		return mcp.NewToolResultText(`{"error":"exactly one of jd_url or jd_text must be provided"}`), nil
+	}
+	if jdURL != "" && jdText != "" {
+		return mcp.NewToolResultText(`{"error":"jd_url and jd_text are mutually exclusive"}`), nil
+	}
+
+	var buf bytes.Buffer
+	pres := headless.New(&buf)
+	p := build(resumeDir, pres)
+
+	if err := p.Run(ctx, pipeline.TailorRequest{
+		ResumeLabel:         resumeLabel,
+		URL:                 jdURL,
+		Text:                jdText,
+		AccomplishmentsPath: accomplishmentsPath,
+		Cfg:                 cfg,
+	}); err != nil {
+		return mcp.NewToolResultText(fmt.Sprintf(`{"error":%q}`, err.Error())), nil
+	}
+	return mcp.NewToolResultText(buf.String()), nil
+}
+
 // handleGetConfig handles the get_config MCP tool.
 // If key is empty, returns the full redacted config. Otherwise returns the field value.
 func handleGetConfig(req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -412,23 +477,16 @@ func handleGetScore(ctx context.Context, req mcp.CallToolRequest, build pipeline
 		return mcp.NewToolResultText(`{"error":"jd_url and jd_text are mutually exclusive"}`), nil
 	}
 
-	p, pres := build(resumeDir)
+	var buf bytes.Buffer
+	pres := headless.New(&buf)
+	p := build(resumeDir, pres)
 
-	if runErr := p.Run(ctx, pipeline.RunInput{
+	if err := p.Run(ctx, pipeline.RunInput{
 		URL:     jdURL,
 		Text:    jdText,
 		Channel: model.ChannelCold,
-	}); runErr != nil && pres.Err() == nil {
-		return mcp.NewToolResultText(fmt.Sprintf(`{"error":%q}`, runErr.Error())), nil
-	}
-
-	if presErr := pres.Err(); presErr != nil {
-		return mcp.NewToolResultText(fmt.Sprintf(`{"error":%q}`, presErr.Error())), nil
-	}
-
-	data, err := json.Marshal(pres.Result())
-	if err != nil {
+	}); err != nil {
 		return mcp.NewToolResultText(fmt.Sprintf(`{"error":%q}`, err.Error())), nil
 	}
-	return mcp.NewToolResultText(string(data)), nil
+	return mcp.NewToolResultText(buf.String()), nil
 }
