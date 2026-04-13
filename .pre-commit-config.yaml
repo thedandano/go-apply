@@ -11,7 +11,7 @@ repos:
 
       - id: go-imports
         name: goimports
-        entry: goimports -w
+        entry: bash -c 'export PATH="$PATH:$(go env GOPATH)/bin" && goimports -w "$@"' --
         language: system
         types: [go]
         stages: [pre-commit]
@@ -26,21 +26,21 @@ repos:
       # --- pre-push: slower (mirrors CI) ---
       - id: golangci-lint
         name: golangci-lint
-        entry: golangci-lint run
+        entry: bash -c 'export PATH="$PATH:$(go env GOPATH)/bin" && golangci-lint run' --
         language: system
         pass_filenames: false
         stages: [pre-push]
 
       - id: govulncheck
         name: govulncheck
-        entry: govulncheck ./...
+        entry: bash -c 'export PATH="$PATH:$(go env GOPATH)/bin" && govulncheck ./...' --
         language: system
         pass_filenames: false
         stages: [pre-push]
 
       - id: gosec
         name: gosec security scan
-        entry: gosec ./...
+        entry: bash -c 'export PATH="$PATH:$(go env GOPATH)/bin" && gosec -exclude-dir .worktrees ./...' --
         language: system
         pass_filenames: false
         stages: [pre-push]
@@ -48,6 +48,11 @@ repos:
       # --- commit-msg ---
       - id: conventional-commit
         name: conventional commit message
-        entry: bash -c 'head -1 "$1" | grep -qE "^(feat|fix|chore|test|docs|refactor|ci|perf|style|build)(\(.+\))?: .{1,100}$" || (echo "commit msg must follow conventional commits: type(scope): description" && exit 1)' --
+        entry: >-
+          bash -c
+          'head -1 "$1" | grep -qE
+          "^(feat|fix|chore|test|docs|refactor|ci|perf|style|build)(\(.+\))?: .{1,100}$"
+          || (echo "commit msg must follow conventional commits: type(scope): description" && exit 1)'
+          --
         language: system
         stages: [commit-msg]
