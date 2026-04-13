@@ -94,7 +94,7 @@ func (s *Service) retrieveByVector(ctx context.Context, keywords []string) ([]re
 	if err != nil {
 		return nil, fmt.Errorf("embed keywords: %w", err)
 	}
-	if !stored {
+	if !stored && s.cache != nil {
 		cacheKey := strings.Join(keywords, " ")
 		if setErr := s.cache.SetVector(ctx, cacheKey, vector); setErr != nil {
 			s.log.WarnContext(ctx, "augment: cache write failed — continuing", "error", setErr)
