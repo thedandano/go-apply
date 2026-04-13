@@ -107,12 +107,12 @@ func (s *Service) retrieveByVector(ctx context.Context, keywords []string) ([]re
 	}
 
 	threshold := s.defaults.VectorSearch.SimilarityThreshold
-	max := s.defaults.Augment.MaxChunksToIncorporate
+	maxChunks := s.defaults.Augment.MaxChunksToIncorporate
 	var chunks []retrievedChunk
 	for _, c := range candidates {
 		if c.Weight >= threshold {
 			chunks = append(chunks, retrievedChunk{Source: c.SourceDoc, Text: c.Term})
-			if len(chunks) >= max {
+			if len(chunks) >= maxChunks {
 				break
 			}
 		}
@@ -131,7 +131,7 @@ func (s *Service) retrieveByKeyword(ctx context.Context, keywords []string) ([]r
 	}
 
 	minCount := s.defaults.Augment.KeywordMatchMinCount
-	max := s.defaults.Augment.MaxChunksToIncorporate
+	maxChunks := s.defaults.Augment.MaxChunksToIncorporate
 	var chunks []retrievedChunk
 	for _, doc := range docs {
 		lower := strings.ToLower(doc.Text)
@@ -143,7 +143,7 @@ func (s *Service) retrieveByKeyword(ctx context.Context, keywords []string) ([]r
 		}
 		if hits >= minCount {
 			chunks = append(chunks, retrievedChunk{Source: doc.Source, Text: doc.Text})
-			if len(chunks) >= max {
+			if len(chunks) >= maxChunks {
 				break
 			}
 		}
