@@ -6,8 +6,8 @@ AI-powered job application CLI. Scores your resume against job postings, tailors
 
 | Mode | Command | Use case |
 |------|---------|----------|
-| Interactive TUI | `go-apply apply --url <url>` | Human at terminal |
-| Headless / Agent | `go-apply apply --headless --url <url>` | Scripts, openclaw, hermes |
+| Interactive TUI | `go-apply run --url <url>` | Human at terminal |
+| Headless / Agent | `go-apply run --headless --url <url>` | Scripts, openclaw, hermes |
 | MCP Server | `go-apply serve` | Claude Code integration |
 
 ## Installation
@@ -65,19 +65,19 @@ cat ~/.local/state/go-apply/logs/go-apply-*.log | jq 'select(.level=="ERROR")'
 
 ## Commands
 
-### `go-apply apply`
+### `go-apply run`
 
 Run the full pipeline against a job description. Fetches (or accepts) the JD, scores all resumes in `~/.local/share/go-apply/inputs/`, augments resume text with profile context, and generates a cover letter.
 
 ```bash
 # From a URL (fetches and caches the JD)
-go-apply apply --url https://example.com/jobs/123
+go-apply run --url https://example.com/jobs/123
 
 # From raw text (useful in scripts or when the page is paywalled)
-go-apply apply --text "We are hiring a senior Go engineer..."
+go-apply run --text "We are hiring a senior Go engineer..."
 
 # Specify application channel
-go-apply apply --url <url> --channel REFERRAL   # COLD (default), REFERRAL, RECRUITER
+go-apply run --url <url> --channel REFERRAL   # COLD (default), REFERRAL, RECRUITER
 ```
 
 **Output** (stdout, JSON):

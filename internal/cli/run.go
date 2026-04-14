@@ -21,7 +21,7 @@ import (
 	"github.com/thedandano/go-apply/internal/service/scorer"
 )
 
-// NewApplyCommand returns the cobra command for "go-apply apply".
+// NewApplyCommand returns the cobra command for "go-apply run".
 // It supports two mutually exclusive input modes:
 //   - --url <url>  : fetch a job description from a URL
 //   - --text <jd>  : provide raw JD text inline
@@ -36,7 +36,7 @@ func NewApplyCommand() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "apply",
+		Use:   "run",
 		Short: "Run the full apply pipeline for a job description",
 		Long: `Fetch or accept a job description, score your resumes, and generate a cover letter.
 Outputs a JSON result to stdout when --headless is set.`,
