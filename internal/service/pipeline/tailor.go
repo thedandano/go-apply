@@ -186,13 +186,14 @@ func (p *TailorPipeline) Run(ctx context.Context, req TailorRequest) error {
 	var accomplishmentsText string
 	if req.AccomplishmentsPath != "" {
 		p.presenter.OnEvent(model.StepStartedEvent{StepID: "accomplishments", Label: "Loading accomplishments"})
+		accomStart := time.Now()
 		accText, accErr := p.loader.Load(req.AccomplishmentsPath)
 		if accErr != nil {
 			slog.WarnContext(ctx, "accomplishments load failed — tier-2 will be skipped", "path", req.AccomplishmentsPath, "error", accErr)
 			p.presenter.OnEvent(model.StepFailedEvent{StepID: "accomplishments", Label: "Accomplishments load degraded", Err: accErr.Error()})
 		} else {
 			accomplishmentsText = accText
-			p.presenter.OnEvent(model.StepCompletedEvent{StepID: "accomplishments", Label: "Accomplishments loaded", ElapsedMS: 0})
+			p.presenter.OnEvent(model.StepCompletedEvent{StepID: "accomplishments", Label: "Accomplishments loaded", ElapsedMS: time.Since(accomStart).Milliseconds()})
 		}
 	}
 

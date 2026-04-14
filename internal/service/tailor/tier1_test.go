@@ -114,3 +114,23 @@ python, GOLANG
 		t.Errorf("expected no keywords added (all already present case-insensitively), got %v", added)
 	}
 }
+
+func TestAddKeywords_TechnicalSkillsHeader(t *testing.T) {
+	resume := `# Experience
+- Built distributed systems
+
+## Technical Skills
+Python, Docker
+`
+	modified, added := AddKeywordsToSkillsSection(resume, []string{"Golang", "Kubernetes"})
+
+	if len(added) != 2 {
+		t.Errorf("expected 2 keywords added under '## Technical Skills', got %v", added)
+	}
+	if !strings.Contains(modified, "Golang") {
+		t.Error("modified resume does not contain injected keyword Golang")
+	}
+	if !strings.Contains(modified, "Kubernetes") {
+		t.Error("modified resume does not contain injected keyword Kubernetes")
+	}
+}

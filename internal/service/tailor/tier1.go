@@ -7,8 +7,8 @@ import (
 )
 
 // skillsHeaderRe matches common Skills section headers:
-// "## Skills", "Skills:", "SKILLS", "# Technical Skills", etc.
-var skillsHeaderRe = regexp.MustCompile(`(?im)^(#{0,3}\s*)(skills[:\s]*)$`)
+// "## Skills", "Skills:", "SKILLS", "## Technical Skills", "Core Skills:", etc.
+var skillsHeaderRe = regexp.MustCompile(`(?im)^(#{0,3}\s*)((technical|core|key|professional|additional)?\s*skills[:\s]*)$`)
 
 // AddKeywordsToSkillsSection injects missing keywords into the Skills section of resumeText.
 // Deduplication is case-insensitive — keywords already present anywhere in the Skills section

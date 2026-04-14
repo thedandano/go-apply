@@ -14,11 +14,18 @@ import (
 // bulletMarkers lists the recognized bullet markers at the start of a trimmed line.
 var bulletMarkers = []string{"•", "-", "*"}
 
+// indexedBullet pairs a bullet line with its index in the full resume's line slice.
+type indexedBullet struct {
+	Line  string
+	Index int
+}
+
 // experienceHeaderRe-like pattern handled inline for clarity.
 
-// extractExperienceBullets returns all bullet lines from the Experience section.
+// extractExperienceBullets returns all bullet lines from the Experience section,
+// each paired with its index in the full resume line slice.
 // Bullet markers recognized: '•', '-', '*' at the start of the trimmed line.
-func extractExperienceBullets(resumeText string) []string {
+func extractExperienceBullets(resumeText string) []indexedBullet {
 	lines := strings.Split(resumeText, "\n")
 
 	experienceStart := -1
@@ -44,11 +51,11 @@ func extractExperienceBullets(resumeText string) []string {
 		}
 	}
 
-	var bullets []string
-	for _, line := range lines[experienceStart+1 : experienceEnd] {
+	var bullets []indexedBullet
+	for i, line := range lines[experienceStart+1 : experienceEnd] {
 		trimmed := strings.TrimSpace(line)
 		if isBulletLine(trimmed) {
-			bullets = append(bullets, line)
+			bullets = append(bullets, indexedBullet{Line: line, Index: experienceStart + 1 + i})
 		}
 	}
 	return bullets
@@ -66,9 +73,14 @@ func isExperienceHeader(trimmed string) bool {
 }
 
 // isBulletLine returns true when the trimmed line starts with a recognized bullet marker.
+// For "*", a trailing space is required to avoid matching Markdown bold ("**text**").
 func isBulletLine(trimmed string) bool {
 	for _, m := range bulletMarkers {
-		if strings.HasPrefix(trimmed, m) {
+		if m == "*" {
+			if strings.HasPrefix(trimmed, "* ") {
+				return true
+			}
+		} else if strings.HasPrefix(trimmed, m) {
 			return true
 		}
 	}
@@ -76,9 +88,14 @@ func isBulletLine(trimmed string) bool {
 }
 
 // bulletMarkerOf returns the leading bullet marker of a trimmed line, or "".
+// For "*", a trailing space is required to avoid matching Markdown bold ("**text**").
 func bulletMarkerOf(trimmed string) string {
 	for _, m := range bulletMarkers {
-		if strings.HasPrefix(trimmed, m) {
+		if m == "*" {
+			if strings.HasPrefix(trimmed, "* ") {
+				return m
+			}
+		} else if strings.HasPrefix(trimmed, m) {
 			return m
 		}
 	}
@@ -128,15 +145,16 @@ func rewriteBullets(input *BulletRewriteInput) (string, []model.BulletChange, er
 	if maxRewrites <= 0 {
 		maxRewrites = input.Defaults.Tailor.MaxTier2BulletRewrites
 	}
-	modified := input.ResumeText
+	lines := strings.Split(input.ResumeText, "\n")
 	changes := make([]model.BulletChange, 0, maxRewrites)
 	rewroteCount := 0
 
-	for _, originalLine := range bullets {
+	for _, b := range bullets {
 		if maxRewrites > 0 && rewroteCount >= maxRewrites {
 			break
 		}
 
+		originalLine := b.Line
 		trimmed := strings.TrimSpace(originalLine)
 		if !bulletContainsAnyKeyword(trimmed, input.JDKeywords) {
 			continue
@@ -189,9 +207,10 @@ func rewriteBullets(input *BulletRewriteInput) (string, []model.BulletChange, er
 			Original:  trimmed,
 			Rewritten: strings.TrimSpace(rewrittenLine),
 		})
-		modified = strings.Replace(modified, originalLine, rewrittenLine, 1)
+		// Replace at the known line index — avoids substring collision bugs.
+		lines[b.Index] = rewrittenLine
 		rewroteCount++
 	}
 
-	return modified, changes, nil
+	return strings.Join(lines, "\n"), changes, nil
 }

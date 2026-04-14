@@ -36,14 +36,19 @@ Python, Golang
 		t.Fatalf("expected 3 bullets, got %d: %v", len(bullets), bullets)
 	}
 	// Verify first bullet is preserved with its original marker.
-	if !strings.HasPrefix(strings.TrimSpace(bullets[0]), "-") {
-		t.Errorf("expected first bullet to start with '-', got %q", bullets[0])
+	if !strings.HasPrefix(strings.TrimSpace(bullets[0].Line), "-") {
+		t.Errorf("expected first bullet to start with '-', got %q", bullets[0].Line)
 	}
-	if !strings.HasPrefix(strings.TrimSpace(bullets[1]), "•") {
-		t.Errorf("expected second bullet to start with '•', got %q", bullets[1])
+	if !strings.HasPrefix(strings.TrimSpace(bullets[1].Line), "•") {
+		t.Errorf("expected second bullet to start with '•', got %q", bullets[1].Line)
 	}
-	if !strings.HasPrefix(strings.TrimSpace(bullets[2]), "*") {
-		t.Errorf("expected third bullet to start with '*', got %q", bullets[2])
+	if !strings.HasPrefix(strings.TrimSpace(bullets[2].Line), "*") {
+		t.Errorf("expected third bullet to start with '*', got %q", bullets[2].Line)
+	}
+	// Verify that indices are strictly increasing and in range.
+	if bullets[0].Index >= bullets[1].Index || bullets[1].Index >= bullets[2].Index {
+		t.Errorf("expected strictly increasing indices, got %d, %d, %d",
+			bullets[0].Index, bullets[1].Index, bullets[2].Index)
 	}
 }
 
