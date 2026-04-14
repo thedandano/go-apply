@@ -41,7 +41,7 @@ func cacheKey(url string) string {
 // Returns found=false (no error) if the entry does not exist.
 func (r *JDCacheRepository) Get(url string) (rawText string, jd model.JDData, found bool) {
 	path := filepath.Join(r.cacheDir, cacheKey(url)+".json")
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- path is cacheDir + md5 hex, no traversal possible
 	if err != nil {
 		return "", model.JDData{}, false
 	}
@@ -54,7 +54,7 @@ func (r *JDCacheRepository) Get(url string) (rawText string, jd model.JDData, fo
 
 // Put writes a new JD cache entry to disk, creating the cache directory if needed.
 func (r *JDCacheRepository) Put(url string, rawText string, jd model.JDData) error { //nolint:gocritic // interface requires value type
-	if err := os.MkdirAll(r.cacheDir, 0755); err != nil {
+	if err := os.MkdirAll(r.cacheDir, 0750); err != nil { // #nosec G301
 		return fmt.Errorf("jd cache: mkdir %s: %w", r.cacheDir, err)
 	}
 	entry := cacheEntry{URL: url, RawText: rawText, JD: jd}
@@ -69,7 +69,7 @@ func (r *JDCacheRepository) Put(url string, rawText string, jd model.JDData) err
 // Returns os.ErrNotExist if no entry exists for the given url.
 func (r *JDCacheRepository) Update(url string, jd model.JDData) error { //nolint:gocritic // interface requires value type
 	path := filepath.Join(r.cacheDir, cacheKey(url)+".json")
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- path is cacheDir + md5 hex, no traversal possible
 	if err != nil {
 		return fmt.Errorf("jd cache update %s: %w", url, err)
 	}
