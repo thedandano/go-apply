@@ -1,6 +1,6 @@
 module github.com/thedandano/go-apply
 
-go 1.25.0
+go 1.26
 
 require (
 	github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728
