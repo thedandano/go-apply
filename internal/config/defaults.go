@@ -24,6 +24,8 @@ type ScoringDefaults struct {
 	OverqualificationThresholdMult float64            `json:"overqualification_threshold_multiplier"`
 	OverqualificationPenalty       float64            `json:"overqualification_penalty"`
 	ImpactBulletTarget             int                `json:"impact_bullet_target"`
+	FillerPhrases                  []string           `json:"filler_phrases"`
+	ReadabilityPenaltyPerFiller    float64            `json:"readability_penalty_per_filler"`
 }
 
 type ThresholdDefaults struct {
@@ -103,40 +105,13 @@ func LoadDefaults() (*AppDefaults, error) {
 	return &d, nil
 }
 
-// EmbeddedDefaults returns hardcoded defaults — exported so TestDefaultsMatchJSON can compare.
-// Values must match config/defaults.json exactly.
+// EmbeddedDefaults loads defaults from the embedded defaults.json.
+// defaults.json is the single source of truth — no values are duplicated here.
+// Panics if the embedded JSON is malformed (compile-time guarantees this cannot happen).
 func EmbeddedDefaults() *AppDefaults {
-	return &AppDefaults{
-		Scoring: ScoringDefaults{
-			Weights:                        ScoringWeights{KeywordMatch: 45, ExperienceFit: 25, ImpactEvidence: 10, ATSFormat: 10, Readability: 10},
-			KeywordRequiredWeight:          0.7,
-			KeywordPreferredWeight:         0.3,
-			ExperienceSeniorityWeight:      0.6,
-			ExperienceYearsWeight:          0.4,
-			SeniorityMultipliers:           map[string]float64{"exact": 1.0, "one_off": 0.8, "two_or_more_off": 0.5},
-			OverqualificationThresholdMult: 2.0,
-			OverqualificationPenalty:       0.85,
-			ImpactBulletTarget:             5,
-		},
-		Thresholds:   ThresholdDefaults{ScorePass: 70.0, ScoreBoostMin: 40.0, MaxBoostIterations: 3},
-		CoverLetter:  CoverLetterDefaults{MaxWords: 90, SentenceCount: 3, TargetWords: 75},
-		Tailor:       TailorDefaults{MaxTier2BulletRewrites: 4, MinBlendDelta: 5.0, KeywordRelevanceRequiredWeight: 0.7, KeywordRelevancePreferredWeight: 0.3, BulletRelevanceKeywordWeight: 0.6, BulletRelevanceMetricWeight: 0.4},
-		Fetcher:      FetcherDefaults{ChromedpTimeoutMS: 60000, MinJDTextLengthChars: 100},
-		VectorSearch: VectorSearchDefaults{SimilarityThreshold: 0.6, TopK: 10, DefaultEmbeddingDim: 1536},
-		LLM: LLMDefaults{
-			TimeoutMS:                  60000,
-			KeywordExtractionTemp:      0.1,
-			KeywordExtractionMaxTokens: 500,
-			CoverLetterTemp:            0.3,
-			CoverLetterMaxTokens:       200,
-			BulletRewriteTemp:          0.2,
-			BulletRewriteMaxTokens:     800,
-		},
-		Augment: AugmentDefaults{
-			IncorporationTemp:      0.2,
-			IncorporationMaxTokens: 2000,
-			KeywordMatchMinCount:   1,
-			MaxChunksToIncorporate: 5,
-		},
+	d, err := LoadDefaults()
+	if err != nil {
+		panic("config: embedded defaults.json is malformed: " + err.Error())
 	}
+	return d
 }
