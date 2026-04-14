@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/thedandano/go-apply/internal/config"
@@ -69,6 +71,19 @@ func (s *stubJDFetcher) Fetch(_ context.Context, _ string) (string, error) {
 	return "fake JD text", nil
 }
 
+// stubTailorForApply satisfies port.Tailor with a fixed result for use in ApplyPipeline tests.
+type stubTailorForApply struct{}
+
+var _ port.Tailor = (*stubTailorForApply)(nil)
+
+func (s *stubTailorForApply) TailorResume(_ context.Context, _ *model.TailorInput) (model.TailorResult, error) {
+	return model.TailorResult{
+		TierApplied:   model.TierKeyword,
+		AddedKeywords: []string{"golang"},
+		TailoredText:  "tailored resume text",
+	}, nil
+}
+
 func TestApplyPipeline_HeadlessE2E(t *testing.T) {
 	llmSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
@@ -107,6 +122,7 @@ func TestApplyPipeline_HeadlessE2E(t *testing.T) {
 		Augment:   &stubAugmentService{},
 		Presenter: pres,
 		Defaults:  defaults,
+		Tailor:    nil,
 	})
 
 	err = pl.Run(context.Background(), pipeline.ApplyRequest{
@@ -129,5 +145,83 @@ func TestApplyPipeline_HeadlessE2E(t *testing.T) {
 	}
 	if result.BestScore == 0 {
 		t.Error("best_score is 0 — scoring did not run")
+	}
+}
+
+func TestApplyPipeline_TailorStep(t *testing.T) {
+	llmSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
+			"choices": []map[string]any{
+				{"message": map[string]any{
+					"content": `{"title":"SWE","company":"Acme","required":["python","golang","kubernetes"],"preferred":["docker"],"location":"Remote","seniority":"senior","required_years":3}`,
+				}},
+			},
+		})
+	}))
+	defer llmSrv.Close()
+
+	// Write a temporary accomplishments file.
+	tmpDir := t.TempDir()
+	accomPath := filepath.Join(tmpDir, "accomplishments.txt")
+	if err := os.WriteFile(accomPath, []byte("Led migration of monolith to microservices."), 0o600); err != nil {
+		t.Fatalf("write accomplishments file: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	pres := headless.NewWith(&stdout, &stderr)
+
+	cfg := &config.Config{
+		Orchestrator:      config.LLMProviderConfig{BaseURL: llmSrv.URL, Model: "test", APIKey: "test"},
+		YearsOfExperience: 5,
+		DefaultSeniority:  "senior",
+	}
+
+	defaults, err := config.LoadDefaults()
+	if err != nil {
+		t.Fatalf("LoadDefaults: %v", err)
+	}
+	llmClient := llm.New(llmSrv.URL, "test", "test", defaults, nil)
+
+	pl := pipeline.NewApplyPipeline(&pipeline.ApplyConfig{
+		Fetcher:   &stubJDFetcher{},
+		LLM:       llmClient,
+		Scorer:    scorer.New(defaults),
+		CLGen:     &stubCoverLetter{},
+		Resumes:   &stubResumeRepo{},
+		Loader:    &stubDocumentLoader{},
+		AppRepo:   &stubAppRepo{},
+		Augment:   &stubAugmentService{},
+		Presenter: pres,
+		Defaults:  defaults,
+		Tailor:    &stubTailorForApply{},
+	})
+
+	err = pl.Run(context.Background(), pipeline.ApplyRequest{
+		URLOrText:           `We are hiring a senior Go engineer. Required: python, golang, kubernetes. Preferred: docker.`,
+		IsText:              true,
+		Channel:             model.ChannelCold,
+		Config:              cfg,
+		AccomplishmentsPath: accomPath,
+	})
+	if err != nil {
+		t.Fatalf("pipeline error: %v", err)
+	}
+
+	var result model.PipelineResult
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatalf("output is not valid JSON: %v\nOutput: %s", err, stdout.String())
+	}
+	if result.Cascade == nil {
+		t.Fatal("result.Cascade is nil — tailor step did not run")
+	}
+	found := false
+	for _, kw := range result.Cascade.AddedKeywords {
+		if kw == "golang" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("result.Cascade.AddedKeywords = %v, want to contain %q", result.Cascade.AddedKeywords, "golang")
 	}
 }

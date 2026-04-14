@@ -19,6 +19,7 @@ import (
 	"github.com/thedandano/go-apply/internal/service/llm"
 	"github.com/thedandano/go-apply/internal/service/pipeline"
 	"github.com/thedandano/go-apply/internal/service/scorer"
+	"github.com/thedandano/go-apply/internal/service/tailor"
 )
 
 // NewApplyCommand returns the cobra command for "go-apply run".
@@ -29,10 +30,11 @@ import (
 // The --headless flag (default true for now) emits JSON to stdout.
 func NewApplyCommand() *cobra.Command {
 	var (
-		urlFlag      string
-		textFlag     string
-		headlessFlag bool
-		channelFlag  string
+		urlFlag             string
+		textFlag            string
+		headlessFlag        bool
+		channelFlag         string
+		accomplishmentsFlag string
 	)
 
 	cmd := &cobra.Command{
@@ -86,6 +88,7 @@ Outputs a JSON result to stdout when --headless is set.`,
 			scorerSvc := scorer.New(defaults)
 			clGen := coverletter.New(llmClient, defaults, log)
 			fetcherSvc := fetcher.NewFallback(defaults, log)
+			tailorSvc := tailor.New(llmClient, defaults, log)
 
 			// Wire presenter — always headless for now.
 			// TODO(Epic 6): swap in TUIPresenter when isatty detects a terminal and --headless is not set
@@ -103,6 +106,7 @@ Outputs a JSON result to stdout when --headless is set.`,
 				Augment:   augmentSvc,
 				Presenter: pres,
 				Defaults:  defaults,
+				Tailor:    tailorSvc,
 			})
 
 			isText := textFlag != ""
@@ -112,10 +116,11 @@ Outputs a JSON result to stdout when --headless is set.`,
 			}
 
 			return pl.Run(cmd.Context(), pipeline.ApplyRequest{
-				URLOrText: input,
-				IsText:    isText,
-				Channel:   channel,
-				Config:    cfg,
+				URLOrText:           input,
+				IsText:              isText,
+				Channel:             channel,
+				Config:              cfg,
+				AccomplishmentsPath: accomplishmentsFlag,
 			})
 		},
 	}
@@ -124,6 +129,7 @@ Outputs a JSON result to stdout when --headless is set.`,
 	cmd.Flags().StringVar(&textFlag, "text", "", "Raw job description text (alternative to --url)")
 	cmd.Flags().BoolVar(&headlessFlag, "headless", true, "Output JSON to stdout (default; TUI available in future)")
 	cmd.Flags().StringVar(&channelFlag, "channel", "COLD", "Application channel: COLD, REFERRAL, or RECRUITER")
+	cmd.Flags().StringVar(&accomplishmentsFlag, "accomplishments", "", "Path to accomplishments doc for tier-2 bullet rewriting (optional)")
 
 	return cmd
 }

@@ -23,6 +23,9 @@ type ApplyRequest struct {
 	Channel model.ChannelType
 	// Config is the active application configuration.
 	Config *config.Config
+	// AccomplishmentsPath is an optional path to an accomplishments doc for tier-2
+	// bullet rewriting. When empty, the tailor step is skipped.
+	AccomplishmentsPath string
 }
 
 // ApplyPipeline orchestrates the full headless apply pipeline.
@@ -38,6 +41,7 @@ type ApplyPipeline struct {
 	augment   port.Augmenter
 	presenter port.Presenter
 	defaults  *config.AppDefaults
+	tailor    port.Tailor
 }
 
 // ApplyConfig holds all dependencies for an ApplyPipeline.
@@ -52,6 +56,7 @@ type ApplyConfig struct {
 	Augment   port.Augmenter
 	Presenter port.Presenter
 	Defaults  *config.AppDefaults
+	Tailor    port.Tailor
 }
 
 // NewApplyPipeline constructs an ApplyPipeline with all dependencies injected via ApplyConfig.
@@ -67,6 +72,7 @@ func NewApplyPipeline(cfg *ApplyConfig) *ApplyPipeline {
 		augment:   cfg.Augment,
 		presenter: cfg.Presenter,
 		defaults:  cfg.Defaults,
+		tailor:    cfg.Tailor,
 	}
 }
 
@@ -135,7 +141,33 @@ func (p *ApplyPipeline) Run(ctx context.Context, req ApplyRequest) error {
 	result.BestResume = bestLabel
 	result.BestScore = bestScore
 
-	// Step 4: Generate cover letter — only when the best resume score meets the threshold.
+	// Step 4 (optional): Tailor the best-matching resume when --accomplishments is set.
+	if req.AccomplishmentsPath != "" && result.BestResume != "" && p.tailor != nil {
+		tailorStart := time.Now()
+		p.presenter.OnEvent(model.StepStartedEvent{StepID: "tailor", Label: "Tailoring resume"})
+		tailorResult, tailorErr := p.runTailorStep(ctx, result, jd, req)
+		if tailorErr != nil {
+			slog.WarnContext(ctx, "tailor step failed — continuing", "error", tailorErr)
+			p.presenter.OnEvent(model.StepFailedEvent{StepID: "tailor", Label: "Tailor failed", Err: tailorErr.Error()})
+			result.Warnings = append(result.Warnings, model.RiskWarning{
+				Severity: "warn",
+				Message:  fmt.Sprintf("tailor step failed: %v", tailorErr),
+			})
+		} else {
+			p.presenter.OnEvent(model.StepCompletedEvent{
+				StepID:    "tailor",
+				Label:     "Resume tailored",
+				ElapsedMS: time.Since(tailorStart).Milliseconds(),
+			})
+			result.Cascade = tailorResult
+			// Update best score if tailored version scores higher.
+			if tailored := tailorResult.NewScore.Breakdown.Total(); tailored > result.BestScore {
+				result.BestScore = tailored
+			}
+		}
+	}
+
+	// Step 5: Generate cover letter — only when the best resume score meets the threshold.
 	if result.BestScore >= p.defaults.Thresholds.ScorePass {
 		clStart := time.Now()
 		p.presenter.OnEvent(model.StepStartedEvent{StepID: "05", Label: "Cover Letter"})
@@ -420,4 +452,75 @@ func profileFromConfig(cfg *config.Config) model.UserProfile {
 		YearsOfExperience: cfg.YearsOfExperience,
 		Seniority:         cfg.DefaultSeniority,
 	}
+}
+
+// runTailorStep loads the accomplishments file, finds and loads the best resume,
+// calls the tailor service, and re-scores the tailored text. It is invoked only
+// when AccomplishmentsPath is set and a tailor service is wired.
+func (p *ApplyPipeline) runTailorStep(
+	ctx context.Context,
+	result *model.PipelineResult,
+	jd model.JDData,
+	req ApplyRequest,
+) (*model.TailorResult, error) {
+	// Load accomplishments file.
+	accomplishments, err := p.loader.Load(req.AccomplishmentsPath)
+	if err != nil {
+		return nil, fmt.Errorf("load accomplishments: %w", err)
+	}
+
+	// Find and load the best resume.
+	resumeFiles, err := p.resumes.ListResumes()
+	if err != nil {
+		return nil, fmt.Errorf("list resumes for tailor: %w", err)
+	}
+	var bestFile model.ResumeFile
+	for _, r := range resumeFiles {
+		if r.Label == result.BestResume {
+			bestFile = r
+			break
+		}
+	}
+	if bestFile.Path == "" {
+		return nil, fmt.Errorf("best resume %q not found in repository", result.BestResume)
+	}
+
+	resumeText, err := p.loader.Load(bestFile.Path)
+	if err != nil {
+		return nil, fmt.Errorf("load best resume for tailor: %w", err)
+	}
+
+	scoreBefore := result.Scores[result.BestResume]
+
+	tailorResult, err := p.tailor.TailorResume(ctx, &model.TailorInput{
+		Resume:              bestFile,
+		ResumeText:          resumeText,
+		JD:                  jd,
+		ScoreBefore:         scoreBefore,
+		AccomplishmentsText: accomplishments,
+		Options: model.TailorOptions{
+			MaxTier2BulletRewrites: p.defaults.Tailor.MaxTier2BulletRewrites,
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("tailor resume: %w", err)
+	}
+
+	// Re-score using tailored text for accurate delta.
+	seniorityMatch := resolveSeniorityMatch(req.Config.DefaultSeniority, &jd)
+	scoreAfter, err := p.scorer.Score(&model.ScorerInput{
+		ResumeText:     tailorResult.TailoredText,
+		ResumeLabel:    bestFile.Label,
+		ResumePath:     bestFile.Path,
+		JD:             jd,
+		CandidateYears: req.Config.YearsOfExperience,
+		RequiredYears:  jd.RequiredYears,
+		SeniorityMatch: seniorityMatch,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("score tailored resume: %w", err)
+	}
+
+	tailorResult.NewScore = scoreAfter
+	return &tailorResult, nil
 }
