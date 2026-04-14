@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/thedandano/go-apply/internal/config"
 	"github.com/thedandano/go-apply/internal/model"
 	"github.com/thedandano/go-apply/internal/repository/fs"
 )
@@ -14,7 +15,7 @@ import (
 
 func TestResumeRepository_ListResumes_Empty(t *testing.T) {
 	dir := t.TempDir()
-	os.MkdirAll(filepath.Join(dir, "inputs"), 0755) //nolint:errcheck
+	os.MkdirAll(filepath.Join(dir, "inputs"), config.DirPerm) //nolint:errcheck
 
 	repo := fs.NewResumeRepository(dir)
 	resumes, err := repo.ListResumes()
@@ -29,7 +30,7 @@ func TestResumeRepository_ListResumes_Empty(t *testing.T) {
 func TestResumeRepository_ListResumes_FiltersExtensions(t *testing.T) {
 	dir := t.TempDir()
 	inputsDir := filepath.Join(dir, "inputs")
-	os.MkdirAll(inputsDir, 0755) //nolint:errcheck
+	os.MkdirAll(inputsDir, config.DirPerm) //nolint:errcheck
 
 	// Write files of various extensions; only .docx and .pdf should be listed.
 	for _, name := range []string{"resume.docx", "resume.pdf", "readme.txt", "ignore.xlsx"} {
