@@ -11,11 +11,15 @@ const (
 )
 
 type JDData struct {
-	Title         string         `json:"title"`
-	Company       string         `json:"company"`
-	Required      []string       `json:"required"`
-	Preferred     []string       `json:"preferred"`
-	Location      string         `json:"location"`
-	Seniority     SeniorityLevel `json:"seniority"`
-	RequiredYears float64        `json:"required_years"`
+	Title               string         `json:"title"`
+	Company             string         `json:"company"`
+	Required            []string       `json:"required"`
+	Preferred           []string       `json:"preferred"`
+	Location            string         `json:"location"`
+	Seniority           SeniorityLevel `json:"seniority"`
+	RequiredYears       float64        `json:"required_years"`
+	Team                string         `json:"team,omitempty"`
+	KeyResponsibilities []string       `json:"key_responsibilities,omitempty"`
+	PayRangeMin         float64        `json:"pay_range_min,omitempty"`
+	PayRangeMax         float64        `json:"pay_range_max,omitempty"`
 }

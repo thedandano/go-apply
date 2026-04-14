@@ -32,9 +32,9 @@ func TestResumeRepository_ListResumes_FiltersExtensions(t *testing.T) {
 	inputsDir := filepath.Join(dir, "inputs")
 	os.MkdirAll(inputsDir, config.DirPerm) //nolint:errcheck
 
-	// Write files of various extensions; only .docx and .pdf should be listed.
+	// Only .docx and .pdf should be listed.
 	for _, name := range []string{"resume.docx", "resume.pdf", "readme.txt", "ignore.xlsx"} {
-		os.WriteFile(filepath.Join(inputsDir, name), []byte("content"), 0644) //nolint:errcheck
+		os.WriteFile(filepath.Join(inputsDir, name), []byte("content"), config.FilePerm) //nolint:errcheck
 	}
 
 	repo := fs.NewResumeRepository(dir)
@@ -63,72 +63,163 @@ func TestResumeRepository_ListResumes_ErrorOnMissingDir(t *testing.T) {
 	}
 }
 
-// --- JDCacheRepository tests ---
+// --- ApplicationRepository tests ---
 
-func TestJDCacheRepository_PutAndGet(t *testing.T) {
+func newRecord(url string) *model.ApplicationRecord {
+	return &model.ApplicationRecord{
+		URL:     url,
+		RawText: "senior golang engineer remote",
+		JD: model.JDData{
+			Title:   "Senior Engineer",
+			Company: "Acme",
+		},
+	}
+}
+
+func TestApplicationRepository_PutAndGet(t *testing.T) {
 	dir := t.TempDir()
-	repo := fs.NewJDCacheRepository(dir)
+	repo := fs.NewApplicationRepository(dir)
 
-	jd := model.JDData{Title: "Senior Gopher", Company: "Acme"}
-	if err := repo.Put("https://example.com/job/1", "raw job text", jd); err != nil {
+	rec := newRecord("https://example.com/job/1")
+	rec.JD.PayRangeMin = 150_000
+	rec.JD.PayRangeMax = 220_000
+
+	if err := repo.Put(rec); err != nil {
 		t.Fatalf("Put: %v", err)
 	}
 
-	rawText, got, found := repo.Get("https://example.com/job/1")
+	got, found, err := repo.Get("https://example.com/job/1")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
 	if !found {
-		t.Fatal("expected entry to be found")
+		t.Fatal("expected record to be found")
 	}
-	if rawText != "raw job text" {
-		t.Errorf("raw text: got %q, want %q", rawText, "raw job text")
+	if got.RawText != rec.RawText {
+		t.Errorf("RawText: got %q, want %q", got.RawText, rec.RawText)
 	}
-	if got.Title != jd.Title || got.Company != jd.Company {
-		t.Errorf("jd mismatch: got %+v, want %+v", got, jd)
+	if got.JD.Title != rec.JD.Title {
+		t.Errorf("JD.Title: got %q, want %q", got.JD.Title, rec.JD.Title)
+	}
+	if got.JD.PayRangeMax != 220_000 {
+		t.Errorf("JD.PayRangeMax: got %v, want 220000", got.JD.PayRangeMax)
 	}
 }
 
-func TestJDCacheRepository_GetMissing(t *testing.T) {
+func TestApplicationRepository_GetMissing(t *testing.T) {
 	dir := t.TempDir()
-	repo := fs.NewJDCacheRepository(dir)
+	repo := fs.NewApplicationRepository(dir)
 
-	_, _, found := repo.Get("https://example.com/nonexistent")
+	got, found, err := repo.Get("https://example.com/nonexistent")
+	if err != nil {
+		t.Fatalf("Get on missing: unexpected error: %v", err)
+	}
 	if found {
-		t.Fatal("expected not found for missing entry")
+		t.Fatal("expected not found")
+	}
+	if got != nil {
+		t.Fatal("expected nil record for missing entry")
 	}
 }
 
-func TestJDCacheRepository_Update(t *testing.T) {
+func TestApplicationRepository_GetCorrupted(t *testing.T) {
 	dir := t.TempDir()
-	repo := fs.NewJDCacheRepository(dir)
+	repo := fs.NewApplicationRepository(dir)
 
-	original := model.JDData{Title: "Engineer", Company: "OldCo"}
-	if err := repo.Put("https://example.com/job/2", "raw text", original); err != nil {
+	// Seed a valid record so we know the filename, then corrupt it.
+	rec := newRecord("https://example.com/job/corrupt")
+	if err := repo.Put(rec); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	// Find the written file and overwrite with garbage.
+	entries, _ := os.ReadDir(filepath.Join(dir, "applications"))
+	if len(entries) == 0 {
+		t.Fatal("expected at least one file in applications dir")
+	}
+	path := filepath.Join(dir, "applications", entries[0].Name())
+	os.WriteFile(path, []byte("not json"), config.FilePerm) //nolint:errcheck
+
+	_, _, err := repo.Get("https://example.com/job/corrupt")
+	if err == nil {
+		t.Fatal("expected error on corrupted record, got nil")
+	}
+}
+
+func TestApplicationRepository_Update(t *testing.T) {
+	dir := t.TempDir()
+	repo := fs.NewApplicationRepository(dir)
+
+	rec := newRecord("https://example.com/job/2")
+	if err := repo.Put(rec); err != nil {
 		t.Fatalf("Put: %v", err)
 	}
 
-	updated := model.JDData{Title: "Senior Engineer", Company: "NewCo"}
-	if err := repo.Update("https://example.com/job/2", updated); err != nil {
+	rec.Outcome = model.OutcomeInterview
+	rec.Applied = "2026-04-13"
+	if err := repo.Update(rec); err != nil {
 		t.Fatalf("Update: %v", err)
 	}
 
-	rawText, got, found := repo.Get("https://example.com/job/2")
-	if !found {
-		t.Fatal("expected entry to be found after update")
+	got, found, err := repo.Get("https://example.com/job/2")
+	if err != nil || !found {
+		t.Fatalf("Get after Update: found=%v err=%v", found, err)
 	}
-	// raw text must be preserved by Update
-	if rawText != "raw text" {
-		t.Errorf("Update must preserve raw_text, got %q", rawText)
+	if got.Outcome != model.OutcomeInterview {
+		t.Errorf("Outcome: got %q, want %q", got.Outcome, model.OutcomeInterview)
 	}
-	if got.Title != updated.Title || got.Company != updated.Company {
-		t.Errorf("jd mismatch after update: got %+v, want %+v", got, updated)
+	if got.Applied != "2026-04-13" {
+		t.Errorf("Applied: got %q, want %q", got.Applied, "2026-04-13")
+	}
+	// RawText must be preserved
+	if got.RawText != rec.RawText {
+		t.Errorf("RawText must survive Update: got %q", got.RawText)
 	}
 }
 
-func TestJDCacheRepository_UpdateMissing(t *testing.T) {
+func TestApplicationRepository_UpdateMissing(t *testing.T) {
 	dir := t.TempDir()
-	repo := fs.NewJDCacheRepository(dir)
+	repo := fs.NewApplicationRepository(dir)
 
-	err := repo.Update("https://example.com/nonexistent", model.JDData{})
+	rec := newRecord("https://example.com/nonexistent")
+	err := repo.Update(rec)
 	if !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("expected os.ErrNotExist for missing entry, got: %v", err)
+		t.Errorf("expected os.ErrNotExist for missing record, got: %v", err)
+	}
+}
+
+func TestApplicationRepository_List(t *testing.T) {
+	dir := t.TempDir()
+	repo := fs.NewApplicationRepository(dir)
+
+	urls := []string{
+		"https://example.com/job/a",
+		"https://example.com/job/b",
+		"https://example.com/job/c",
+	}
+	for _, u := range urls {
+		if err := repo.Put(newRecord(u)); err != nil {
+			t.Fatalf("Put %s: %v", u, err)
+		}
+	}
+
+	records, err := repo.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(records) != 3 {
+		t.Errorf("List: got %d records, want 3", len(records))
+	}
+}
+
+func TestApplicationRepository_ListEmpty(t *testing.T) {
+	dir := t.TempDir()
+	repo := fs.NewApplicationRepository(dir)
+
+	records, err := repo.List()
+	if err != nil {
+		t.Fatalf("List on empty repo: %v", err)
+	}
+	if len(records) != 0 {
+		t.Errorf("expected 0 records, got %d", len(records))
 	}
 }

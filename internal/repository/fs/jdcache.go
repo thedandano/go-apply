@@ -6,81 +6,107 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/thedandano/go-apply/internal/model"
 	"github.com/thedandano/go-apply/internal/port"
 )
 
 // Compile-time interface satisfaction check.
-var _ port.JDCacheRepository = (*JDCacheRepository)(nil)
+var _ port.ApplicationRepository = (*ApplicationRepository)(nil)
 
-// JDCacheRepository stores parsed job description data as JSON files on disk.
-// Each entry is keyed by an MD5 hash of the URL (non-cryptographic, filename-safe).
-type JDCacheRepository struct {
-	cacheDir string
+// ApplicationRepository persists ApplicationRecords as JSON files on disk,
+// keyed by an MD5 hash of the URL (non-cryptographic, filename-safe).
+// Each file lives in dataDir/applications/.
+type ApplicationRepository struct {
+	dir string
 }
 
-// NewJDCacheRepository constructs a JDCacheRepository rooted at dataDir/jd_cache.
-func NewJDCacheRepository(dataDir string) *JDCacheRepository {
-	return &JDCacheRepository{cacheDir: filepath.Join(dataDir, "jd_cache")}
+// NewApplicationRepository constructs an ApplicationRepository rooted at dataDir/applications.
+func NewApplicationRepository(dataDir string) *ApplicationRepository {
+	return &ApplicationRepository{dir: filepath.Join(dataDir, "applications")}
 }
 
-// cacheEntry is the on-disk JSON structure for a single cached JD.
-type cacheEntry struct {
-	URL     string       `json:"url"`
-	RawText string       `json:"raw_text"`
-	JD      model.JDData `json:"jd"`
-}
-
-// cacheKey returns a hex-encoded MD5 hash of url, used as the filename.
-func cacheKey(url string) string {
+// recordKey returns a hex-encoded MD5 hash of url, used as the filename stem.
+func recordKey(url string) string {
 	return fmt.Sprintf("%x", md5.Sum([]byte(url))) // #nosec G401
 }
 
-// Get retrieves a cached JD entry by url.
-// Returns found=false (no error) if the entry does not exist.
-func (r *JDCacheRepository) Get(url string) (rawText string, jd model.JDData, found bool) {
-	path := filepath.Join(r.cacheDir, cacheKey(url)+".json")
-	data, err := os.ReadFile(path) // #nosec G304 -- path is cacheDir + md5 hex, no traversal possible
-	if err != nil {
-		return "", model.JDData{}, false
-	}
-	var entry cacheEntry
-	if err := json.Unmarshal(data, &entry); err != nil {
-		return "", model.JDData{}, false
-	}
-	return entry.RawText, entry.JD, true
+func (r *ApplicationRepository) filePath(url string) string {
+	return filepath.Join(r.dir, recordKey(url)+".json")
 }
 
-// Put writes a new JD cache entry to disk, creating the cache directory if needed.
-func (r *JDCacheRepository) Put(url string, rawText string, jd model.JDData) error { //nolint:gocritic // interface requires value type
-	if err := os.MkdirAll(r.cacheDir, 0750); err != nil { // #nosec G301
-		return fmt.Errorf("jd cache: mkdir %s: %w", r.cacheDir, err)
-	}
-	entry := cacheEntry{URL: url, RawText: rawText, JD: jd}
-	data, err := json.MarshalIndent(entry, "", "  ")
+// Get retrieves the record for the given URL.
+// Returns (nil, false, nil) if no record exists.
+// Returns a non-nil error if a record file exists but cannot be read or parsed.
+func (r *ApplicationRepository) Get(url string) (*model.ApplicationRecord, bool, error) {
+	path := r.filePath(url)
+	data, err := os.ReadFile(path) // #nosec G304 -- path is dir + md5 hex, no traversal possible
 	if err != nil {
-		return fmt.Errorf("jd cache: marshal %s: %w", url, err)
+		if os.IsNotExist(err) {
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("application repo: read %s: %w", url, err)
 	}
-	return os.WriteFile(filepath.Join(r.cacheDir, cacheKey(url)+".json"), data, 0600)
+	var rec model.ApplicationRecord
+	if err := json.Unmarshal(data, &rec); err != nil {
+		return nil, false, fmt.Errorf("application repo: parse %s: %w", url, err)
+	}
+	return &rec, true, nil
 }
 
-// Update replaces the JD field of an existing cache entry, preserving the raw text.
-// Returns os.ErrNotExist if no entry exists for the given url.
-func (r *JDCacheRepository) Update(url string, jd model.JDData) error { //nolint:gocritic // interface requires value type
-	path := filepath.Join(r.cacheDir, cacheKey(url)+".json")
-	data, err := os.ReadFile(path) // #nosec G304 -- path is cacheDir + md5 hex, no traversal possible
+// Put writes a new record to disk, creating the directory if needed.
+// Overwrites any existing record for the same URL.
+func (r *ApplicationRepository) Put(record *model.ApplicationRecord) error {
+	if err := os.MkdirAll(r.dir, 0750); err != nil { // #nosec G301
+		return fmt.Errorf("application repo: mkdir %s: %w", r.dir, err)
+	}
+	data, err := json.MarshalIndent(record, "", "  ")
 	if err != nil {
-		return fmt.Errorf("jd cache update %s: %w", url, err)
+		return fmt.Errorf("application repo: marshal %s: %w", record.URL, err)
 	}
-	var entry cacheEntry
-	if err := json.Unmarshal(data, &entry); err != nil {
-		return fmt.Errorf("jd cache update parse %s: %w", url, err)
+	return os.WriteFile(r.filePath(record.URL), data, 0600)
+}
+
+// Update replaces the full record for record.URL.
+// Returns os.ErrNotExist if no record exists for that URL.
+func (r *ApplicationRepository) Update(record *model.ApplicationRecord) error {
+	path := r.filePath(record.URL)
+	if _, err := os.Stat(path); err != nil {
+		return fmt.Errorf("application repo: update %s: %w", record.URL, err)
 	}
-	entry.JD = jd
-	updated, err := json.MarshalIndent(entry, "", "  ")
+	data, err := json.MarshalIndent(record, "", "  ")
 	if err != nil {
-		return fmt.Errorf("jd cache update marshal %s: %w", url, err)
+		return fmt.Errorf("application repo: marshal %s: %w", record.URL, err)
 	}
-	return os.WriteFile(path, updated, 0600)
+	return os.WriteFile(path, data, 0600)
+}
+
+// List returns all stored records in undefined order.
+// Used for batch rescoring.
+func (r *ApplicationRepository) List() ([]*model.ApplicationRecord, error) {
+	entries, err := os.ReadDir(r.dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("application repo: list %s: %w", r.dir, err)
+	}
+	records := make([]*model.ApplicationRecord, 0, len(entries))
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		path := filepath.Join(r.dir, e.Name())
+		data, err := os.ReadFile(path) // #nosec G304
+		if err != nil {
+			return nil, fmt.Errorf("application repo: read %s: %w", e.Name(), err)
+		}
+		var rec model.ApplicationRecord
+		if err := json.Unmarshal(data, &rec); err != nil {
+			return nil, fmt.Errorf("application repo: parse %s: %w", e.Name(), err)
+		}
+		records = append(records, &rec)
+	}
+	return records, nil
 }
