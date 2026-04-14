@@ -199,14 +199,15 @@ func (p *TailorPipeline) Run(ctx context.Context, req TailorRequest) error {
 	// Step 7: tailor the resume.
 	p.presenter.OnEvent(model.StepStartedEvent{StepID: "tailor", Label: "Tailoring resume"})
 	tailorStart := time.Now()
-	tailorResult, err := p.tailor.TailorResume(ctx, model.TailorInput{
+	tailorInput := model.TailorInput{
 		Resume:              resume,
 		ResumeText:          augmented,
 		JD:                  jd,
 		ScoreBefore:         scoreBefore,
 		AccomplishmentsText: accomplishmentsText,
 		Options:             model.TailorOptions{MaxTier2BulletRewrites: p.defaults.Tailor.MaxTier2BulletRewrites},
-	})
+	}
+	tailorResult, err := p.tailor.TailorResume(ctx, &tailorInput)
 	if err != nil {
 		p.presenter.OnEvent(model.StepFailedEvent{StepID: "tailor", Label: "Tailor failed", Err: err.Error()})
 		p.presenter.ShowError(err)

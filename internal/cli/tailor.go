@@ -28,7 +28,6 @@ func NewTailorCommand() *cobra.Command {
 		urlFlag             string
 		textFlag            string
 		accomplishmentsFlag string
-		channelFlag         string
 	)
 
 	cmd := &cobra.Command{
@@ -47,10 +46,6 @@ Outputs a JSON result to stdout.`,
 			}
 			if urlFlag != "" && textFlag != "" {
 				return fmt.Errorf("--url and --text are mutually exclusive")
-			}
-			// Validate channel flag (side-effect: parse to ensure value is valid).
-			if _, err := resolveChannel(channelFlag); err != nil {
-				return err
 			}
 
 			cfg, err := config.Load()
@@ -123,7 +118,6 @@ Outputs a JSON result to stdout.`,
 	cmd.Flags().StringVar(&urlFlag, "url", "", "URL of the job posting to fetch")
 	cmd.Flags().StringVar(&textFlag, "text", "", "Raw job description text (alternative to --url)")
 	cmd.Flags().StringVar(&accomplishmentsFlag, "accomplishments", "", "Path to accomplishments file for tier-2 bullet rewriting (optional)")
-	cmd.Flags().StringVar(&channelFlag, "channel", "COLD", "Application channel: COLD, REFERRAL, or RECRUITER")
 
 	_ = cmd.MarkFlagRequired("resume")
 

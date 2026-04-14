@@ -22,7 +22,7 @@ type stubTailorService struct{}
 
 var _ port.Tailor = (*stubTailorService)(nil)
 
-func (s *stubTailorService) TailorResume(_ context.Context, input model.TailorInput) (model.TailorResult, error) {
+func (s *stubTailorService) TailorResume(_ context.Context, input *model.TailorInput) (model.TailorResult, error) {
 	return model.TailorResult{
 		ResumeLabel:   input.Resume.Label,
 		TierApplied:   model.TierKeyword,

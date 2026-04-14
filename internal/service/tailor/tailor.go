@@ -35,7 +35,7 @@ func New(llm port.LLMClient, defaults *config.AppDefaults, log *slog.Logger) *Se
 // Tier-2 (bullet rewriting) runs only when AccomplishmentsText is non-empty
 // and Options.MaxTier2BulletRewrites > 0.
 // A tier-2 LLM error degrades gracefully to the tier-1 result; no error is returned.
-func (s *Service) TailorResume(ctx context.Context, input model.TailorInput) (model.TailorResult, error) {
+func (s *Service) TailorResume(ctx context.Context, input *model.TailorInput) (model.TailorResult, error) {
 	allKeywords := append(input.JD.Required, input.JD.Preferred...) //nolint:gocritic // fresh slice intentional
 
 	// Tier-1: inject missing keywords into Skills section.
@@ -54,9 +54,10 @@ func (s *Service) TailorResume(ctx context.Context, input model.TailorInput) (mo
 		return result, nil
 	}
 
-	tier2Input := BulletRewriteInput{
+	tier2Input := &BulletRewriteInput{
 		Ctx:                 ctx,
 		LLM:                 s.llm,
+		Log:                 s.log,
 		ResumeText:          tier1Text,
 		JDKeywords:          allKeywords,
 		AccomplishmentsText: input.AccomplishmentsText,
@@ -64,11 +65,10 @@ func (s *Service) TailorResume(ctx context.Context, input model.TailorInput) (mo
 		MaxRewrites:         input.Options.MaxTier2BulletRewrites,
 	}
 
-	tier2Text, changes, err := rewriteBullets(tier2Input)
-	if err != nil {
-		s.log.WarnContext(ctx, "tier-2 bullet rewrite failed — degrading to tier-1 result", "error", err)
-		return result, nil
-	}
+	// rewriteBullets handles per-bullet LLM errors internally (log + skip).
+	// It always returns nil error; degradation to tier-1 is implicit when no
+	// changes are produced (e.g. all bullets fail or none match keywords).
+	tier2Text, changes, _ := rewriteBullets(tier2Input)
 
 	// If tier-2 produced changes, upgrade the result.
 	if len(changes) > 0 {

@@ -35,7 +35,7 @@ Python
 
 - Built distributed systems
 `
-	input := model.TailorInput{
+	input := &model.TailorInput{
 		Resume:     model.ResumeFile{Label: "main"},
 		ResumeText: resume,
 		JD: model.JDData{
@@ -79,7 +79,7 @@ Python
 
 - Deployed Kubernetes clusters at scale
 `
-	input := model.TailorInput{
+	input := &model.TailorInput{
 		Resume:              model.ResumeFile{Label: "main"},
 		ResumeText:          resume,
 		AccomplishmentsText: "Managed large Kubernetes deployments",
@@ -89,7 +89,10 @@ Python
 		Options: model.TailorOptions{MaxTier2BulletRewrites: 5},
 	}
 
-	// LLM always errors.
+	// LLM always errors on every bullet call.
+	// rewriteBullets swallows per-bullet errors and skips them, producing zero
+	// changes. TailorResume then keeps the tier-1 result (TierKeyword) unchanged.
+	// This is the defined internal-degradation path — no error is surfaced.
 	svc := newTestService(&stubLLMClient{err: errors.New("llm unavailable")}, defaults)
 	result, err := svc.TailorResume(context.Background(), input)
 
@@ -97,12 +100,21 @@ Python
 	if err != nil {
 		t.Fatalf("expected no error on tier-2 LLM failure, got: %v", err)
 	}
-	// TierApplied should fall back to tier-1 when tier-2 errors.
+	// TierApplied must remain TierKeyword: no bullet changes were produced.
 	if result.TierApplied != model.TierKeyword {
-		t.Errorf("tier = %v, want TierKeyword on tier-2 failure", result.TierApplied)
+		t.Errorf("tier = %v, want TierKeyword when all tier-2 bullet rewrites fail", result.TierApplied)
 	}
+	// TailoredText must be the tier-1 output (non-empty) containing the injected keyword.
 	if result.TailoredText == "" {
 		t.Error("TailoredText must not be empty even when tier-2 degrades")
+	}
+	// Tier-1 should have injected "Kubernetes" into the Skills section.
+	if !strings.Contains(result.TailoredText, "Kubernetes") {
+		t.Errorf("TailoredText should contain tier-1 injected keyword 'Kubernetes'; got:\n%s", result.TailoredText)
+	}
+	// No rewritten bullets: tier-2 produced zero changes.
+	if len(result.RewrittenBullets) != 0 {
+		t.Errorf("expected no rewritten bullets when LLM fails, got %d", len(result.RewrittenBullets))
 	}
 }
 
@@ -117,7 +129,7 @@ Python
 
 - Led Kubernetes migration for 50-node cluster
 `
-	input := model.TailorInput{
+	input := &model.TailorInput{
 		Resume:              model.ResumeFile{Label: "main"},
 		ResumeText:          resume,
 		AccomplishmentsText: "Completed Kubernetes migration 2 weeks ahead of schedule",

@@ -2,6 +2,7 @@ package tailor
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 	"testing"
 
@@ -61,9 +62,10 @@ Python
 	defaults.Tailor.MaxTier2BulletRewrites = 5
 
 	stub := &stubLLMClient{response: "- Led a cross-functional team of 5 engineers deploying Kubernetes at scale"}
-	input := BulletRewriteInput{
+	input := &BulletRewriteInput{
 		Ctx:                 context.Background(),
 		LLM:                 stub,
+		Log:                 slog.Default(),
 		ResumeText:          resume,
 		JDKeywords:          []string{"Kubernetes"},
 		AccomplishmentsText: "Delivered Kubernetes migration on time",
@@ -99,9 +101,10 @@ Python
 
 	// LLM returns with "- " prefix — the original "•" prefix must be preserved.
 	stub := &stubLLMClient{response: "- Reduced deployment latency 40% by automating Kubernetes rollouts"}
-	input := BulletRewriteInput{
+	input := &BulletRewriteInput{
 		Ctx:                 context.Background(),
 		LLM:                 stub,
+		Log:                 slog.Default(),
 		ResumeText:          resume,
 		JDKeywords:          []string{"Kubernetes"},
 		AccomplishmentsText: "Automated Kubernetes rollouts",

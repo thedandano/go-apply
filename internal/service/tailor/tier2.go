@@ -100,8 +100,11 @@ func bulletContainsAnyKeyword(bullet string, keywords []string) bool {
 // BulletRewriteInput groups all inputs for the bullet rewrite step.
 // Struct required because the function takes ≥5 parameters.
 type BulletRewriteInput struct {
-	Ctx                 context.Context
-	LLM                 port.LLMClient
+	Ctx context.Context
+	LLM port.LLMClient
+	// Log is the injected structured logger used for per-bullet warnings.
+	// Must not be nil; callers should pass slog.Default() in tests.
+	Log                 *slog.Logger
 	ResumeText          string
 	JDKeywords          []string
 	AccomplishmentsText string
@@ -115,7 +118,7 @@ type BulletRewriteInput struct {
 // grounded in the candidate's accomplishments. Returns the modified resume text,
 // the list of changes, and any fatal error. LLM errors on individual bullets are
 // logged and skipped — they do not abort the entire rewrite.
-func rewriteBullets(input BulletRewriteInput) (string, []model.BulletChange, error) {
+func rewriteBullets(input *BulletRewriteInput) (string, []model.BulletChange, error) {
 	bullets := extractExperienceBullets(input.ResumeText)
 	if len(bullets) == 0 {
 		return input.ResumeText, nil, nil
@@ -126,7 +129,7 @@ func rewriteBullets(input BulletRewriteInput) (string, []model.BulletChange, err
 		maxRewrites = input.Defaults.Tailor.MaxTier2BulletRewrites
 	}
 	modified := input.ResumeText
-	var changes []model.BulletChange
+	changes := make([]model.BulletChange, 0, maxRewrites)
 	rewroteCount := 0
 
 	for _, originalLine := range bullets {
@@ -164,7 +167,7 @@ func rewriteBullets(input BulletRewriteInput) (string, []model.BulletChange, err
 
 		resp, err := input.LLM.ChatComplete(input.Ctx, messages, opts)
 		if err != nil {
-			slog.WarnContext(input.Ctx, "bullet rewrite LLM call failed — skipping bullet",
+			input.Log.WarnContext(input.Ctx, "bullet rewrite LLM call failed — skipping bullet",
 				"bullet", content, "error", err)
 			continue
 		}
