@@ -16,52 +16,84 @@ import (
 // Compile-time interface satisfaction check.
 var _ port.Scorer = (*Service)(nil)
 
-// metricRegex matches lines that contain a genuine metric: a number combined with
-// a unit, currency symbol, multiplier, or percentage. It explicitly excludes
-// version-number patterns like "Go 1.21", "Python 3.11", or "Windows 10".
+// metricRegex matches lines that contain a genuine quantified metric.
+// Each branch is a distinct signal type:
+//   - percentage:       "reduced latency by 40%"
+//   - dollar amount:    "saved $1.2M annually"
+//   - magnitude suffix: "handled 50k requests/sec"
+//   - multiplier:       "improved throughput by 2x"
+//   - large integer:    "served 500 daily users"
 //
-// Strategy:
-//   - A version number is: a word/identifier followed immediately by whitespace
-//     and then a bare decimal (e.g. "Go 1.21", "Node 18", "Windows 10").
-//   - A metric is: a percentage, a dollar/currency amount, an "Nx" multiplier,
-//     a number with a clear unit suffix (k, M, B), or a large standalone integer
-//     (≥ three digits — e.g. "500k users" or "1,000 requests").
+// Calendar years and version strings are stripped from each line BEFORE this
+// regex is applied (see scoreImpact), so "2023" and "Go 1.21" never reach here.
 var metricRegex = regexp.MustCompile(
-	`(?i)` + // case-insensitive
+	`(?i)` +
 		`(?:` +
 		`\d+\.?\d*\s*%` + // percentage: 40%, 3.5%
 		`|\$\s*\d[\d,\.]*` + // dollar amount: $1.2M, $50k
 		`|\d[\d,\.]*\s*[kKmMbB]\b` + // magnitude suffix: 50k, 1.2M
 		`|\d+x\b` + // multiplier: 2x, 10x
-		`|\d{3,}` + // large standalone integer: 500, 1000
+		`|\d{3,}` + // large integer: 500, 1000 (years already stripped)
 		`)`,
 )
 
-// versionRegex matches a word boundary followed by a name-like token, whitespace,
-// and a bare version number — used to veto metricRegex false positives.
-var versionRegex = regexp.MustCompile(`(?i)\b(?:[A-Za-z][A-Za-z0-9]*)\s+\d+(?:\.\d+)+\b`)
+// versionRegex identifies software/tool version patterns like "Go 1.21",
+// "Python 3.11", or "Node 18.0". Stripped from lines before metric detection.
+var versionRegex = regexp.MustCompile(`(?i)\b[A-Za-z][A-Za-z0-9]*\s+\d+(?:\.\d+)+\b`)
 
-// atsSections are the standard ATS-readable section headers checked in ATSFormat scoring.
-var atsSections = []string{"experience", "education", "skills"}
+// yearRegex matches bare 4-digit calendar years (1900–2099).
+// Stripped from lines before metric detection to prevent date ranges like
+// "Jan 2019 – Dec 2023" from counting as impact bullets.
+var yearRegex = regexp.MustCompile(`\b(?:19|20)\d{2}\b`)
+
+// atsSectionPatterns matches common ATS section headers as standalone lines.
+// A line qualifies when, after stripping leading/trailing whitespace and
+// optional trailing punctuation, it equals a known header (with common prefixes).
+// This prevents body-text false positives like "5 years of experience in Go".
+var atsSectionPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)^\s*(?:work\s+|professional\s+)?experience\s*:?\s*$`),
+	regexp.MustCompile(`(?i)^\s*(?:academic\s+)?education\s*:?\s*$`),
+	regexp.MustCompile(`(?i)^\s*(?:technical\s+|core\s+)?skills?\s*:?\s*$`),
+}
 
 // Service implements port.Scorer.
 type Service struct {
-	defaults *config.AppDefaults
+	defaults       *config.AppDefaults
+	fillerPatterns []*regexp.Regexp // pre-compiled from defaults.Scoring.FillerPhrases
 }
 
-// New constructs a Service with the provided defaults.
+// New constructs a Service. Filler-phrase patterns are pre-compiled once at
+// construction time — they depend on config but are fixed for the lifetime of
+// the service.
 func New(defaults *config.AppDefaults) *Service {
-	return &Service{defaults: defaults}
+	patterns := make([]*regexp.Regexp, len(defaults.Scoring.FillerPhrases))
+	for i, phrase := range defaults.Scoring.FillerPhrases {
+		// Filler phrases consist entirely of word characters and spaces, so
+		// \b boundaries are valid on both sides.
+		patterns[i] = regexp.MustCompile(`(?i)\b` + regexp.QuoteMeta(phrase) + `\b`)
+	}
+	return &Service{defaults: defaults, fillerPatterns: patterns}
 }
 
 // Score computes a ScoreResult for the given ScorerInput.
-// Returns an error if input is nil or ResumeText is empty.
+// Returns an error if input is nil, ResumeText is empty, or SeniorityMatch is
+// not a recognised key in the configured seniority multiplier map.
 func (s *Service) Score(input *model.ScorerInput) (model.ScoreResult, error) {
 	if input == nil {
 		return model.ScoreResult{}, fmt.Errorf("scorer: input must not be nil")
 	}
 	if strings.TrimSpace(input.ResumeText) == "" {
 		return model.ScoreResult{}, fmt.Errorf("scorer: ResumeText must not be empty")
+	}
+	if _, ok := s.defaults.Scoring.SeniorityMultipliers[input.SeniorityMatch]; !ok {
+		valid := make([]string, 0, len(s.defaults.Scoring.SeniorityMultipliers))
+		for k := range s.defaults.Scoring.SeniorityMultipliers {
+			valid = append(valid, `"`+k+`"`)
+		}
+		return model.ScoreResult{}, fmt.Errorf(
+			"scorer: unknown SeniorityMatch %q — valid values: %s",
+			input.SeniorityMatch, strings.Join(valid, ", "),
+		)
 	}
 
 	kwResult := s.scoreKeywords(input)
@@ -92,23 +124,36 @@ type kwScoreResult struct {
 	score float64
 }
 
-// keywordMatches reports whether keyword appears as a whole word in text
-// (case-insensitive). Word-boundary matching prevents "Go" from matching
-// inside "Django" or "Mongo".
-func keywordMatches(text, keyword string) bool {
-	pattern := `(?i)\b` + regexp.QuoteMeta(keyword) + `\b`
-	ok, _ := regexp.MatchString(pattern, text)
-	return ok
+// isWordChar reports whether b is a regex word character [A-Za-z0-9_].
+func isWordChar(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') || b == '_'
+}
+
+// compileKeywordPattern builds a case-insensitive whole-word pattern for kw.
+// \b boundaries are added only at positions where the keyword character is a
+// word char — this correctly handles keywords like "C++", "C#", and ".NET"
+// where a trailing \b after '+' or '#' would never fire.
+func compileKeywordPattern(kw string) *regexp.Regexp {
+	quoted := regexp.QuoteMeta(kw)
+	prefix, suffix := "", ""
+	if len(kw) > 0 && isWordChar(kw[0]) {
+		prefix = `\b`
+	}
+	if len(kw) > 0 && isWordChar(kw[len(kw)-1]) {
+		suffix = `\b`
+	}
+	return regexp.MustCompile(`(?i)` + prefix + quoted + suffix)
 }
 
 // scoreKeywords computes the KeywordMatch dimension (max 45).
-// When both required and preferred keyword lists are empty, full credit is granted
-// (no requirements = perfect match). When only one category is empty, it
-// contributes 0 to avoid inflating the score with imaginary matches.
+//
+// Weight distribution:
+//   - Both required and preferred present: configured weights (0.7 / 0.3)
+//   - Only one category present: that category gets full weight (1.0)
+//   - Both empty: full score granted (no requirements = perfect match)
 func (s *Service) scoreKeywords(input *model.ScorerInput) kwScoreResult {
 	cfg := s.defaults.Scoring
 
-	// No requirements at all → grant full keyword score.
 	if len(input.JD.Required) == 0 && len(input.JD.Preferred) == 0 {
 		return kwScoreResult{
 			KeywordResult: model.KeywordResult{ReqPct: 1.0, PrefPct: 1.0},
@@ -116,12 +161,22 @@ func (s *Service) scoreKeywords(input *model.ScorerInput) kwScoreResult {
 		}
 	}
 
+	// Determine effective weights based on which lists are populated.
+	reqW, prefW := cfg.KeywordRequiredWeight, cfg.KeywordPreferredWeight
+	switch {
+	case len(input.JD.Required) == 0:
+		reqW, prefW = 0.0, 1.0
+	case len(input.JD.Preferred) == 0:
+		reqW, prefW = 1.0, 0.0
+	}
+
 	classify := func(keywords []string) (matched, unmatched []string, pct float64) {
 		if len(keywords) == 0 {
 			return nil, nil, 0.0
 		}
 		for _, kw := range keywords {
-			if keywordMatches(input.ResumeText, kw) {
+			pat := compileKeywordPattern(kw)
+			if pat.MatchString(input.ResumeText) {
 				matched = append(matched, kw)
 			} else {
 				unmatched = append(unmatched, kw)
@@ -133,8 +188,7 @@ func (s *Service) scoreKeywords(input *model.ScorerInput) kwScoreResult {
 
 	reqMatched, reqUnmatched, reqPct := classify(input.JD.Required)
 	prefMatched, prefUnmatched, prefPct := classify(input.JD.Preferred)
-
-	score := (reqPct*cfg.KeywordRequiredWeight + prefPct*cfg.KeywordPreferredWeight) * cfg.Weights.KeywordMatch
+	score := (reqPct*reqW + prefPct*prefW) * cfg.Weights.KeywordMatch
 
 	return kwScoreResult{
 		KeywordResult: model.KeywordResult{
@@ -162,12 +216,16 @@ func (s *Service) scoreExperience(input *model.ScorerInput) float64 {
 	}
 
 	seniorityScore := cfg.SeniorityMultipliers[input.SeniorityMatch]
-
 	return (yearsScore*cfg.ExperienceYearsWeight + seniorityScore*cfg.ExperienceSeniorityWeight) * cfg.Weights.ExperienceFit
 }
 
 // scoreImpact computes the ImpactEvidence dimension (max 10) and returns the
 // matched metric bullet lines.
+//
+// Version strings (e.g. "Python 3.11") are stripped from each line before
+// checking for metrics — this prevents a line like "reduced latency by 40%
+// migrating from Python 2.7 to 3.11" from being discarded just because it
+// also mentions a version.
 func (s *Service) scoreImpact(resumeText string) (float64, []string) {
 	target := float64(s.defaults.Scoring.ImpactBulletTarget)
 	var bullets []string
@@ -177,8 +235,11 @@ func (s *Service) scoreImpact(resumeText string) (float64, []string) {
 		if line == "" {
 			continue
 		}
-		if metricRegex.MatchString(line) && !versionRegex.MatchString(line) {
-			bullets = append(bullets, line)
+		// Strip version strings and calendar years, then check for genuine metrics.
+		stripped := versionRegex.ReplaceAllString(line, "")
+		stripped = yearRegex.ReplaceAllString(stripped, "")
+		if metricRegex.MatchString(stripped) {
+			bullets = append(bullets, line) // preserve original text in output
 		}
 	}
 
@@ -186,32 +247,34 @@ func (s *Service) scoreImpact(resumeText string) (float64, []string) {
 	return score, bullets
 }
 
-// scoreATS computes the ATSFormat dimension (max 10) based on presence of standard
-// section headers (case-insensitive).
+// scoreATS computes the ATSFormat dimension (max 10) based on presence of
+// standard ATS section headers as standalone lines. Each section pattern
+// checks one line at a time to avoid false positives from body text.
 func (s *Service) scoreATS(resumeText string) float64 {
-	lower := strings.ToLower(resumeText)
+	lines := strings.Split(resumeText, "\n")
 	found := 0
-	for _, section := range atsSections {
-		if strings.Contains(lower, section) {
-			found++
+	for _, pat := range atsSectionPatterns {
+		for _, line := range lines {
+			if pat.MatchString(line) {
+				found++
+				break
+			}
 		}
 	}
-	return float64(found) / float64(len(atsSections)) * s.defaults.Scoring.Weights.ATSFormat
+	return float64(found) / float64(len(atsSectionPatterns)) * s.defaults.Scoring.Weights.ATSFormat
 }
 
-// scoreReadability computes the Readability dimension (max 10) by penalising each
-// occurrence of a filler phrase in the resume. Returns the score and detected phrases.
+// scoreReadability computes the Readability dimension (max 10) by penalising
+// each filler phrase that appears in the resume. Uses pre-compiled word-boundary
+// patterns to avoid false positives (e.g. "worked on" inside "networked on").
 func (s *Service) scoreReadability(resumeText string) (float64, []string) {
 	cfg := s.defaults.Scoring
-	lower := strings.ToLower(resumeText)
-
 	var detected []string
-	for _, phrase := range cfg.FillerPhrases {
-		if strings.Contains(lower, strings.ToLower(phrase)) {
-			detected = append(detected, phrase)
+	for i, pat := range s.fillerPatterns {
+		if pat.MatchString(resumeText) {
+			detected = append(detected, cfg.FillerPhrases[i])
 		}
 	}
-
 	score := math.Max(cfg.Weights.Readability-float64(len(detected))*cfg.ReadabilityPenaltyPerFiller, 0)
 	return score, detected
 }
