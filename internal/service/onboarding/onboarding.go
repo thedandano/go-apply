@@ -53,7 +53,7 @@ func (s *Service) Run(ctx context.Context, input model.OnboardInput) (model.Onbo
 	for _, resume := range input.Resumes {
 		if err := validateLabel(resume.Label); err != nil {
 			result.Warnings = append(result.Warnings, model.RiskWarning{
-				Severity: "error",
+				Severity: model.SeverityError,
 				Message:  fmt.Sprintf("resume %q: %v", resume.Label, err),
 			})
 			continue
@@ -61,7 +61,7 @@ func (s *Service) Run(ctx context.Context, input model.OnboardInput) (model.Onbo
 		sourceDoc := "resume:" + resume.Label
 		path := filepath.Join(inputsDir, resume.Label+".txt")
 		if warn := s.storeDocument(ctx, sourceDoc, resume.Text, path); warn != "" {
-			result.Warnings = append(result.Warnings, model.RiskWarning{Severity: "warn", Message: warn})
+			result.Warnings = append(result.Warnings, model.RiskWarning{Severity: model.SeverityWarn, Message: warn})
 			continue
 		}
 		result.Stored = append(result.Stored, sourceDoc)
@@ -70,7 +70,7 @@ func (s *Service) Run(ctx context.Context, input model.OnboardInput) (model.Onbo
 	if input.SkillsText != "" {
 		path := filepath.Join(inputsDir, "skills.md")
 		if warn := s.storeDocument(ctx, "ref:skills", input.SkillsText, path); warn != "" {
-			result.Warnings = append(result.Warnings, model.RiskWarning{Severity: "warn", Message: warn})
+			result.Warnings = append(result.Warnings, model.RiskWarning{Severity: model.SeverityWarn, Message: warn})
 		} else {
 			result.Stored = append(result.Stored, "ref:skills")
 		}
@@ -79,7 +79,7 @@ func (s *Service) Run(ctx context.Context, input model.OnboardInput) (model.Onbo
 	if input.AccomplishmentsText != "" {
 		path := filepath.Join(inputsDir, "accomplishments.md")
 		if warn := s.storeDocument(ctx, "accomplishments", input.AccomplishmentsText, path); warn != "" {
-			result.Warnings = append(result.Warnings, model.RiskWarning{Severity: "warn", Message: warn})
+			result.Warnings = append(result.Warnings, model.RiskWarning{Severity: model.SeverityWarn, Message: warn})
 		} else {
 			result.Stored = append(result.Stored, "accomplishments")
 		}
@@ -114,14 +114,14 @@ func (s *Service) storeDocument(ctx context.Context, sourceDoc, text, path strin
 	return ""
 }
 
-// validateLabel rejects labels that contain path separators.
+// validateLabel rejects empty labels and labels containing path separators.
 // This prevents path traversal when the label is used to construct a filename.
 func validateLabel(label string) error {
-	if strings.ContainsAny(label, "/\\") {
-		return fmt.Errorf("label must not contain path separators")
-	}
 	if label == "" {
 		return fmt.Errorf("label must not be empty")
+	}
+	if strings.ContainsAny(label, "/\\") {
+		return fmt.Errorf("label must not contain path separators")
 	}
 	return nil
 }

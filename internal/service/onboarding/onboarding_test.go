@@ -166,6 +166,24 @@ func TestOnboardingService_RejectsSlashLabel(t *testing.T) {
 	}
 }
 
+func TestOnboardingService_RejectsEmptyLabel(t *testing.T) {
+	repo := &stubProfileRepo{}
+	svc := newService(t, repo, &stubEmbedder{})
+
+	result, err := svc.Run(context.Background(), model.OnboardInput{
+		Resumes: []model.ResumeEntry{{Label: "", Text: "text"}},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(result.Warnings) == 0 {
+		t.Error("expected warning for empty label")
+	}
+	if len(result.Stored) > 0 {
+		t.Error("empty label must not result in stored document")
+	}
+}
+
 func TestOnboardingService_WritesFilesToDisk(t *testing.T) {
 	repo := &stubProfileRepo{}
 	dataDir := t.TempDir()

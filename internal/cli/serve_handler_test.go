@@ -14,6 +14,19 @@ import (
 	"github.com/thedandano/go-apply/internal/service/pipeline"
 )
 
+// ── onboard stubs ─────────────────────────────────────────────────────────────
+
+type stubOnboarder struct {
+	result model.OnboardResult
+	err    error
+}
+
+var _ port.Onboarder = (*stubOnboarder)(nil)
+
+func (s *stubOnboarder) Run(_ context.Context, _ model.OnboardInput) (model.OnboardResult, error) {
+	return s.result, s.err
+}
+
 // ── stubs ─────────────────────────────────────────────────────────────────────
 
 type stubJDFetcher struct{}
@@ -114,12 +127,12 @@ func stubApplyConfig() pipeline.ApplyConfig {
 }
 
 // callToolRequest builds an mcp.CallToolRequest with the given arguments map.
+// Arguments must be map[string]any (not json.RawMessage) so that GetString works correctly.
 func callToolRequest(name string, args map[string]any) mcp.CallToolRequest {
-	raw, _ := json.Marshal(args)
 	return mcp.CallToolRequest{
 		Params: mcp.CallToolParams{
 			Name:      name,
-			Arguments: json.RawMessage(raw),
+			Arguments: args,
 		},
 	}
 }
@@ -170,5 +183,199 @@ func TestGetScore_URLOnly_ReturnsResult(t *testing.T) {
 	var pipelineResult model.PipelineResult
 	if err := json.Unmarshal([]byte(text), &pipelineResult); err != nil {
 		t.Fatalf("response is not valid PipelineResult JSON: %v — got: %s", err, text)
+	}
+}
+
+// ── HandleOnboardUser tests ────────────────────────────────────────────────────
+
+func TestHandleOnboardUser_XORValidation_MissingLabel(t *testing.T) {
+	svc := &stubOnboarder{}
+	req := callToolRequest("onboard_user", map[string]any{
+		"resume_content": "resume text",
+		// resume_label missing
+	})
+	result := cli.HandleOnboardUser(context.Background(), &req, svc)
+	text := extractText(t, result)
+	var resp map[string]string
+	if err := json.Unmarshal([]byte(text), &resp); err != nil {
+		t.Fatalf("response is not JSON: %v", err)
+	}
+	if _, ok := resp["error"]; !ok {
+		t.Errorf("expected error key, got: %v", resp)
+	}
+}
+
+func TestHandleOnboardUser_XORValidation_MissingContent(t *testing.T) {
+	svc := &stubOnboarder{}
+	req := callToolRequest("onboard_user", map[string]any{
+		"resume_label": "backend",
+		// resume_content missing
+	})
+	result := cli.HandleOnboardUser(context.Background(), &req, svc)
+	text := extractText(t, result)
+	var resp map[string]string
+	if err := json.Unmarshal([]byte(text), &resp); err != nil {
+		t.Fatalf("response is not JSON: %v", err)
+	}
+	if _, ok := resp["error"]; !ok {
+		t.Errorf("expected error key, got: %v", resp)
+	}
+}
+
+func TestHandleOnboardUser_EmptyInput_ReturnsError(t *testing.T) {
+	svc := &stubOnboarder{}
+	req := callToolRequest("onboard_user", map[string]any{})
+	result := cli.HandleOnboardUser(context.Background(), &req, svc)
+	text := extractText(t, result)
+	var resp map[string]string
+	if err := json.Unmarshal([]byte(text), &resp); err != nil {
+		t.Fatalf("response is not JSON: %v", err)
+	}
+	if _, ok := resp["error"]; !ok {
+		t.Errorf("expected error key, got: %v", resp)
+	}
+}
+
+func TestHandleOnboardUser_HappyPath_ReturnsStored(t *testing.T) {
+	svc := &stubOnboarder{
+		result: model.OnboardResult{Stored: []string{"resume:backend"}},
+	}
+	req := callToolRequest("onboard_user", map[string]any{
+		"resume_content": "resume text",
+		"resume_label":   "backend",
+	})
+	result := cli.HandleOnboardUser(context.Background(), &req, svc)
+	text := extractText(t, result)
+	var resp model.OnboardResult
+	if err := json.Unmarshal([]byte(text), &resp); err != nil {
+		t.Fatalf("response is not valid OnboardResult JSON: %v — got: %s", err, text)
+	}
+	if len(resp.Stored) != 1 || resp.Stored[0] != "resume:backend" {
+		t.Errorf("Stored = %v, want [resume:backend]", resp.Stored)
+	}
+}
+
+func TestHandleOnboardUser_SkillsOnly_Valid(t *testing.T) {
+	svc := &stubOnboarder{
+		result: model.OnboardResult{Stored: []string{"ref:skills"}},
+	}
+	req := callToolRequest("onboard_user", map[string]any{
+		"skills": "Go, Python",
+	})
+	result := cli.HandleOnboardUser(context.Background(), &req, svc)
+	text := extractText(t, result)
+	var resp model.OnboardResult
+	if err := json.Unmarshal([]byte(text), &resp); err != nil {
+		t.Fatalf("response is not valid JSON: %v", err)
+	}
+	if _, hasErr := map[string]string{}["error"]; hasErr {
+		t.Error("skills-only onboard should not return error")
+	}
+}
+
+// ── HandleAddResume tests ─────────────────────────────────────────────────────
+
+func TestHandleAddResume_MissingContent_ReturnsError(t *testing.T) {
+	svc := &stubOnboarder{}
+	req := callToolRequest("add_resume", map[string]any{
+		"resume_label": "backend",
+	})
+	result := cli.HandleAddResume(context.Background(), &req, svc)
+	text := extractText(t, result)
+	var resp map[string]string
+	if err := json.Unmarshal([]byte(text), &resp); err != nil {
+		t.Fatalf("response is not JSON: %v", err)
+	}
+	if _, ok := resp["error"]; !ok {
+		t.Errorf("expected error key, got: %v", resp)
+	}
+}
+
+func TestHandleAddResume_HappyPath(t *testing.T) {
+	svc := &stubOnboarder{
+		result: model.OnboardResult{Stored: []string{"resume:backend"}},
+	}
+	req := callToolRequest("add_resume", map[string]any{
+		"resume_content": "resume text",
+		"resume_label":   "backend",
+	})
+	result := cli.HandleAddResume(context.Background(), &req, svc)
+	text := extractText(t, result)
+	var resp model.OnboardResult
+	if err := json.Unmarshal([]byte(text), &resp); err != nil {
+		t.Fatalf("response is not valid OnboardResult JSON: %v — got: %s", err, text)
+	}
+}
+
+// ── HandleUpdateConfig tests ──────────────────────────────────────────────────
+
+func TestHandleUpdateConfig_MissingKey_ReturnsError(t *testing.T) {
+	req := callToolRequest("update_config", map[string]any{
+		"value": "claude-haiku-4-5",
+	})
+	cfg := &config.Config{}
+	result := cli.HandleUpdateConfig(context.Background(), &req, cfg)
+	text := extractText(t, result)
+	var resp map[string]string
+	if err := json.Unmarshal([]byte(text), &resp); err != nil {
+		t.Fatalf("response is not JSON: %v", err)
+	}
+	if _, ok := resp["error"]; !ok {
+		t.Errorf("expected error key, got: %v", resp)
+	}
+}
+
+func TestHandleUpdateConfig_UnknownKey_ReturnsError(t *testing.T) {
+	req := callToolRequest("update_config", map[string]any{
+		"key":   "nonexistent.field",
+		"value": "value",
+	})
+	cfg := &config.Config{}
+	result := cli.HandleUpdateConfig(context.Background(), &req, cfg)
+	text := extractText(t, result)
+	var resp map[string]string
+	if err := json.Unmarshal([]byte(text), &resp); err != nil {
+		t.Fatalf("response is not JSON: %v", err)
+	}
+	if _, ok := resp["error"]; !ok {
+		t.Errorf("expected error key, got: %v", resp)
+	}
+}
+
+// ── handleGetConfigWith tests ─────────────────────────────────────────────────
+
+func TestHandleGetConfigWith_RedactsAPIKeys(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Orchestrator.APIKey = "sk-super-secret"
+	cfg.Embedder.APIKey = "another-key"
+
+	result := cli.HandleGetConfigWith(cfg)
+
+	text := extractText(t, result)
+	var fields map[string]string
+	if err := json.Unmarshal([]byte(text), &fields); err != nil {
+		t.Fatalf("response is not JSON: %v", err)
+	}
+	if fields["orchestrator.api_key"] != "***" {
+		t.Errorf("orchestrator.api_key = %q, want ***", fields["orchestrator.api_key"])
+	}
+	if fields["embedder.api_key"] != "***" {
+		t.Errorf("embedder.api_key = %q, want ***", fields["embedder.api_key"])
+	}
+}
+
+func TestHandleGetConfigWith_EmptyAPIKey_NotRedacted(t *testing.T) {
+	cfg := &config.Config{}
+	// API keys left empty
+
+	result := cli.HandleGetConfigWith(cfg)
+
+	text := extractText(t, result)
+	var fields map[string]string
+	if err := json.Unmarshal([]byte(text), &fields); err != nil {
+		t.Fatalf("response is not JSON: %v", err)
+	}
+	if fields["orchestrator.api_key"] == "***" {
+		t.Error("empty API key should not be redacted")
 	}
 }

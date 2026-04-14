@@ -58,7 +58,14 @@ func NewServeCommand() *cobra.Command {
 					mcp.WithString("skills", mcp.Description("Skills reference text (optional)")),
 					mcp.WithString("accomplishments", mcp.Description("Accomplishments text (optional)")),
 				),
-				handleOnboardUser,
+				func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+					svc, cleanup, err := newOnboardSvc()
+					if err != nil {
+						return errorResult(fmt.Sprintf("setup: %v", err)), nil
+					}
+					defer cleanup()
+					return HandleOnboardUser(ctx, &req, svc), nil
+				},
 			)
 
 			srv.AddTool(
@@ -67,7 +74,14 @@ func NewServeCommand() *cobra.Command {
 					mcp.WithString("resume_content", mcp.Description("Resume text"), mcp.Required()),
 					mcp.WithString("resume_label", mcp.Description("Short identifier, e.g. 'backend'"), mcp.Required()),
 				),
-				handleAddResume,
+				func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+					svc, cleanup, err := newOnboardSvc()
+					if err != nil {
+						return errorResult(fmt.Sprintf("setup: %v", err)), nil
+					}
+					defer cleanup()
+					return HandleAddResume(ctx, &req, svc), nil
+				},
 			)
 
 			srv.AddTool(
@@ -76,14 +90,26 @@ func NewServeCommand() *cobra.Command {
 					mcp.WithString("key", mcp.Description("Dot-notation config key"), mcp.Required()),
 					mcp.WithString("value", mcp.Description("New value for the key"), mcp.Required()),
 				),
-				handleUpdateConfig,
+				func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+					cfg, err := config.Load()
+					if err != nil {
+						return errorResult(fmt.Sprintf("load config: %v", err)), nil
+					}
+					return HandleUpdateConfig(ctx, &req, cfg), nil
+				},
 			)
 
 			srv.AddTool(
 				mcp.NewTool("get_config",
 					mcp.WithDescription("Return all go-apply config fields. API keys are redacted."),
 				),
-				handleGetConfig,
+				func(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+					cfg, err := config.Load()
+					if err != nil {
+						return errorResult(fmt.Sprintf("load config: %v", err)), nil
+					}
+					return HandleGetConfigWith(cfg), nil
+				},
 			)
 
 			return server.ServeStdio(srv)

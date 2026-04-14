@@ -21,6 +21,12 @@ type StepFailedEvent struct {
 	Err    string `json:"error"`
 }
 
+// Warning severity levels used in RiskWarning.Severity.
+const (
+	SeverityWarn  = "warn"  // non-fatal degradation; processing continues
+	SeverityError = "error" // invalid input rejected before processing
+)
+
 type RiskWarning struct {
 	Severity string `json:"severity"`
 	Message  string `json:"message"`
