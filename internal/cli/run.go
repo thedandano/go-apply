@@ -118,7 +118,7 @@ Outputs a JSON result to stdout when --headless is set.`,
 
 			var accomplishmentsText string
 			if accomplishmentsFlag != "" {
-				data, err := os.ReadFile(accomplishmentsFlag)
+				data, err := os.ReadFile(accomplishmentsFlag) //nolint:gosec // G304: path is explicitly provided by the user via --accomplishments flag
 				if err != nil {
 					return fmt.Errorf("read accomplishments file: %w", err)
 				}
