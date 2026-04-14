@@ -23,9 +23,9 @@ type ApplyRequest struct {
 	Channel model.ChannelType
 	// Config is the active application configuration.
 	Config *config.Config
-	// AccomplishmentsPath is an optional path to an accomplishments doc for tier-2
+	// AccomplishmentsText is optional raw accomplishments text for tier-2
 	// bullet rewriting. When empty, the tailor step is skipped.
-	AccomplishmentsPath string
+	AccomplishmentsText string
 }
 
 // ApplyPipeline orchestrates the full headless apply pipeline.
@@ -142,7 +142,7 @@ func (p *ApplyPipeline) Run(ctx context.Context, req ApplyRequest) error {
 	result.BestScore = bestScore
 
 	// Step 4 (optional): Tailor the best-matching resume when --accomplishments is set.
-	if req.AccomplishmentsPath != "" && result.BestResume != "" && p.tailor != nil {
+	if req.AccomplishmentsText != "" && result.BestResume != "" && p.tailor != nil {
 		tailorStart := time.Now()
 		p.presenter.OnEvent(model.StepStartedEvent{StepID: "tailor", Label: "Tailoring resume"})
 		tailorResult, tailorErr := p.runTailorStep(ctx, result, &jd, req, resumeFiles)
@@ -453,9 +453,10 @@ func profileFromConfig(cfg *config.Config) model.UserProfile {
 	}
 }
 
-// runTailorStep loads the accomplishments file, finds and loads the best resume,
-// calls the tailor service, and re-scores the tailored text. It is invoked only
-// when AccomplishmentsPath is set and a tailor service is wired.
+// runTailorStep finds and loads the best resume, calls the tailor service,
+// and re-scores the tailored text. Accomplishments text is passed directly
+// via req.AccomplishmentsText — no file loading is performed here.
+// It is invoked only when AccomplishmentsText is set and a tailor service is wired.
 // resumeFiles is the same slice already scored in Run — passed here to avoid a
 // redundant ListResumes call.
 func (p *ApplyPipeline) runTailorStep(
@@ -465,12 +466,6 @@ func (p *ApplyPipeline) runTailorStep(
 	req ApplyRequest,
 	resumeFiles []model.ResumeFile,
 ) (*model.TailorResult, error) {
-	// Load accomplishments file.
-	accomplishments, err := p.loader.Load(req.AccomplishmentsPath)
-	if err != nil {
-		return nil, fmt.Errorf("load accomplishments: %w", err)
-	}
-
 	// Find and load the best resume from the already-scored file list.
 	var bestFile model.ResumeFile
 	for _, r := range resumeFiles {
@@ -495,7 +490,7 @@ func (p *ApplyPipeline) runTailorStep(
 		ResumeText:          resumeText,
 		JD:                  *jd,
 		ScoreBefore:         scoreBefore,
-		AccomplishmentsText: accomplishments,
+		AccomplishmentsText: req.AccomplishmentsText,
 		Options: model.TailorOptions{
 			MaxTier2BulletRewrites: p.defaults.Tailor.MaxTier2BulletRewrites,
 		},

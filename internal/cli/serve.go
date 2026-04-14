@@ -149,7 +149,7 @@ func HandleGetScoreWithConfig(ctx context.Context, req *mcp.CallToolRequest, dep
 		IsText:              isText,
 		Channel:             channel,
 		Config:              resolveConfig(cfg),
-		AccomplishmentsPath: accomplishmentsVal,
+		AccomplishmentsText: accomplishmentsVal,
 	})
 	if runErr != nil {
 		return errorResult(runErr.Error())

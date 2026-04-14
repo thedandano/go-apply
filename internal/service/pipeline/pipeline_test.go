@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/thedandano/go-apply/internal/config"
@@ -170,14 +168,6 @@ func TestApplyPipeline_TailorStep(t *testing.T) {
 	}))
 	defer llmSrv.Close()
 
-	// Write a temporary accomplishments file.
-	tmpDir := t.TempDir()
-	accomPath := filepath.Join(tmpDir, "accomplishments.txt")
-	if err := os.WriteFile(accomPath, []byte("Led migration of monolith to microservices."), 0o600); err != nil {
-		t.Fatalf("write accomplishments file: %v", err)
-	}
-	// stubDocumentLoader ignores the path; only the non-empty string matters for the guard condition.
-
 	var stdout, stderr bytes.Buffer
 	pres := headless.NewWith(&stdout, &stderr)
 
@@ -212,7 +202,7 @@ func TestApplyPipeline_TailorStep(t *testing.T) {
 		IsText:              true,
 		Channel:             model.ChannelCold,
 		Config:              cfg,
-		AccomplishmentsPath: accomPath,
+		AccomplishmentsText: "accomplishments text",
 	})
 	if err != nil {
 		t.Fatalf("pipeline error: %v", err)
@@ -249,14 +239,6 @@ func TestApplyPipeline_TailorStep_TailorError(t *testing.T) {
 	}))
 	defer llmSrv.Close()
 
-	// Write a temporary accomplishments file so the guard condition passes.
-	tmpDir := t.TempDir()
-	accomPath := filepath.Join(tmpDir, "accomplishments.txt")
-	if err := os.WriteFile(accomPath, []byte("Led migration of monolith to microservices."), 0o600); err != nil {
-		t.Fatalf("write accomplishments file: %v", err)
-	}
-	// stubDocumentLoader ignores the path; only the non-empty string matters for the guard condition.
-
 	var stdout, stderr bytes.Buffer
 	pres := headless.NewWith(&stdout, &stderr)
 
@@ -291,7 +273,7 @@ func TestApplyPipeline_TailorStep_TailorError(t *testing.T) {
 		IsText:              true,
 		Channel:             model.ChannelCold,
 		Config:              cfg,
-		AccomplishmentsPath: accomPath,
+		AccomplishmentsText: "accomplishments text",
 	})
 	if err != nil {
 		t.Fatalf("pipeline error: %v — expected degradation (nil error), not a fatal failure", err)

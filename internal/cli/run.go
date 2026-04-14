@@ -4,6 +4,7 @@ package cli
 import (
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -115,12 +116,21 @@ Outputs a JSON result to stdout when --headless is set.`,
 				input = textFlag
 			}
 
+			var accomplishmentsText string
+			if accomplishmentsFlag != "" {
+				data, err := os.ReadFile(accomplishmentsFlag)
+				if err != nil {
+					return fmt.Errorf("read accomplishments file: %w", err)
+				}
+				accomplishmentsText = string(data)
+			}
+
 			return pl.Run(cmd.Context(), pipeline.ApplyRequest{
 				URLOrText:           input,
 				IsText:              isText,
 				Channel:             channel,
 				Config:              cfg,
-				AccomplishmentsPath: accomplishmentsFlag,
+				AccomplishmentsText: accomplishmentsText,
 			})
 		},
 	}
