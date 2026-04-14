@@ -9,5 +9,6 @@ func NewRootCommand() *cobra.Command {
 		Short: "AI-powered job application assistant",
 	}
 	cmd.AddCommand(NewApplyCommand())
+	cmd.AddCommand(NewServeCommand())
 	return cmd
 }

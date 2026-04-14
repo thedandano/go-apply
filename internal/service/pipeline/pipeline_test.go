@@ -96,18 +96,18 @@ func TestApplyPipeline_HeadlessE2E(t *testing.T) {
 	}
 	llmClient := llm.New(llmSrv.URL, "test", "test", defaults, nil)
 
-	pl := pipeline.NewApplyPipeline(
-		&stubJDFetcher{},
-		llmClient,
-		scorer.New(defaults),
-		&stubCoverLetter{},
-		&stubResumeRepo{},
-		&stubDocumentLoader{},
-		&stubAppRepo{},
-		&stubAugmentService{},
-		pres,
-		defaults,
-	)
+	pl := pipeline.NewApplyPipeline(&pipeline.ApplyConfig{
+		Fetcher:   &stubJDFetcher{},
+		LLM:       llmClient,
+		Scorer:    scorer.New(defaults),
+		CLGen:     &stubCoverLetter{},
+		Resumes:   &stubResumeRepo{},
+		Loader:    &stubDocumentLoader{},
+		AppRepo:   &stubAppRepo{},
+		Augment:   &stubAugmentService{},
+		Presenter: pres,
+		Defaults:  defaults,
+	})
 
 	err = pl.Run(context.Background(), pipeline.ApplyRequest{
 		URLOrText: `We are hiring a senior Go engineer. Required: python, golang, kubernetes. Preferred: docker.`,
