@@ -702,6 +702,48 @@ func TestScore_NilInput_ReturnsError(t *testing.T) {
 	}
 }
 
+// ── ReferenceData passthrough ─────────────────────────────────────────────────
+
+func TestScore_ReferenceGaps_PassedThrough(t *testing.T) {
+	svc := scorer.New(defaults())
+
+	input := baseInput()
+	input.ReferenceData = &model.ReferenceData{
+		AllSkills: []string{"Go", "PostgreSQL"},
+		PriorityMap: map[string]model.ReferenceGap{
+			"Kubernetes": {JDSkill: "Kubernetes", RefSkill: "Docker", Priority: "high"},
+		},
+	}
+
+	result, err := svc.Score(&input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(result.ReferenceGaps) != 1 {
+		t.Fatalf("expected 1 reference gap, got %d", len(result.ReferenceGaps))
+	}
+	if result.ReferenceGaps[0].JDSkill != "Kubernetes" {
+		t.Errorf("gap JDSkill: want %q, got %q", "Kubernetes", result.ReferenceGaps[0].JDSkill)
+	}
+}
+
+func TestScore_ReferenceGaps_NilReferenceData(t *testing.T) {
+	svc := scorer.New(defaults())
+
+	input := baseInput()
+	input.ReferenceData = nil
+
+	result, err := svc.Score(&input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.ReferenceGaps != nil {
+		t.Errorf("expected nil ReferenceGaps when ReferenceData is nil, got %v", result.ReferenceGaps)
+	}
+}
+
 // ── Interface compliance ──────────────────────────────────────────────────────
 
 func TestScore_SatisfiesPortScorer(t *testing.T) {

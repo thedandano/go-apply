@@ -115,7 +115,21 @@ func (s *Service) Score(input *model.ScorerInput) (model.ScoreResult, error) {
 		Keywords:      kwResult.KeywordResult,
 		MetricBullets: metricBullets,
 		FillerPhrases: fillerPhrases,
+		ReferenceGaps: referenceGaps(input.ReferenceData),
 	}, nil
+}
+
+// referenceGaps extracts the gap slice from ReferenceData for passthrough onto
+// ScoreResult. Returns nil when ReferenceData is nil or its map is empty.
+func referenceGaps(rd *model.ReferenceData) []model.ReferenceGap {
+	if rd == nil || len(rd.PriorityMap) == 0 {
+		return nil
+	}
+	gaps := make([]model.ReferenceGap, 0, len(rd.PriorityMap))
+	for _, g := range rd.PriorityMap {
+		gaps = append(gaps, g)
+	}
+	return gaps
 }
 
 // kwScoreResult bundles the keyword score with the structured keyword result.
