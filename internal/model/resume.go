@@ -24,9 +24,8 @@ type TailorResult struct {
 	TierApplied      TailorTier     `json:"tier_applied"`
 	AddedKeywords    []string       `json:"added_keywords,omitempty"`
 	RewrittenBullets []BulletChange `json:"rewritten_bullets,omitempty"`
-	OutputPath       string         `json:"output_path,omitempty"`
+	OutputPath       string         `json:"output_path"`
 	NewScore         ScoreResult    `json:"new_score"`
-	TailoredText     string         `json:"-"` // post-cascade text for accurate re-score delta; not serialized
 }
 
 // ResumeChanges describes the mutations the tailor service applied to a resume.
