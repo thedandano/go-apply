@@ -50,6 +50,42 @@ func NewServeCommand() *cobra.Command {
 				},
 			)
 
+			srv.AddTool(
+				mcp.NewTool("onboard_user",
+					mcp.WithDescription("Store a resume, skills, and accomplishments into the profile database. All inputs are raw text extracted from the vector store."),
+					mcp.WithString("resume_content", mcp.Description("Resume text (required when resume_label is provided)")),
+					mcp.WithString("resume_label", mcp.Description("Short identifier for the resume, e.g. 'backend' (required when resume_content is provided)")),
+					mcp.WithString("skills", mcp.Description("Skills reference text (optional)")),
+					mcp.WithString("accomplishments", mcp.Description("Accomplishments text (optional)")),
+				),
+				handleOnboardUser,
+			)
+
+			srv.AddTool(
+				mcp.NewTool("add_resume",
+					mcp.WithDescription("Add or replace a single resume in the profile database."),
+					mcp.WithString("resume_content", mcp.Description("Resume text"), mcp.Required()),
+					mcp.WithString("resume_label", mcp.Description("Short identifier, e.g. 'backend'"), mcp.Required()),
+				),
+				handleAddResume,
+			)
+
+			srv.AddTool(
+				mcp.NewTool("update_config",
+					mcp.WithDescription("Set a go-apply config field by dot-notation key (e.g. orchestrator.model)."),
+					mcp.WithString("key", mcp.Description("Dot-notation config key"), mcp.Required()),
+					mcp.WithString("value", mcp.Description("New value for the key"), mcp.Required()),
+				),
+				handleUpdateConfig,
+			)
+
+			srv.AddTool(
+				mcp.NewTool("get_config",
+					mcp.WithDescription("Return all go-apply config fields. API keys are redacted."),
+				),
+				handleGetConfig,
+			)
+
 			return server.ServeStdio(srv)
 		},
 	}
