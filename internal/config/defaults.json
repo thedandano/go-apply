@@ -19,7 +19,20 @@
     },
     "overqualification_threshold_multiplier": 2.0,
     "overqualification_penalty":              0.85,
-    "impact_bullet_target": 5
+    "impact_bullet_target": 5,
+    "filler_phrases": [
+      "responsible for",
+      "worked on",
+      "helped with",
+      "assisted in",
+      "involved in",
+      "participated in",
+      "contributed to",
+      "familiar with",
+      "exposure to",
+      "knowledge of"
+    ],
+    "readability_penalty_per_filler": 2.0
   },
   "thresholds": {
     "score_pass":     70.0,
