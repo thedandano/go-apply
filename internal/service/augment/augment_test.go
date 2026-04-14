@@ -85,12 +85,12 @@ type stubLLMClient struct {
 	response string
 	err      error
 	calls    int
-	lastMsgs []port.ChatMessage
+	lastMsgs []model.ChatMessage
 }
 
 var _ port.LLMClient = (*stubLLMClient)(nil)
 
-func (s *stubLLMClient) ChatComplete(_ context.Context, messages []port.ChatMessage, _ port.ChatOptions) (string, error) {
+func (s *stubLLMClient) ChatComplete(_ context.Context, messages []model.ChatMessage, _ model.ChatOptions) (string, error) {
 	s.calls++
 	s.lastMsgs = messages
 	return s.response, s.err
@@ -137,7 +137,7 @@ func TestAugmentResumeText_SkipsWhenNoKeywords(t *testing.T) {
 		testLogger(),
 	)
 
-	input := port.AugmentInput{
+	input := model.AugmentInput{
 		ResumeText: "experienced software engineer",
 		RefData:    nil,
 		JDKeywords: nil,
@@ -171,7 +171,7 @@ func TestAugmentResumeText_VectorPath_IncorporatesChunksViaLLM(t *testing.T) {
 		testLogger(),
 	)
 
-	input := port.AugmentInput{
+	input := model.AugmentInput{
 		ResumeText: "experienced software engineer",
 		JDKeywords: []string{"distributed", "systems"},
 	}
@@ -207,7 +207,7 @@ func TestAugmentResumeText_VectorPath_ReturnsOriginalWhenNoChunksAboveThreshold(
 		testLogger(),
 	)
 
-	input := port.AugmentInput{
+	input := model.AugmentInput{
 		ResumeText: "experienced software engineer",
 		JDKeywords: []string{"golang", "microservices"},
 	}
@@ -240,7 +240,7 @@ func TestAugmentResumeText_VectorPath_ErrorWhenFindSimilarFails(t *testing.T) {
 		testLogger(),
 	)
 
-	input := port.AugmentInput{
+	input := model.AugmentInput{
 		ResumeText: "experienced software engineer",
 		JDKeywords: []string{"golang", "kubernetes"},
 	}
@@ -267,7 +267,7 @@ func TestAugmentResumeText_VectorPath_ErrorWhenLLMFails(t *testing.T) {
 		testLogger(),
 	)
 
-	input := port.AugmentInput{
+	input := model.AugmentInput{
 		ResumeText: "experienced software engineer",
 		JDKeywords: []string{"distributed", "systems"},
 	}
@@ -294,7 +294,7 @@ func TestAugmentResumeText_VectorPath_ErrorWhenLLMReturnsEmpty(t *testing.T) {
 		testLogger(),
 	)
 
-	input := port.AugmentInput{
+	input := model.AugmentInput{
 		ResumeText: "experienced software engineer",
 		JDKeywords: []string{"distributed", "systems"},
 	}
@@ -322,7 +322,7 @@ func TestAugmentResumeText_KeywordFallback_WhenEmbedderFails(t *testing.T) {
 		testLogger(),
 	)
 
-	input := port.AugmentInput{
+	input := model.AugmentInput{
 		ResumeText: "experienced software engineer",
 		JDKeywords: []string{"golang"},
 	}
@@ -359,7 +359,7 @@ func TestAugmentResumeText_KeywordFallback_FiltersByMinCount(t *testing.T) {
 		testLogger(),
 	)
 
-	input := port.AugmentInput{
+	input := model.AugmentInput{
 		ResumeText: "experienced software engineer",
 		JDKeywords: []string{"golang", "distributed"},
 	}
@@ -399,7 +399,7 @@ func TestAugmentResumeText_KeywordFallback_ErrorWhenListDocumentsFails(t *testin
 		testLogger(),
 	)
 
-	input := port.AugmentInput{
+	input := model.AugmentInput{
 		ResumeText: "experienced software engineer",
 		JDKeywords: []string{"golang"},
 	}
@@ -426,7 +426,7 @@ func TestAugmentResumeText_LLMReceivesCorrectPromptStructure(t *testing.T) {
 		testLogger(),
 	)
 
-	input := port.AugmentInput{
+	input := model.AugmentInput{
 		ResumeText: "experienced software engineer",
 		JDKeywords: []string{"distributed", "systems"},
 	}
@@ -475,7 +475,7 @@ func TestAugmentResumeText_CacheHitSkipsEmbedder(t *testing.T) {
 		testLogger(),
 	)
 
-	input := port.AugmentInput{
+	input := model.AugmentInput{
 		ResumeText: "experienced software engineer",
 		JDKeywords: []string{"golang", "kubernetes"},
 	}
@@ -508,7 +508,7 @@ func TestAugmentResumeText_CacheMissStoresVector(t *testing.T) {
 		testLogger(),
 	)
 
-	input := port.AugmentInput{
+	input := model.AugmentInput{
 		ResumeText: "experienced software engineer",
 		JDKeywords: []string{"golang", "kubernetes"},
 	}
@@ -541,7 +541,7 @@ func TestAugmentResumeText_CacheWriteFailureContinues(t *testing.T) {
 		testLogger(),
 	)
 
-	input := port.AugmentInput{
+	input := model.AugmentInput{
 		ResumeText: "experienced software engineer",
 		JDKeywords: []string{"golang", "kubernetes"},
 	}

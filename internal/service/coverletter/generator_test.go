@@ -20,10 +20,10 @@ var _ port.LLMClient = (*stubLLMClient)(nil)
 type stubLLMClient struct {
 	response string
 	err      error
-	recorded []port.ChatMessage
+	recorded []model.ChatMessage
 }
 
-func (s *stubLLMClient) ChatComplete(_ context.Context, messages []port.ChatMessage, _ port.ChatOptions) (string, error) {
+func (s *stubLLMClient) ChatComplete(_ context.Context, messages []model.ChatMessage, _ model.ChatOptions) (string, error) {
 	s.recorded = messages
 	return s.response, s.err
 }
@@ -43,7 +43,7 @@ func TestGenerate_ReturnsResult(t *testing.T) {
 
 	gen := coverletter.New(stub, testDefaults(), discardLogger())
 
-	input := port.CoverLetterInput{
+	input := model.CoverLetterInput{
 		JD: model.JDData{
 			Title:    "Software Engineer",
 			Company:  "Acme Corp",
@@ -88,7 +88,7 @@ func TestGenerate_PromptIncludesJDSkills(t *testing.T) {
 	stub := &stubLLMClient{response: "Cover letter."}
 	gen := coverletter.New(stub, testDefaults(), discardLogger())
 
-	input := port.CoverLetterInput{
+	input := model.CoverLetterInput{
 		JD: model.JDData{
 			Title:     "Backend Engineer",
 			Company:   "TechCo",
@@ -117,7 +117,7 @@ func TestGenerate_PromptIncludesWordTargets(t *testing.T) {
 	stub := &stubLLMClient{response: "Cover letter."}
 	gen := coverletter.New(stub, testDefaults(), discardLogger())
 
-	input := port.CoverLetterInput{
+	input := model.CoverLetterInput{
 		JD:      model.JDData{Title: "Eng", Company: "Co"},
 		Scores:  map[string]model.ScoreResult{"r": {ResumeLabel: "r"}},
 		Channel: model.ChannelCold,
@@ -143,7 +143,7 @@ func TestGenerate_UsesHighestScoringResume(t *testing.T) {
 	stub := &stubLLMClient{response: "Cover letter text."}
 	gen := coverletter.New(stub, testDefaults(), discardLogger())
 
-	input := port.CoverLetterInput{
+	input := model.CoverLetterInput{
 		JD:      model.JDData{Title: "Data Engineer", Company: "DataCo"},
 		Channel: model.ChannelReferral,
 		Profile: model.UserProfile{Name: "John Smith"},
@@ -183,7 +183,7 @@ func TestGenerate_EmptyScores(t *testing.T) {
 	stub := &stubLLMClient{response: "Cover letter with no score context."}
 	gen := coverletter.New(stub, testDefaults(), discardLogger())
 
-	input := port.CoverLetterInput{
+	input := model.CoverLetterInput{
 		JD:      model.JDData{Title: "Engineer", Company: "Corp"},
 		Scores:  map[string]model.ScoreResult{},
 		Channel: model.ChannelCold,
@@ -212,7 +212,7 @@ func TestGenerate_WarnWhenJDRawTextMissing(t *testing.T) {
 	stub := &stubLLMClient{response: "Cover letter."}
 	gen := coverletter.New(stub, testDefaults(), log)
 
-	input := port.CoverLetterInput{
+	input := model.CoverLetterInput{
 		JD:      model.JDData{Title: "SWE", Company: "Acme"},
 		Scores:  map[string]model.ScoreResult{"r": {ResumeLabel: "r"}},
 		Channel: model.ChannelCold,
@@ -242,7 +242,7 @@ func TestGenerate_PromptIncludesJDRawText(t *testing.T) {
 	stub := &stubLLMClient{response: "Cover letter."}
 	gen := coverletter.New(stub, testDefaults(), discardLogger())
 
-	input := port.CoverLetterInput{
+	input := model.CoverLetterInput{
 		JD:        model.JDData{Title: "SRE", Company: "CloudCo"},
 		JDRawText: "We are looking for a site reliability engineer with expertise in Kubernetes and Terraform.",
 		Scores:    map[string]model.ScoreResult{"r": {ResumeLabel: "r"}},
@@ -265,7 +265,7 @@ func TestGenerate_EmptyLLMResponse(t *testing.T) {
 	stub := &stubLLMClient{response: ""}
 	gen := coverletter.New(stub, testDefaults(), discardLogger())
 
-	input := port.CoverLetterInput{
+	input := model.CoverLetterInput{
 		JD:      model.JDData{Title: "Engineer", Company: "Corp"},
 		Scores:  map[string]model.ScoreResult{"r": {ResumeLabel: "r"}},
 		Channel: model.ChannelCold,
@@ -285,7 +285,7 @@ func TestGenerate_LLMError(t *testing.T) {
 	stub := &stubLLMClient{err: errors.New("connection refused")}
 	gen := coverletter.New(stub, testDefaults(), discardLogger())
 
-	input := port.CoverLetterInput{
+	input := model.CoverLetterInput{
 		JD:      model.JDData{Title: "Engineer", Company: "Corp"},
 		Scores:  map[string]model.ScoreResult{"r": {ResumeLabel: "r"}},
 		Channel: model.ChannelRecruiter,

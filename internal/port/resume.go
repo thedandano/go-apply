@@ -6,16 +6,12 @@ import (
 	"github.com/thedandano/go-apply/internal/model"
 )
 
+// ResumeRepository lists the resume files available to the pipeline.
 type ResumeRepository interface {
 	ListResumes() ([]model.ResumeFile, error)
 }
 
-type ResumeChanges struct {
-	AddedKeywords    []string
-	RewrittenBullets []model.BulletChange
-}
-
-// ResumeModifier generates a modified resume file via the resume modifier subprocess.
+// ResumeModifier generates a modified resume file by applying the given changes.
 type ResumeModifier interface {
-	ModifyResume(ctx context.Context, resume model.ResumeFile, changes ResumeChanges) (string, error)
+	ModifyResume(ctx context.Context, resume model.ResumeFile, changes model.ResumeChanges) (string, error)
 }

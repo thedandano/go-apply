@@ -42,3 +42,23 @@ type ScoreResult struct {
 	FillerPhrases []string       `json:"filler_phrases"`
 	ReferenceGaps []ReferenceGap `json:"reference_gaps"`
 }
+
+// ReferenceData carries the scorer's computed skill inventory and gap analysis,
+// threaded through the pipeline so downstream services (augment, tailor) can
+// prioritise what to emphasise without re-deriving it.
+type ReferenceData struct {
+	AllSkills   []string
+	PriorityMap map[string]ReferenceGap
+}
+
+// ScorerInput groups all inputs required to score a single resume against a JD.
+type ScorerInput struct {
+	ResumeText     string
+	ResumeLabel    string
+	ResumePath     string
+	JD             JDData
+	CandidateYears float64
+	RequiredYears  float64
+	SeniorityMatch string
+	ReferenceData  *ReferenceData
+}
