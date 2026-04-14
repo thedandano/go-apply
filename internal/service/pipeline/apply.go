@@ -145,7 +145,7 @@ func (p *ApplyPipeline) Run(ctx context.Context, req ApplyRequest) error {
 	if req.AccomplishmentsPath != "" && result.BestResume != "" && p.tailor != nil {
 		tailorStart := time.Now()
 		p.presenter.OnEvent(model.StepStartedEvent{StepID: "tailor", Label: "Tailoring resume"})
-		tailorResult, tailorErr := p.runTailorStep(ctx, result, jd, req)
+		tailorResult, tailorErr := p.runTailorStep(ctx, result, &jd, req)
 		if tailorErr != nil {
 			slog.WarnContext(ctx, "tailor step failed — continuing", "error", tailorErr)
 			p.presenter.OnEvent(model.StepFailedEvent{StepID: "tailor", Label: "Tailor failed", Err: tailorErr.Error()})
@@ -459,7 +459,7 @@ func profileFromConfig(cfg *config.Config) model.UserProfile {
 func (p *ApplyPipeline) runTailorStep(
 	ctx context.Context,
 	result *model.PipelineResult,
-	jd model.JDData,
+	jd *model.JDData,
 	req ApplyRequest,
 ) (*model.TailorResult, error) {
 	// Load accomplishments file.
@@ -494,7 +494,7 @@ func (p *ApplyPipeline) runTailorStep(
 	tailorResult, err := p.tailor.TailorResume(ctx, &model.TailorInput{
 		Resume:              bestFile,
 		ResumeText:          resumeText,
-		JD:                  jd,
+		JD:                  *jd,
 		ScoreBefore:         scoreBefore,
 		AccomplishmentsText: accomplishments,
 		Options: model.TailorOptions{
@@ -506,12 +506,12 @@ func (p *ApplyPipeline) runTailorStep(
 	}
 
 	// Re-score using tailored text for accurate delta.
-	seniorityMatch := resolveSeniorityMatch(req.Config.DefaultSeniority, &jd)
+	seniorityMatch := resolveSeniorityMatch(req.Config.DefaultSeniority, jd)
 	scoreAfter, err := p.scorer.Score(&model.ScorerInput{
 		ResumeText:     tailorResult.TailoredText,
 		ResumeLabel:    bestFile.Label,
 		ResumePath:     bestFile.Path,
-		JD:             jd,
+		JD:             *jd,
 		CandidateYears: req.Config.YearsOfExperience,
 		RequiredYears:  jd.RequiredYears,
 		SeniorityMatch: seniorityMatch,
