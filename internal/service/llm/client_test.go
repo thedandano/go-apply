@@ -20,7 +20,7 @@ func newTestClient(t *testing.T, baseURL string) *llm.HTTPClient {
 
 // chatOK returns an httptest server that always responds with the given content.
 func chatOK(content string) *httptest.Server {
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{
 			"choices": []map[string]any{
 				{"message": map[string]any{"content": content}},
@@ -31,7 +31,7 @@ func chatOK(content string) *httptest.Server {
 
 // embedOK returns an httptest server that always responds with the given vector.
 func embedOK(vec []float32) *httptest.Server {
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{
 			"data": []map[string]any{
 				{"embedding": vec},
@@ -74,7 +74,7 @@ func TestChatComplete_ErrorOnNon200(t *testing.T) {
 }
 
 func TestChatComplete_ErrorOnEmptyChoices(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{"choices": []any{}})
 	}))
 	defer srv.Close()

@@ -10,7 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"math/rand"
+	"math/rand/v2"
 	"net/http"
 	"time"
 
@@ -134,7 +134,7 @@ func (c *HTTPClient) doWithRetry(ctx context.Context, url string, body []byte, o
 		if attempt > 0 {
 			// Exponential backoff with full jitter: sleep [0, base * 2^attempt)
 			maxWait := baseBackoff * time.Duration(1<<attempt)
-			jitter := time.Duration(rand.Int63n(int64(maxWait)))
+			jitter := time.Duration(rand.Int64N(int64(maxWait)))
 			c.log.DebugContext(ctx, "llm: retrying after backoff",
 				"attempt", attempt,
 				"jitter_ms", jitter.Milliseconds(),
@@ -167,17 +167,17 @@ func (c *HTTPClient) doWithRetry(ctx context.Context, url string, body []byte, o
 		switch resp.StatusCode {
 		case http.StatusOK:
 			decodeErr := json.NewDecoder(resp.Body).Decode(out)
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			return decodeErr
 		case http.StatusTooManyRequests, http.StatusServiceUnavailable:
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			lastErr = fmt.Errorf("llm: API returned %d", resp.StatusCode)
 			c.log.WarnContext(ctx, "llm: retryable status received",
 				"status", resp.StatusCode,
 				"attempt", attempt+1,
 			)
 		default:
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			return fmt.Errorf("llm: API returned status %d", resp.StatusCode)
 		}
 	}
