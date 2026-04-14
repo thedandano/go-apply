@@ -76,7 +76,7 @@ Outputs a JSON result to stdout when --headless is set.`,
 			docLoader := loader.New()
 
 			// Wire profile DB (implements both port.ProfileRepository and port.KeywordCacheRepository).
-			profileRepo, err := newSQLiteProfile(cfg, defaults)
+			profileRepo, err := newSQLiteProfile(cfg)
 			if err != nil {
 				return err
 			}
@@ -87,8 +87,8 @@ Outputs a JSON result to stdout when --headless is set.`,
 			clGen := coverletter.New(llmClient, defaults, log)
 			fetcherSvc := fetcher.NewFallback(defaults, log)
 
-			// Wire presenter — always headless for now; TUI in Epic 6.
-			_ = headlessFlag
+			// Wire presenter — always headless for now.
+			// TODO(Epic 6): swap in TUIPresenter when isatty detects a terminal and --headless is not set
 			pres := headless.New()
 
 			// Build and run the pipeline.

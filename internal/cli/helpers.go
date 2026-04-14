@@ -11,11 +11,10 @@ import (
 // Returns a concrete *sqlite.ProfileRepository because it satisfies both
 // port.ProfileRepository and port.KeywordCacheRepository, so callers can pass
 // it for both parameters without an additional type assertion.
-func newSQLiteProfile(cfg *config.Config, defaults *config.AppDefaults) (*sqlite.ProfileRepository, error) {
+func newSQLiteProfile(cfg *config.Config) (*sqlite.ProfileRepository, error) {
 	repo, err := sqlite.NewProfileRepository(cfg.ResolveDBPath(), cfg.ResolveEmbeddingDim())
 	if err != nil {
 		return nil, fmt.Errorf("open profile db %s: %w", cfg.ResolveDBPath(), err)
 	}
-	_ = defaults
 	return repo, nil
 }

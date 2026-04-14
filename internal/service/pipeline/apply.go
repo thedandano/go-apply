@@ -131,22 +131,37 @@ func (p *ApplyPipeline) Run(ctx context.Context, req ApplyRequest) error {
 	result.BestResume = bestLabel
 	result.BestScore = bestScore
 
-	// Step 4: Generate cover letter.
-	clResult, clErr := p.clGen.Generate(ctx, &model.CoverLetterInput{
-		JD:        jd,
-		JDRawText: jdText,
-		Scores:    scores,
-		Channel:   req.Channel,
-		Profile:   profileFromConfig(req.Config),
-	})
-	if clErr != nil {
-		slog.WarnContext(ctx, "cover letter generation failed", "error", clErr)
-		result.Warnings = append(result.Warnings, model.RiskWarning{
-			Severity: "warn",
-			Message:  fmt.Sprintf("cover letter generation failed: %v", clErr),
+	// Step 4: Generate cover letter — only when the best resume score meets the threshold.
+	if result.BestScore >= p.defaults.Thresholds.ScorePass {
+		clStart := time.Now()
+		p.presenter.OnEvent(model.StepStartedEvent{StepID: "05", Label: "Cover Letter"})
+		clResult, clErr := p.clGen.Generate(ctx, &model.CoverLetterInput{
+			JD:        jd,
+			JDRawText: jdText,
+			Scores:    scores,
+			Channel:   req.Channel,
+			Profile:   profileFromConfig(req.Config),
 		})
+		if clErr != nil {
+			slog.WarnContext(ctx, "cover letter generation failed", "error", clErr)
+			p.presenter.OnEvent(model.StepFailedEvent{StepID: "05", Label: "Cover Letter failed", Err: clErr.Error()})
+			result.Warnings = append(result.Warnings, model.RiskWarning{
+				Severity: "warn",
+				Message:  fmt.Sprintf("cover letter generation failed: %v", clErr),
+			})
+		} else {
+			p.presenter.OnEvent(model.StepCompletedEvent{
+				StepID:    "05",
+				Label:     "Cover Letter generated",
+				ElapsedMS: time.Since(clStart).Milliseconds(),
+			})
+			result.CoverLetter = clResult
+		}
 	} else {
-		result.CoverLetter = clResult
+		slog.InfoContext(ctx, "cover letter skipped — best score below threshold",
+			"best_score", result.BestScore,
+			"threshold", p.defaults.Thresholds.ScorePass,
+		)
 	}
 
 	// Finalize result status.
