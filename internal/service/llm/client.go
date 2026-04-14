@@ -134,7 +134,7 @@ func (c *HTTPClient) doWithRetry(ctx context.Context, url string, body []byte, o
 		if attempt > 0 {
 			// Exponential backoff with full jitter: sleep [0, base * 2^attempt)
 			maxWait := baseBackoff * time.Duration(1<<attempt)
-			jitter := time.Duration(rand.Int64N(int64(maxWait))) //nolint:gosec // G404: jitter for backoff — no security requirement, crypto/rand is unnecessary overhead
+			jitter := time.Duration(rand.Int64N(int64(maxWait))) // #nosec G404 -- jitter for backoff, not a security-sensitive operation
 			c.log.DebugContext(ctx, "llm: retrying after backoff",
 				"attempt", attempt,
 				"jitter_ms", jitter.Milliseconds(),
