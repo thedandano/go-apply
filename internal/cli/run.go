@@ -92,18 +92,18 @@ Outputs a JSON result to stdout when --headless is set.`,
 			pres := headless.New()
 
 			// Build and run the pipeline.
-			pl := pipeline.NewApplyPipeline(
-				fetcherSvc,
-				llmClient,
-				scorerSvc,
-				clGen,
-				resumeRepo,
-				docLoader,
-				appRepo,
-				augmentSvc,
-				pres,
-				defaults,
-			)
+			pl := pipeline.NewApplyPipeline(&pipeline.ApplyConfig{
+				Fetcher:   fetcherSvc,
+				LLM:       llmClient,
+				Scorer:    scorerSvc,
+				CLGen:     clGen,
+				Resumes:   resumeRepo,
+				Loader:    docLoader,
+				AppRepo:   appRepo,
+				Augment:   augmentSvc,
+				Presenter: pres,
+				Defaults:  defaults,
+			})
 
 			isText := textFlag != ""
 			input := urlFlag

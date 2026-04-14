@@ -40,30 +40,33 @@ type ApplyPipeline struct {
 	defaults  *config.AppDefaults
 }
 
-// NewApplyPipeline constructs an ApplyPipeline with all dependencies injected.
-func NewApplyPipeline(
-	fetcher port.JDFetcher,
-	llm port.LLMClient,
-	scorer port.Scorer,
-	clGen port.CoverLetterGenerator,
-	resumes port.ResumeRepository,
-	loader port.DocumentLoader,
-	appRepo port.ApplicationRepository,
-	augment port.Augmenter,
-	presenter port.Presenter,
-	defaults *config.AppDefaults,
-) *ApplyPipeline {
+// ApplyConfig holds all dependencies for an ApplyPipeline.
+type ApplyConfig struct {
+	Fetcher   port.JDFetcher
+	LLM       port.LLMClient
+	Scorer    port.Scorer
+	CLGen     port.CoverLetterGenerator
+	Resumes   port.ResumeRepository
+	Loader    port.DocumentLoader
+	AppRepo   port.ApplicationRepository
+	Augment   port.Augmenter
+	Presenter port.Presenter
+	Defaults  *config.AppDefaults
+}
+
+// NewApplyPipeline constructs an ApplyPipeline with all dependencies injected via ApplyConfig.
+func NewApplyPipeline(cfg *ApplyConfig) *ApplyPipeline {
 	return &ApplyPipeline{
-		fetcher:   fetcher,
-		llm:       llm,
-		scorer:    scorer,
-		clGen:     clGen,
-		resumes:   resumes,
-		loader:    loader,
-		appRepo:   appRepo,
-		augment:   augment,
-		presenter: presenter,
-		defaults:  defaults,
+		fetcher:   cfg.Fetcher,
+		llm:       cfg.LLM,
+		scorer:    cfg.Scorer,
+		clGen:     cfg.CLGen,
+		resumes:   cfg.Resumes,
+		loader:    cfg.Loader,
+		appRepo:   cfg.AppRepo,
+		augment:   cfg.Augment,
+		presenter: cfg.Presenter,
+		defaults:  cfg.Defaults,
 	}
 }
 
