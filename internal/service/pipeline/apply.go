@@ -268,8 +268,7 @@ func (p *ApplyPipeline) extractKeywords(ctx context.Context, jdText string) (mod
 	return jd, false, nil
 }
 
-// extractKeywordsFromText is a package-level helper shared by ApplyPipeline and
-// future TailorPipeline. It calls the LLM with a structured prompt and parses
+// extractKeywordsFromText is a package-level helper used by ApplyPipeline. It calls the LLM with a structured prompt and parses
 // the JSON response into a JDData.
 func extractKeywordsFromText(ctx context.Context, llmClient port.LLMClient, jdText string, defaults *config.AppDefaults) (model.JDData, error) {
 	prompt := fmt.Sprintf(`Extract structured information from the following job description.
