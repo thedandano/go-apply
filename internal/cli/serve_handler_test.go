@@ -268,8 +268,8 @@ func TestHandleOnboardUser_SkillsOnly_Valid(t *testing.T) {
 	if err := json.Unmarshal([]byte(text), &resp); err != nil {
 		t.Fatalf("response is not valid JSON: %v", err)
 	}
-	if _, hasErr := map[string]string{}["error"]; hasErr {
-		t.Error("skills-only onboard should not return error")
+	if len(resp.Stored) == 0 || resp.Stored[0] != "ref:skills" {
+		t.Errorf("Stored = %v, want [ref:skills]", resp.Stored)
 	}
 }
 
@@ -339,6 +339,26 @@ func TestHandleUpdateConfig_UnknownKey_ReturnsError(t *testing.T) {
 	}
 	if _, ok := resp["error"]; !ok {
 		t.Errorf("expected error key, got: %v", resp)
+	}
+}
+
+func TestHandleUpdateConfig_APIKey_ResponseRedacted(t *testing.T) {
+	req := callToolRequest("update_config", map[string]any{
+		"key":   "orchestrator.api_key",
+		"value": "sk-super-secret",
+	})
+	cfg := &config.Config{}
+	result := cli.HandleUpdateConfig(context.Background(), &req, cfg)
+	text := extractText(t, result)
+	var resp map[string]string
+	if err := json.Unmarshal([]byte(text), &resp); err != nil {
+		t.Fatalf("response is not JSON: %v", err)
+	}
+	if resp["value"] == "sk-super-secret" {
+		t.Error("API key must be redacted in update_config response, got plaintext")
+	}
+	if resp["value"] != "***" {
+		t.Errorf("update_config response value = %q, want ***", resp["value"])
 	}
 }
 

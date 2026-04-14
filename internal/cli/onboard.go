@@ -90,6 +90,7 @@ them in the local profile database for use during the apply pipeline.`,
 			if err != nil {
 				return err
 			}
+			defer profileRepo.Close() //nolint:errcheck
 
 			svc := onboarding.New(profileRepo, embedderClient, config.DataDir(), log)
 

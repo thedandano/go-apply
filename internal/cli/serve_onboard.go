@@ -84,7 +84,11 @@ func HandleUpdateConfig(_ context.Context, req *mcp.CallToolRequest, cfg *config
 	if err := cfg.Save(); err != nil {
 		return errorResult(fmt.Sprintf("save config: %v", err))
 	}
-	data, _ := json.Marshal(map[string]string{"updated": key, "value": value})
+	displayValue := value
+	if config.IsAPIKey(key) && value != "" {
+		displayValue = "***"
+	}
+	data, _ := json.Marshal(map[string]string{"updated": key, "value": displayValue})
 	return mcp.NewToolResultText(string(data))
 }
 

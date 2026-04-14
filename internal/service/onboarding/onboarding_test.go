@@ -10,8 +10,13 @@ import (
 	"testing"
 
 	"github.com/thedandano/go-apply/internal/model"
+	"github.com/thedandano/go-apply/internal/port"
 	"github.com/thedandano/go-apply/internal/service/onboarding"
 )
+
+// Compile-time interface satisfaction checks.
+var _ port.ProfileRepository = (*stubProfileRepo)(nil)
+var _ port.EmbeddingClient = (*stubEmbedder)(nil)
 
 // stubProfileRepo records UpsertDocument calls and optionally injects errors.
 type stubProfileRepo struct {
