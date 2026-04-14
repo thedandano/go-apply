@@ -59,7 +59,7 @@ func TestChatComplete_ReturnsAssistantContent(t *testing.T) {
 }
 
 func TestChatComplete_ErrorOnNon200(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 	}))
 	defer srv.Close()
@@ -90,7 +90,7 @@ func TestChatComplete_ErrorOnEmptyChoices(t *testing.T) {
 
 func TestChatComplete_RetriesOn429(t *testing.T) {
 	attempts := 0
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		attempts++
 		if attempts < 3 {
 			w.Header().Set("Retry-After", "0")
@@ -122,7 +122,7 @@ func TestChatComplete_RetriesOn429(t *testing.T) {
 
 func TestChatComplete_RetriesOn503(t *testing.T) {
 	attempts := 0
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		attempts++
 		if attempts < 2 {
 			http.Error(w, "service unavailable", http.StatusServiceUnavailable)
@@ -149,7 +149,7 @@ func TestChatComplete_RetriesOn503(t *testing.T) {
 }
 
 func TestChatComplete_ExhaustsRetries(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "rate limited", http.StatusTooManyRequests)
 	}))
 	defer srv.Close()
@@ -164,7 +164,7 @@ func TestChatComplete_ExhaustsRetries(t *testing.T) {
 }
 
 func TestChatComplete_RespectsContextCancellation(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "rate limited", http.StatusTooManyRequests)
 	}))
 	defer srv.Close()
@@ -204,7 +204,7 @@ func TestEmbed_ReturnsVector(t *testing.T) {
 }
 
 func TestEmbed_ErrorOnEmptyResponse(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{"data": []any{}})
 	}))
 	defer srv.Close()
@@ -217,7 +217,7 @@ func TestEmbed_ErrorOnEmptyResponse(t *testing.T) {
 }
 
 func TestEmbed_ErrorOnNon200(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 	}))
 	defer srv.Close()
@@ -232,7 +232,7 @@ func TestEmbed_ErrorOnNon200(t *testing.T) {
 func TestEmbed_RetriesOn429(t *testing.T) {
 	attempts := 0
 	want := []float32{0.9, 0.8}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		attempts++
 		if attempts < 2 {
 			http.Error(w, "rate limited", http.StatusTooManyRequests)
