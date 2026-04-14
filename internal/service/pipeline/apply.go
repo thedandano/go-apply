@@ -92,6 +92,7 @@ func (p *ApplyPipeline) Run(ctx context.Context, req ApplyRequest) error {
 		slog.WarnContext(ctx, "keyword extraction failed — continuing with empty JD", "error", kwErr)
 		result.Status = "degraded"
 		result.Message = fmt.Sprintf("keyword extraction failed: %v", kwErr)
+		result.Error = kwErr.Error()
 	}
 	result.JD = jd
 	result.Keywords.Required = jd.Required
@@ -350,7 +351,9 @@ func (p *ApplyPipeline) scoreResumes(
 	}
 
 	if len(scores) == 0 && len(resumeFiles) > 0 {
-		return nil, "", 0, fmt.Errorf("scoring: all %d resume(s) failed to load or score", len(resumeFiles))
+		err := fmt.Errorf("scoring: all %d resume(s) failed to load or score", len(resumeFiles))
+		p.presenter.OnEvent(model.StepFailedEvent{StepID: "score", Label: "Score Resumes", Err: err.Error()})
+		return nil, "", 0, err
 	}
 
 	p.presenter.OnEvent(model.StepCompletedEvent{
