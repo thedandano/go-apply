@@ -21,6 +21,7 @@ import (
 	"github.com/thedandano/go-apply/internal/service/llm"
 	"github.com/thedandano/go-apply/internal/service/pipeline"
 	"github.com/thedandano/go-apply/internal/service/scorer"
+	tailor "github.com/thedandano/go-apply/internal/service/tailor"
 )
 
 // NewServeCommand returns the cobra command for "go-apply serve".
@@ -38,6 +39,7 @@ func NewServeCommand() *cobra.Command {
 					mcp.WithString("url", mcp.Description("URL of the job posting to fetch")),
 					mcp.WithString("text", mcp.Description("Raw job description text (alternative to url)")),
 					mcp.WithString("channel", mcp.Description("Application channel: COLD, REFERRAL, or RECRUITER"), mcp.DefaultString("COLD")),
+					mcp.WithString("accomplishments", mcp.Description("Path to accomplishments doc for tier-2 bullet rewriting (optional)")),
 				),
 				func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 					cfg, deps, err := loadDeps()
@@ -85,6 +87,7 @@ func loadDeps() (*config.Config, pipeline.ApplyConfig, error) {
 	scorerSvc := scorer.New(defaults)
 	clGen := coverletter.New(llmClient, defaults, log)
 	fetcherSvc := fetcher.NewFallback(defaults, log)
+	tailorSvc := tailor.New(llmClient, defaults, log)
 
 	deps := pipeline.ApplyConfig{
 		Fetcher:  fetcherSvc,
@@ -96,6 +99,7 @@ func loadDeps() (*config.Config, pipeline.ApplyConfig, error) {
 		AppRepo:  appRepo,
 		Augment:  augmentSvc,
 		Defaults: defaults,
+		Tailor:   tailorSvc,
 		// Presenter is set per-invocation inside each handler.
 	}
 
@@ -115,6 +119,7 @@ func HandleGetScoreWithConfig(ctx context.Context, req *mcp.CallToolRequest, dep
 	urlVal := req.GetString("url", "")
 	textVal := req.GetString("text", "")
 	channelVal := req.GetString("channel", "COLD")
+	accomplishmentsVal := req.GetString("accomplishments", "")
 
 	if urlVal != "" && textVal != "" {
 		return errorResult("exactly one of url or text is required")
@@ -140,10 +145,11 @@ func HandleGetScoreWithConfig(ctx context.Context, req *mcp.CallToolRequest, dep
 	}
 
 	runErr := pl.Run(ctx, pipeline.ApplyRequest{
-		URLOrText: input,
-		IsText:    isText,
-		Channel:   channel,
-		Config:    resolveConfig(cfg),
+		URLOrText:           input,
+		IsText:              isText,
+		Channel:             channel,
+		Config:              resolveConfig(cfg),
+		AccomplishmentsPath: accomplishmentsVal,
 	})
 	if runErr != nil {
 		return errorResult(runErr.Error())

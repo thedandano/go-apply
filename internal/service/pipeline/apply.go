@@ -1,5 +1,5 @@
 // Package pipeline orchestrates the full apply pipeline: fetch → extract keywords →
-// score resumes → augment → generate cover letter → emit result.
+// score resumes → augment → tailor (optional) → generate cover letter → emit result.
 package pipeline
 
 import (
@@ -145,7 +145,7 @@ func (p *ApplyPipeline) Run(ctx context.Context, req ApplyRequest) error {
 	if req.AccomplishmentsPath != "" && result.BestResume != "" && p.tailor != nil {
 		tailorStart := time.Now()
 		p.presenter.OnEvent(model.StepStartedEvent{StepID: "tailor", Label: "Tailoring resume"})
-		tailorResult, tailorErr := p.runTailorStep(ctx, result, &jd, req)
+		tailorResult, tailorErr := p.runTailorStep(ctx, result, &jd, req, resumeFiles)
 		if tailorErr != nil {
 			slog.WarnContext(ctx, "tailor step failed — continuing", "error", tailorErr)
 			p.presenter.OnEvent(model.StepFailedEvent{StepID: "tailor", Label: "Tailor failed", Err: tailorErr.Error()})
@@ -456,11 +456,14 @@ func profileFromConfig(cfg *config.Config) model.UserProfile {
 // runTailorStep loads the accomplishments file, finds and loads the best resume,
 // calls the tailor service, and re-scores the tailored text. It is invoked only
 // when AccomplishmentsPath is set and a tailor service is wired.
+// resumeFiles is the same slice already scored in Run — passed here to avoid a
+// redundant ListResumes call.
 func (p *ApplyPipeline) runTailorStep(
 	ctx context.Context,
 	result *model.PipelineResult,
 	jd *model.JDData,
 	req ApplyRequest,
+	resumeFiles []model.ResumeFile,
 ) (*model.TailorResult, error) {
 	// Load accomplishments file.
 	accomplishments, err := p.loader.Load(req.AccomplishmentsPath)
@@ -468,11 +471,7 @@ func (p *ApplyPipeline) runTailorStep(
 		return nil, fmt.Errorf("load accomplishments: %w", err)
 	}
 
-	// Find and load the best resume.
-	resumeFiles, err := p.resumes.ListResumes()
-	if err != nil {
-		return nil, fmt.Errorf("list resumes for tailor: %w", err)
-	}
+	// Find and load the best resume from the already-scored file list.
 	var bestFile model.ResumeFile
 	for _, r := range resumeFiles {
 		if r.Label == result.BestResume {
