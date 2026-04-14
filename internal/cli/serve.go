@@ -33,22 +33,6 @@ func NewServeCommand() *cobra.Command {
 			srv := server.NewMCPServer("go-apply", "0.1.0")
 
 			srv.AddTool(
-				mcp.NewTool("apply_to_job",
-					mcp.WithDescription("Run the full apply pipeline against a job description. Accepts a URL or raw text."),
-					mcp.WithString("url", mcp.Description("URL of the job posting to fetch")),
-					mcp.WithString("text", mcp.Description("Raw job description text (alternative to url)")),
-					mcp.WithString("channel", mcp.Description("Application channel: COLD, REFERRAL, or RECRUITER"), mcp.DefaultString("COLD")),
-				),
-				func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-					cfg, deps, err := loadDeps()
-					if err != nil {
-						return errorResult(fmt.Sprintf("load config: %v", err)), nil
-					}
-					return HandleApplyToJobWithConfig(ctx, &req, &deps, cfg), nil
-				},
-			)
-
-			srv.AddTool(
 				mcp.NewTool("get_score",
 					mcp.WithDescription("Score resumes against a job description. Runs the full pipeline; a cover letter is included in the result if the best score meets the configured threshold."),
 					mcp.WithString("url", mcp.Description("URL of the job posting to fetch")),
@@ -61,16 +45,6 @@ func NewServeCommand() *cobra.Command {
 						return errorResult(fmt.Sprintf("load config: %v", err)), nil
 					}
 					return HandleGetScoreWithConfig(ctx, &req, &deps, cfg), nil
-				},
-			)
-
-			srv.AddTool(
-				mcp.NewTool("tailor_resume",
-					mcp.WithDescription("Tailor a resume to better match a job description. Stub — not yet implemented."),
-					mcp.WithString("resume_label", mcp.Description("Label of the resume to tailor"), mcp.Required()),
-				),
-				func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-					return HandleTailorResume(ctx, &req), nil
 				},
 			)
 
@@ -128,17 +102,16 @@ func loadDeps() (*config.Config, pipeline.ApplyConfig, error) {
 	return cfg, deps, nil
 }
 
-// HandleApplyToJob is the exported handler for "apply_to_job" tool calls.
-// It validates inputs and runs the pipeline using the provided ApplyConfig.
+// HandleGetScore is the exported handler for "get_score" tool calls.
 // Presenter is assigned internally — callers must leave ApplyConfig.Presenter nil.
 // This function never returns a Go error; all failures become JSON error responses.
-func HandleApplyToJob(ctx context.Context, req *mcp.CallToolRequest, deps *pipeline.ApplyConfig) *mcp.CallToolResult {
-	return HandleApplyToJobWithConfig(ctx, req, deps, nil)
+func HandleGetScore(ctx context.Context, req *mcp.CallToolRequest, deps *pipeline.ApplyConfig) *mcp.CallToolResult {
+	return HandleGetScoreWithConfig(ctx, req, deps, nil)
 }
 
-// HandleApplyToJobWithConfig is the full handler with optional *config.Config.
+// HandleGetScoreWithConfig is the full handler with optional *config.Config.
 // When cfg is nil (tests), a zero-value config is used for non-nil fields.
-func HandleApplyToJobWithConfig(ctx context.Context, req *mcp.CallToolRequest, deps *pipeline.ApplyConfig, cfg *config.Config) *mcp.CallToolResult {
+func HandleGetScoreWithConfig(ctx context.Context, req *mcp.CallToolRequest, deps *pipeline.ApplyConfig, cfg *config.Config) *mcp.CallToolResult {
 	urlVal := req.GetString("url", "")
 	textVal := req.GetString("text", "")
 	channelVal := req.GetString("channel", "COLD")
@@ -166,13 +139,11 @@ func HandleApplyToJobWithConfig(ctx context.Context, req *mcp.CallToolRequest, d
 		input = textVal
 	}
 
-	appCfg := resolveConfig(cfg)
-
 	runErr := pl.Run(ctx, pipeline.ApplyRequest{
 		URLOrText: input,
 		IsText:    isText,
 		Channel:   channel,
-		Config:    appCfg,
+		Config:    resolveConfig(cfg),
 	})
 	if runErr != nil {
 		return errorResult(runErr.Error())
@@ -187,25 +158,6 @@ func HandleApplyToJobWithConfig(ctx context.Context, req *mcp.CallToolRequest, d
 		return errorResult(fmt.Sprintf("marshal result: %v", err))
 	}
 	return mcp.NewToolResultText(string(data))
-}
-
-// HandleGetScore is the exported handler for "get_score" tool calls.
-// It runs the same full pipeline as apply_to_job (cover letter is threshold-gated internally).
-func HandleGetScore(ctx context.Context, req *mcp.CallToolRequest, deps *pipeline.ApplyConfig) *mcp.CallToolResult {
-	return HandleGetScoreWithConfig(ctx, req, deps, nil)
-}
-
-// HandleGetScoreWithConfig is the full handler with optional *config.Config.
-func HandleGetScoreWithConfig(ctx context.Context, req *mcp.CallToolRequest, deps *pipeline.ApplyConfig, cfg *config.Config) *mcp.CallToolResult {
-	// Validation and pipeline logic are identical to apply_to_job.
-	// Cover letter generation is gated on threshold inside the pipeline.
-	return HandleApplyToJobWithConfig(ctx, req, deps, cfg)
-}
-
-// HandleTailorResume is the exported handler for "tailor_resume" tool calls.
-// It always returns a not-implemented error until the tailor pipeline is built.
-func HandleTailorResume(_ context.Context, _ *mcp.CallToolRequest) *mcp.CallToolResult {
-	return errorResult("tailor_resume not yet implemented")
 }
 
 // errorResult wraps an error message as a JSON text tool result.

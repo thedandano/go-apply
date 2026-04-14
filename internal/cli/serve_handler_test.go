@@ -139,71 +139,6 @@ func extractText(t *testing.T, result *mcp.CallToolResult) string {
 
 // ── tests ─────────────────────────────────────────────────────────────────────
 
-func TestApplyToJob_BothURLAndText_ReturnsError(t *testing.T) {
-	cfg := stubApplyConfig()
-	req := callToolRequest("apply_to_job", map[string]any{
-		"url":  "https://example.com/job",
-		"text": "raw jd text",
-	})
-
-	result := cli.HandleApplyToJob(context.Background(), &req, &cfg)
-
-	text := extractText(t, result)
-	var resp map[string]string
-	if err := json.Unmarshal([]byte(text), &resp); err != nil {
-		t.Fatalf("response is not valid JSON: %v — got: %s", err, text)
-	}
-	if _, ok := resp["error"]; !ok {
-		t.Errorf("expected error key in response, got: %v", resp)
-	}
-}
-
-func TestApplyToJob_NeitherURLNorText_ReturnsError(t *testing.T) {
-	cfg := stubApplyConfig()
-	req := callToolRequest("apply_to_job", map[string]any{})
-
-	result := cli.HandleApplyToJob(context.Background(), &req, &cfg)
-
-	text := extractText(t, result)
-	var resp map[string]string
-	if err := json.Unmarshal([]byte(text), &resp); err != nil {
-		t.Fatalf("response is not valid JSON: %v — got: %s", err, text)
-	}
-	if _, ok := resp["error"]; !ok {
-		t.Errorf("expected error key in response, got: %v", resp)
-	}
-}
-
-func TestApplyToJob_URLOnly_ReturnsResult(t *testing.T) {
-	cfg := stubApplyConfig()
-	req := callToolRequest("apply_to_job", map[string]any{
-		"url": "https://example.com/job",
-	})
-
-	result := cli.HandleApplyToJob(context.Background(), &req, &cfg)
-
-	text := extractText(t, result)
-	var pipelineResult model.PipelineResult
-	if err := json.Unmarshal([]byte(text), &pipelineResult); err != nil {
-		t.Fatalf("response is not valid PipelineResult JSON: %v — got: %s", err, text)
-	}
-}
-
-func TestApplyToJob_TextOnly_ReturnsResult(t *testing.T) {
-	cfg := stubApplyConfig()
-	req := callToolRequest("apply_to_job", map[string]any{
-		"text": "We are hiring a senior Go engineer with 5 years of experience.",
-	})
-
-	result := cli.HandleApplyToJob(context.Background(), &req, &cfg)
-
-	text := extractText(t, result)
-	var pipelineResult model.PipelineResult
-	if err := json.Unmarshal([]byte(text), &pipelineResult); err != nil {
-		t.Fatalf("response is not valid PipelineResult JSON: %v — got: %s", err, text)
-	}
-}
-
 func TestGetScore_BothURLAndText_ReturnsError(t *testing.T) {
 	cfg := stubApplyConfig()
 	req := callToolRequest("get_score", map[string]any{
@@ -235,22 +170,5 @@ func TestGetScore_URLOnly_ReturnsResult(t *testing.T) {
 	var pipelineResult model.PipelineResult
 	if err := json.Unmarshal([]byte(text), &pipelineResult); err != nil {
 		t.Fatalf("response is not valid PipelineResult JSON: %v — got: %s", err, text)
-	}
-}
-
-func TestTailorResume_AlwaysReturnsNotImplemented(t *testing.T) {
-	req := callToolRequest("tailor_resume", map[string]any{
-		"resume_label": "my-resume",
-	})
-
-	result := cli.HandleTailorResume(context.Background(), &req)
-
-	text := extractText(t, result)
-	var resp map[string]string
-	if err := json.Unmarshal([]byte(text), &resp); err != nil {
-		t.Fatalf("response is not valid JSON: %v — got: %s", err, text)
-	}
-	if errMsg, ok := resp["error"]; !ok || errMsg == "" {
-		t.Errorf("expected non-empty error key in response, got: %v", resp)
 	}
 }
