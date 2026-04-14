@@ -56,5 +56,5 @@ func (p *JSONPresenter) ShowTailorResult(result *model.TailorResult) error {
 
 // ShowError writes a JSON error object to stderr.
 func (p *JSONPresenter) ShowError(err error) {
-	json.NewEncoder(p.stderr).Encode(map[string]string{"error": err.Error()}) //nolint:errcheck
+	_ = json.NewEncoder(p.stderr).Encode(map[string]string{"error": err.Error()}) // #nosec G104 -- best-effort error reporting to stderr; encoding a string map cannot fail
 }

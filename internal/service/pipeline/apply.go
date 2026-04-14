@@ -119,7 +119,7 @@ func (p *ApplyPipeline) Run(ctx context.Context, req ApplyRequest) error {
 		return fmt.Errorf("list resumes: %w", err)
 	}
 
-	scores, bestLabel, bestScore, err := p.scoreResumes(ctx, resumeFiles, &jd, req.Config, jdText)
+	scores, bestLabel, bestScore, err := p.scoreResumes(ctx, resumeFiles, &jd, req.Config)
 	if err != nil {
 		result.Status = "error"
 		result.Error = err.Error()
@@ -282,7 +282,6 @@ func (p *ApplyPipeline) scoreResumes(
 	resumeFiles []model.ResumeFile,
 	jd *model.JDData,
 	cfg *config.Config,
-	jdText string,
 ) (map[string]model.ScoreResult, string, float64, error) {
 	scoreStart := time.Now()
 	p.presenter.OnEvent(model.StepStartedEvent{StepID: "score", Label: "Scoring resumes"})
@@ -334,8 +333,6 @@ func (p *ApplyPipeline) scoreResumes(
 			bestLabel = r.Label
 		}
 	}
-
-	_ = jdText // available for future use (e.g. storing in ApplicationRecord)
 
 	p.presenter.OnEvent(model.StepCompletedEvent{
 		StepID:    "score",
