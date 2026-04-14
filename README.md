@@ -65,7 +65,45 @@ cat ~/.local/state/go-apply/logs/go-apply-*.log | jq 'select(.level=="ERROR")'
 
 ## Commands
 
-*(expanded as features are delivered)*
+### `go-apply apply`
+
+Run the full pipeline against a job description. Fetches (or accepts) the JD, scores all resumes in `~/.local/share/go-apply/inputs/`, augments resume text with profile context, and generates a cover letter.
+
+```bash
+# From a URL (fetches and caches the JD)
+go-apply apply --url https://example.com/jobs/123
+
+# From raw text (useful in scripts or when the page is paywalled)
+go-apply apply --text "We are hiring a senior Go engineer..."
+
+# Specify application channel
+go-apply apply --url <url> --channel REFERRAL   # COLD (default), REFERRAL, RECRUITER
+```
+
+**Output** (stdout, JSON):
+```json
+{
+  "status": "success",
+  "jd": { "title": "Senior Go Engineer", "company": "Acme", "required": ["go", "kubernetes"], ... },
+  "scores": { "my-resume": { "breakdown": { "keyword_match": 40.5, ... }, ... } },
+  "best_score": 82.3,
+  "best_resume": "my-resume",
+  "keywords": { "required": ["go", "kubernetes"], "preferred": ["docker"] },
+  "cover_letter": { "text": "...", "channel": "COLD", "word_count": 180 },
+  "start_time": "...", "end_time": "..."
+}
+```
+
+Pipeline events (step-started/completed/failed) are written as JSON lines to stderr.
+
+**Flags:**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--url` | — | URL of the job posting |
+| `--text` | — | Raw JD text (mutually exclusive with --url) |
+| `--headless` | `true` | JSON output mode (default; TUI in future Epic 6) |
+| `--channel` | `COLD` | Application channel: `COLD`, `REFERRAL`, `RECRUITER` |
 
 ## MCP Server (Claude Code)
 

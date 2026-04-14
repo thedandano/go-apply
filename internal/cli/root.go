@@ -8,5 +8,6 @@ func NewRootCommand() *cobra.Command {
 		Use:   "go-apply",
 		Short: "AI-powered job application assistant",
 	}
+	cmd.AddCommand(NewApplyCommand())
 	return cmd
 }
