@@ -10,6 +10,8 @@ AI-powered job application CLI. Scores your resume against job postings, tailors
 | Headless / Agent | `go-apply run --headless --url <url>` | Scripts, openclaw, hermes |
 | MCP Server | `go-apply serve` | Claude Code integration |
 
+After installing, run `go-apply setup mcp --agent claude` to register with Claude Code.
+
 ## Installation
 
 ### Install script (recommended)
@@ -153,3 +155,25 @@ Add to Claude Code `settings.json`:
 ```
 
 Available tools: `apply_to_job`, `tailor_resume`, `get_score`
+
+### MCP setup command
+
+Instead of editing config files manually, use the setup command:
+
+```bash
+# Register with Claude Code
+go-apply setup mcp --agent claude
+
+# Register with OpenClaw
+go-apply setup mcp --agent openclaw
+
+# Register with Hermes
+go-apply setup mcp --agent hermes
+```
+
+To unregister:
+```bash
+go-apply setup mcp --agent claude --remove
+```
+
+The command is idempotent — running it again reports "already registered" and makes no changes.
