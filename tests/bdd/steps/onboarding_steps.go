@@ -203,9 +203,17 @@ func resumeContent(filename string) []byte {
 	return []byte("Go engineer resume content for " + filename)
 }
 
-func (s *bddState) cliOnboardTwoResumes(file1, file2 string) error {
-	args := s.resolveFileArgs([]string{"--resume", file1, "--resume", file2})
-	s.runCLI(append([]string{"onboard"}, args...)...)
+func (s *bddState) cliOnboardTwoResumes(filename1, filename2 string) error {
+	// path1: file in tmpHome using filename1 as-is.
+	path1 := filepath.Join(s.tmpHome, filepath.Base(filename1))
+	// path2: file placed in a subdirectory so the path is distinct from path1
+	// even when both filenames share the same basename (duplicate-label test).
+	dir2 := filepath.Join(s.tmpHome, "other")
+	os.MkdirAll(dir2, 0o700) //nolint:errcheck
+	path2 := filepath.Join(dir2, filepath.Base(filename2))
+	os.WriteFile(path1, resumeContent(filepath.Base(filename1)), 0o600) //nolint:errcheck
+	os.WriteFile(path2, resumeContent(filepath.Base(filename2)), 0o600) //nolint:errcheck
+	s.runCLI("onboard", "--resume", path1, "--resume", path2)
 	return nil
 }
 
