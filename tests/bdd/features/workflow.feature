@@ -75,7 +75,9 @@ Feature: Job Application Workflow
     Then go-apply scores both resumes against the job description
     And the resume with the higher total score is selected as the best match
     And the result contains scores for both resumes
-    And the tailoring and cover letter steps run on the best-matching resume
+    And if the best score is >= 40, T1 keyword injection runs on the best-matching resume
+    And if the best score is >= 40, T2 bullet rewrites run on the best-matching resume
+    And a cover letter is generated if the final score is >= 70
 
   Scenario Outline: Cover letter channel affects letter style
     When the user supplies a job description with channel "<channel>"
