@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/thedandano/go-apply/internal/service/fetcher"
 )
@@ -256,5 +257,23 @@ func TestGoqueryFetcher_TruncatesLargePage(t *testing.T) {
 	}
 	if len(text) > 200 {
 		t.Errorf("result should be truncated to 200 chars, got %d", len(text))
+	}
+}
+
+func TestExtractJDMarkdown_TruncatesAtRuneBoundary(t *testing.T) {
+	// "aaaÉbc" encodes as 7 bytes: a(1)+a(1)+a(1)+É(2)+b(1)+c(1).
+	// The byte-slice truncate at maxChars=4 would yield "aaa\xc3" — cutting É mid-rune.
+	// Rune-safe truncation must yield a valid UTF-8 string of at most 4 runes.
+	html := `<html><body><main><p>aaaÉbc</p></main></body></html>`
+
+	result := fetcher.ExtractJDMarkdown(html, 4)
+
+	// Verify result is valid UTF-8 (would be corrupted if sliced mid-rune by byte index).
+	if !utf8.ValidString(result) {
+		t.Errorf("truncated result is invalid UTF-8: %q", result)
+	}
+	// Verify it was actually truncated (4 runes max).
+	if utf8.RuneCountInString(result) > 4 {
+		t.Errorf("expected at most 4 runes, got %d: %q", utf8.RuneCountInString(result), result)
 	}
 }

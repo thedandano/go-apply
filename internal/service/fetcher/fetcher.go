@@ -230,10 +230,18 @@ func ExtractJDMarkdown(htmlStr string, maxChars int) string {
 	return truncate(strings.TrimSpace(markdown), maxChars)
 }
 
-// truncate returns s truncated to maxChars. If maxChars <= 0, s is returned unchanged.
+// truncate returns s truncated to maxChars Unicode code points (runes).
+// If maxChars <= 0, s is returned unchanged.
 func truncate(s string, maxChars int) string {
-	if maxChars <= 0 || len(s) <= maxChars {
+	if maxChars <= 0 {
 		return s
 	}
-	return s[:maxChars]
+	i := 0
+	for j := range s {
+		if i == maxChars {
+			return s[:j]
+		}
+		i++
+	}
+	return s
 }
