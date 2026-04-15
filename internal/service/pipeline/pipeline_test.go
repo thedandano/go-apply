@@ -230,6 +230,86 @@ func TestApplyPipeline_TailorStep(t *testing.T) {
 	}
 }
 
+// capturingPresenter captures the ShowResult call.
+type capturingPresenter struct {
+	result *model.PipelineResult
+	err    error
+}
+
+func (p *capturingPresenter) ShowResult(r *model.PipelineResult) error {
+	p.result = r
+	return nil
+}
+func (p *capturingPresenter) ShowError(err error)                          { p.err = err }
+func (p *capturingPresenter) OnEvent(_ any)                                {}
+func (p *capturingPresenter) ShowTailorResult(_ *model.TailorResult) error { return nil }
+
+var _ port.Presenter = (*capturingPresenter)(nil)
+
+func minimalApplyConfig(pres *capturingPresenter) *pipeline.ApplyConfig {
+	defaults, _ := config.LoadDefaults()
+	return &pipeline.ApplyConfig{
+		Fetcher:   &stubJDFetcher{},
+		LLM:       nil,
+		Scorer:    scorer.New(defaults),
+		CLGen:     &stubCoverLetter{},
+		Resumes:   &stubResumeRepo{},
+		Loader:    &stubDocumentLoader{},
+		AppRepo:   &stubAppRepo{},
+		Augment:   &stubAugmentService{},
+		Presenter: pres,
+		Defaults:  defaults,
+		Tailor:    nil,
+	}
+}
+
+func TestApplyPipeline_NilLLM_DegradesGracefully(t *testing.T) {
+	pres := &capturingPresenter{}
+	cfg := minimalApplyConfig(pres)
+	cfg.LLM = nil
+	cfg.CLGen = nil
+
+	pl := pipeline.NewApplyPipeline(cfg)
+	err := pl.Run(context.Background(), pipeline.ApplyRequest{
+		URLOrText: "Software Engineer at Acme",
+		IsText:    true,
+		Channel:   model.ChannelCold,
+		Config:    &config.Config{},
+	})
+	if err != nil {
+		t.Fatalf("unexpected hard error: %v", err)
+	}
+	if pres.result == nil {
+		t.Fatal("expected result, got nil")
+	}
+	if pres.result.JDText == "" {
+		t.Error("expected JDText to be populated even when LLM is nil")
+	}
+	if pres.result.Status != "degraded" {
+		t.Errorf("expected status degraded, got %q", pres.result.Status)
+	}
+}
+
+func TestApplyPipeline_NilAugment_ScoresWithoutAugmentation(t *testing.T) {
+	pres := &capturingPresenter{}
+	cfg := minimalApplyConfig(pres)
+	cfg.Augment = nil
+
+	pl := pipeline.NewApplyPipeline(cfg)
+	err := pl.Run(context.Background(), pipeline.ApplyRequest{
+		URLOrText: "Software Engineer at Acme",
+		IsText:    true,
+		Channel:   model.ChannelCold,
+		Config:    &config.Config{},
+	})
+	if err != nil {
+		t.Fatalf("unexpected hard error: %v", err)
+	}
+	if pres.result == nil {
+		t.Fatal("expected result, got nil")
+	}
+}
+
 func TestApplyPipeline_TailorStep_TailorError(t *testing.T) {
 	llmSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck

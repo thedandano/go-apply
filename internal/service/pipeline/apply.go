@@ -4,6 +4,7 @@ package pipeline
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -168,8 +169,8 @@ func (p *ApplyPipeline) Run(ctx context.Context, req ApplyRequest) error {
 		}
 	}
 
-	// Step 5: Generate cover letter — only when the best resume score meets the threshold.
-	if result.BestScore >= p.defaults.Thresholds.ScorePass {
+	// Step 5: Generate cover letter — only when CLGen is configured and score meets threshold.
+	if p.clGen != nil && result.BestScore >= p.defaults.Thresholds.ScorePass {
 		clStart := time.Now()
 		p.presenter.OnEvent(model.StepStartedEvent{StepID: "05", Label: "Cover Letter"})
 		clResult, clErr := p.clGen.Generate(ctx, &model.CoverLetterInput{
@@ -252,6 +253,10 @@ func (p *ApplyPipeline) acquireJDText(ctx context.Context, req ApplyRequest) (st
 // extractKeywords calls the LLM to extract structured JD data from raw text.
 // Returns the JDData, a degraded flag (true if extraction failed), and an error.
 func (p *ApplyPipeline) extractKeywords(ctx context.Context, jdText string) (model.JDData, bool, error) {
+	if p.llm == nil {
+		// No orchestrator LLM configured — MCP host handles keyword extraction.
+		return model.JDData{}, true, errors.New("no LLM configured: keyword extraction skipped")
+	}
 	kwStart := time.Now()
 	p.presenter.OnEvent(model.StepStartedEvent{StepID: "keywords", Label: "Extracting keywords"})
 
@@ -348,16 +353,21 @@ func (p *ApplyPipeline) scoreResumes(
 			continue
 		}
 
-		// Augment resume text with profile context before scoring.
-		augmented, refData, augErr := p.augment.AugmentResumeText(ctx, model.AugmentInput{
-			ResumeText: text,
-			RefData:    nil,
-			JDKeywords: append(jd.Required, jd.Preferred...),
-		})
-		if augErr != nil {
-			slog.WarnContext(ctx, "augmentation failed — using original text", "label", r.Label, "error", augErr)
-			augmented = text
-			refData = nil
+		// Augment resume text with profile context before scoring (skipped when Augment is nil).
+		augmented := text
+		var refData *model.ReferenceData
+		if p.augment != nil {
+			var augErr error
+			augmented, refData, augErr = p.augment.AugmentResumeText(ctx, model.AugmentInput{
+				ResumeText: text,
+				RefData:    nil,
+				JDKeywords: append(jd.Required, jd.Preferred...),
+			})
+			if augErr != nil {
+				slog.WarnContext(ctx, "augmentation failed — using original text", "label", r.Label, "error", augErr)
+				augmented = text
+				refData = nil
+			}
 		}
 
 		seniorityMatch := resolveSeniorityMatch(cfg.DefaultSeniority, jd)
