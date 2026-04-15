@@ -21,11 +21,11 @@ func TestApplyHeadless_GoldenPath(t *testing.T) {
 		t.Fatalf("read jd fixture: %v", err)
 	}
 
-	cmd := exec.Command(binary, "run", "--text", string(jdBytes))
+	cmd := exec.Command(binary, "apply", "--headless", "--text", string(jdBytes))
 	cmd.Env = append(os.Environ(), "GO_APPLY_API_KEY=test-key")
 	out, err := cmd.Output()
 	if err != nil {
-		t.Fatalf("go-apply run failed: %v\nstderr: %s", err, cmd.Stderr)
+		t.Fatalf("go-apply apply failed: %v\nstderr: %s", err, cmd.Stderr)
 	}
 
 	var result map[string]any
