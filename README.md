@@ -6,9 +6,9 @@ AI-powered job application CLI. Scores your resume against job postings, tailors
 
 | Mode | Command | Use case |
 |------|---------|----------|
-| Interactive TUI | `go-apply run --url <url>` | Human at terminal |
-| Headless / Agent | `go-apply run --headless --url <url>` | Scripts, openclaw, hermes |
-| MCP Server | `go-apply serve` | Claude Code integration |
+| Headless / Agent | `go-apply run --url <url>` | Scripts, openclaw, hermes |
+| MCP Server | `go-apply serve` | Claude Code, openclaw, hermes |
+| Interactive TUI | _(coming soon)_ | Human at terminal |
 
 After installing, run `go-apply setup mcp --agent claude` to register with Claude Code.
 
@@ -68,6 +68,7 @@ make build   # binary at bin/go-apply
 Config file: `~/.config/go-apply/config.yaml`
 
 ```yaml
+# CLI mode only — not needed for MCP (the host agent is the orchestrator)
 orchestrator:
   base_url: https://api.anthropic.com/v1
   model: claude-sonnet-4-6
@@ -154,7 +155,7 @@ Add to Claude Code `settings.json`:
 }
 ```
 
-Available tools: `apply_to_job`, `tailor_resume`, `get_score`
+Available tools: `get_score`, `onboard_user`, `add_resume`, `update_config`, `get_config`
 
 ### MCP setup command
 
@@ -177,3 +178,13 @@ go-apply setup mcp --agent claude --remove
 ```
 
 The command is idempotent — running it again reports "already registered" and makes no changes.
+
+## Roadmap
+
+| Feature | Status |
+|---------|--------|
+| Interactive TUI | Coming soon |
+| Resume tailoring (keyword injection + bullet rewriting) | Coming soon |
+| Multi-resume scoring with full breakdown | Available via `get_score` |
+| MCP integration (Claude Code) | Available |
+| Headless agent support (openclaw, hermes) | Available |
