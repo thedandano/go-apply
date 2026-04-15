@@ -15,6 +15,15 @@ INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
 # --- Uninstall mode ---
 if [ "${1:-}" = "--uninstall" ]; then
   BINARY="${INSTALL_DIR}/go-apply"
+
+  # Deregister MCP server from all known agents before removing binary.
+  # Failures are silenced — if an agent isn't configured, that's fine.
+  if [ -f "$BINARY" ]; then
+    for agent in claude openclaw hermes; do
+      "$BINARY" setup mcp --agent "$agent" --remove 2>/dev/null || true
+    done
+  fi
+
   if [ -f "$BINARY" ]; then
     rm -f "$BINARY"
     echo "Removed $BINARY"
