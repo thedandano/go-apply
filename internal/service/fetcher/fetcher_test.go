@@ -194,8 +194,8 @@ func TestExtractJDMarkdown_TruncatesToMaxChars(t *testing.T) {
 
 	result := fetcher.ExtractJDMarkdown(html, 200)
 
-	if len(result) > 200 {
-		t.Errorf("result should be truncated to 200 chars, got %d chars", len(result))
+	if utf8.RuneCountInString(result) > 200 {
+		t.Errorf("result should be truncated to 200 runes, got %d runes", utf8.RuneCountInString(result))
 	}
 }
 
@@ -255,8 +255,8 @@ func TestGoqueryFetcher_TruncatesLargePage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(text) > 200 {
-		t.Errorf("result should be truncated to 200 chars, got %d", len(text))
+	if utf8.RuneCountInString(text) > 200 {
+		t.Errorf("result should be truncated to 200 runes, got %d", utf8.RuneCountInString(text))
 	}
 }
 
