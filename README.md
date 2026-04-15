@@ -12,17 +12,53 @@ AI-powered job application CLI. Scores your resume against job postings, tailors
 
 ## Installation
 
+### Install script (recommended)
+
+```bash
+curl -sSfL https://raw.githubusercontent.com/thedandano/go-apply/main/scripts/install.sh | bash
+```
+
+Install options (env vars):
+```bash
+# Install a specific version
+curl -sSfL https://raw.githubusercontent.com/thedandano/go-apply/main/scripts/install.sh | VERSION=0.1.0 bash
+
+# Install to a custom directory (e.g., system-wide, requires sudo)
+curl -sSfL https://raw.githubusercontent.com/thedandano/go-apply/main/scripts/install.sh | INSTALL_DIR=/usr/local/bin sudo bash
+```
+
+To update, re-run the install command — it overwrites the existing binary.
+
+### Uninstall
+
+```bash
+# Remove binary only (keeps config, data, and logs)
+curl -sSfL https://raw.githubusercontent.com/thedandano/go-apply/main/scripts/install.sh | bash -s -- --uninstall
+
+# Remove everything (binary + config + data + logs)
+curl -sSfL https://raw.githubusercontent.com/thedandano/go-apply/main/scripts/install.sh | bash -s -- --uninstall --purge
+```
+
 ### Homebrew (macOS/Linux)
+
 ```bash
 brew install thedandano/tap/go-apply
 ```
 
-### Download binary
-See [Releases](https://github.com/thedandano/go-apply/releases) for pre-built binaries.
+### Go install
 
-### From source
 ```bash
 go install github.com/thedandano/go-apply/cmd/go-apply@latest
+```
+
+> Note: `go install` does not embed version info — `go-apply version` will show `dev`.
+
+### From source
+
+```bash
+git clone https://github.com/thedandano/go-apply.git
+cd go-apply
+make build   # binary at bin/go-apply
 ```
 
 ## Configuration
