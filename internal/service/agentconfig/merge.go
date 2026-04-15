@@ -216,7 +216,8 @@ func entryMatches(raw any, entry port.MCPServerEntry) bool {
 		return false
 	}
 	for i, a := range rawArgs {
-		if a.(string) != entry.Args[i] {
+		s, ok := a.(string)
+		if !ok || s != entry.Args[i] {
 			return false
 		}
 	}
