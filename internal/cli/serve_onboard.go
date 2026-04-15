@@ -27,8 +27,8 @@ func HandleOnboardUser(ctx context.Context, req *mcp.CallToolRequest, svc port.O
 	if (resumeContent == "") != (resumeLabel == "") {
 		return errorResult("resume_content and resume_label must both be provided or both omitted")
 	}
-	if resumeContent == "" && skills == "" && accomplishments == "" {
-		return errorResult("at least one of resume_content, skills, or accomplishments is required")
+	if resumeContent == "" {
+		return errorResult("resume is required")
 	}
 
 	var resumes []model.ResumeEntry

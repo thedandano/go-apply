@@ -35,6 +35,9 @@ them in the local profile database for use during the apply pipeline.`,
 			if len(resumePaths) == 0 && skillsFlag == "" && accomplishmentsFlag == "" {
 				return fmt.Errorf("at least one of --resume, --skills, or --accomplishments is required")
 			}
+			if len(resumePaths) == 0 {
+				return fmt.Errorf("resume is required")
+			}
 
 			cfg, err := config.Load()
 			if err != nil {
