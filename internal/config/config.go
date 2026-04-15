@@ -139,6 +139,18 @@ func Load() (*Config, error) {
 	return cfg, nil
 }
 
+// ValidateCLI returns an error if the orchestrator config required for CLI/TUI
+// mode is incomplete. MCP mode does not call this — the MCP host is the orchestrator.
+func (c *Config) ValidateCLI() error {
+	if strings.TrimSpace(c.Orchestrator.BaseURL) == "" {
+		return fmt.Errorf("orchestrator.base_url is not set — edit %s or set GO_APPLY_API_KEY", filepath.Join(Dir(), "config.yaml"))
+	}
+	if strings.TrimSpace(c.Orchestrator.Model) == "" {
+		return fmt.Errorf("orchestrator.model is not set — edit %s", filepath.Join(Dir(), "config.yaml"))
+	}
+	return nil
+}
+
 // AllKeys returns all user-facing dot-notation config keys in canonical order.
 // Internal keys (db_path, log_level, default_seniority) are intentionally excluded;
 // they can only be set by editing config.yaml directly.

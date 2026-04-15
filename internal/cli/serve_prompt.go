@@ -25,6 +25,7 @@ You handle reasoning: extract keywords from JD text, interpret scores, write cov
 
 ### Step 1 — Verify profile
 Call get_config. Confirm embedder.base_url, embedder.model, and embedding_dim are set.
+Do NOT ask the user for orchestrator config (base_url, model, api_key) — it is irrelevant in MCP mode and will be rejected if you try to set it.
 If the user has not onboarded yet, call onboard_user first.
 
 ### Step 2 — Call get_score
