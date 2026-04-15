@@ -45,6 +45,13 @@ repos:
         pass_filenames: false
         stages: [pre-push]
 
+      - id: go-coverage
+        name: coverage threshold (65%)
+        entry: bash scripts/check-coverage.sh
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+
       # --- commit-msg ---
       - id: conventional-commit
         name: conventional commit message
