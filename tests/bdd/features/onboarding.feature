@@ -8,6 +8,14 @@
 #   @cli  — via go-apply onboard and go-apply config subcommands
 #   @tui  — TUI wizard (Epic 6, not yet implemented)
 #   @future — not yet implemented
+#
+# Onboarding semantics:
+#   Resume is required. Skills and accomplishments are optional but affect tailoring availability.
+#   Skills-only or accomplishments-only (without resume) → error: "resume is required"
+#   Resume only → stored; warns T1 tailoring unavailable (no skills) AND T2 tailoring unavailable (no accomplishments)
+#   Resume + skills → stored; warns T2 tailoring unavailable (no accomplishments)
+#   Resume + accomplishments → stored; warns T1 tailoring unavailable (no skills)
+#   Resume + skills + accomplishments → stored; no warnings
 
 Feature: User Onboarding
 
@@ -36,18 +44,34 @@ Feature: User Onboarding
     And the response lists "resume:backend", "ref:skills", and "accomplishments" as stored
 
   @mcp
-  Scenario: Store skills only via onboard_user
-    Given no user profile exists
-    When Claude invokes the onboard_user tool with skills "Go, Python, Docker" only
-    Then go-apply stores the skills reference
-    And the response lists "ref:skills" as stored
+  Scenario: Skills only — no resume provided
+    When Claude invokes the onboard_user tool with skills "Go, Python, Docker" but no resume
+    Then go-apply returns an error: "resume is required"
 
   @mcp
-  Scenario: Store accomplishments only via onboard_user
+  Scenario: Accomplishments only — no resume provided
+    When Claude invokes the onboard_user tool with accomplishments text but no resume
+    Then go-apply returns an error: "resume is required"
+
+  @mcp
+  Scenario: Resume stored without skills — warns T1 tailoring unavailable
     Given no user profile exists
-    When Claude invokes the onboard_user tool with accomplishments text only
-    Then go-apply stores the accomplishments
-    And the response lists "accomplishments" as stored
+    When Claude invokes the onboard_user tool with resume_content "Go engineer resume" and resume_label "backend" but no skills
+    Then go-apply stores the resume under the label "backend"
+    And the response includes a warning that T1 tailoring is unavailable without skills
+
+  @mcp
+  Scenario: Resume stored without accomplishments — warns T2 tailoring unavailable
+    Given no user profile exists
+    When Claude invokes the onboard_user tool with resume_content "Go engineer resume" and resume_label "backend" but no accomplishments
+    Then go-apply stores the resume under the label "backend"
+    And the response includes a warning that T2 tailoring is unavailable without accomplishments
+
+  @mcp
+  Scenario: go-apply run with no profile returns onboard instructions
+    Given no user profile exists
+    When Claude invokes the get_score tool with raw job description text
+    Then go-apply returns an error indicating the user must run go-apply onboard first
 
   @mcp
   Scenario: Add or replace a resume via add_resume
@@ -69,7 +93,7 @@ Feature: User Onboarding
   @mcp
   Scenario: No input provided to onboard_user
     When Claude invokes the onboard_user tool with no arguments
-    Then go-apply returns an error: "at least one of resume_content, skills, or accomplishments is required"
+    Then go-apply returns an error: "resume is required"
 
   @mcp
   Scenario: add_resume rejects missing resume_content
@@ -138,6 +162,22 @@ Feature: User Onboarding
     When the user runs: go-apply onboard --resume backend.pdf --resume frontend.pdf
     Then go-apply stores both resumes under labels "backend" and "frontend"
     And prints a JSON result listing both stored keys
+
+  @cli
+  Scenario: Skills only — no resume provided
+    When the user runs: go-apply onboard --skills skills.md
+    Then go-apply returns an error: "resume is required"
+
+  @cli
+  Scenario: Accomplishments only — no resume provided
+    When the user runs: go-apply onboard --accomplishments accomplishments.md
+    Then go-apply returns an error: "resume is required"
+
+  @cli
+  Scenario: go-apply run with no profile returns onboard instructions
+    Given no user profile exists
+    When the user runs: go-apply run --text "Senior Go engineer wanted..."
+    Then go-apply returns an error indicating the user must run go-apply onboard first
 
   @cli
   Scenario: Duplicate resume label is rejected

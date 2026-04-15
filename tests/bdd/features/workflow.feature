@@ -1,7 +1,7 @@
 # Workflow Feature
 #
 # Covers the full job application pipeline:
-#   fetch/text → keyword extraction → score resumes → tailor (optional) → cover letter → result
+#   fetch/text → keyword extraction → score resumes → tailor (T1+T2 when inputs allow) → cover letter → result
 #
 # Tags:
 #   @mcp    — invoked via Claude using the get_score MCP tool
@@ -9,12 +9,13 @@
 #   @future — not yet implemented
 #
 # Score threshold (configurable via defaults.json): 70.0
-# Tailor step: only runs when --accomplishments / accomplishments_text is provided.
-#              Tier-1 (keyword injection) always runs.
-#              Tier-2 (bullet rewriting) always runs when accomplishments are provided.
-# Augmentation: profile context is retrieved and blended into each resume before scoring.
-#               Falls back to keyword matching if vector search fails.
-#               Falls back to original resume text if both retrieval methods fail.
+# Always-tailor design:
+#   T1 (keyword injection into Skills section): runs when score >= 40 AND skills present
+#   T2 (bullet rewrites in Experience section): runs when score >= 40 AND accomplishments present
+#   If score < 40: skip tailoring; advisory "structural mismatch — tailoring cannot close this gap"
+# Cover letter: generated if final score >= 70 OR channel = REFERRAL/RECRUITER
+# Orchestrator unavailable → INOPERABLE hard error (pipeline cannot run at all)
+# Embedder unavailable → orchestrator performs keyword matching as fallback
 
 Feature: Job Application Workflow
 
@@ -23,55 +24,58 @@ Feature: Job Application Workflow
     And go-apply is configured with an orchestrator model and endpoint
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # Base scoring — no tailoring
+  # Base scoring — always-tailor design
   # ─────────────────────────────────────────────────────────────────────────────
 
-  Scenario: URL input — score meets threshold — cover letter generated
-    When the user supplies a job posting URL
-    Then go-apply fetches the job description
-    And extracts required and preferred keywords
+  Scenario Outline: Job description input — pipeline runs with tailoring when profile is complete
+    Given the user profile contains a resume, skills, and accomplishments
+    When the user supplies a job description via <input_type>
+    Then go-apply extracts required and preferred keywords
     And scores all stored resumes against the job description
-    And the best resume score is >= 70
-    Then a cover letter is generated for the best-matching resume
-    And the result contains the score breakdown, extracted keywords, and cover letter
-    And the job description is saved to the application record
+    And the best resume score is >= 40
+    And T1 keyword injection runs against the Skills section
+    And T2 bullet rewrites run using the accomplishments
+    And the tailored resume is re-scored
+    And if the final score is >= 70, a cover letter is generated for the best-matching resume
+    And the result contains the base score, tailored score, extracted keywords, and cover letter if generated
 
-  Scenario: URL input — score below threshold — no cover letter
-    When the user supplies a job posting URL
-    Then go-apply fetches the job description
-    And scores all stored resumes against the job description
-    And the best resume score is < 70
-    Then no cover letter is generated
-    And the result contains the score breakdown and extracted keywords
-    And the job description is saved to the application record
+    Examples:
+      | input_type |
+      | URL        |
+      | raw text   |
 
-  Scenario: Text input — score meets threshold — cover letter generated
-    When the user supplies raw job description text
+  Scenario: No skills or accomplishments — tailoring skipped, cover letter based on base score
+    Given the user profile contains a resume only (no skills, no accomplishments)
+    When the user supplies a job description
     Then go-apply scores all stored resumes against the job description
-    And the best resume score is >= 70
-    Then a cover letter is generated for the best-matching resume
-    And the result contains the score breakdown, extracted keywords, and cover letter
+    And the tailoring step is skipped
+    And if the base score is >= 70, a cover letter is generated
+    And the result contains the base score, extracted keywords, and cover letter if generated
 
-  Scenario: Text input — score below threshold — no cover letter
-    When the user supplies raw job description text
-    Then go-apply scores all stored resumes against the job description
-    And the best resume score is < 70
-    Then no cover letter is generated
-    And the result contains the score breakdown and extracted keywords
+  Scenario: Score below 40 — structural mismatch, tailoring skipped
+    Given the user profile contains a resume, skills, and accomplishments
+    When the user supplies a job description
+    And the best resume score is < 40
+    Then go-apply skips the tailoring step
+    And the result includes an advisory: "structural mismatch — tailoring cannot close this gap"
+    And no cover letter is generated
 
   Scenario: Second run on the same URL uses the cached job description
     Given the job posting at a given URL was previously fetched
     When the user supplies the same URL again
     Then go-apply loads the job description from the local cache
     And does not make an HTTP request to the URL
+    And the result indicates the job description was loaded from cache
     And scores all stored resumes against the cached job description
 
-  Scenario: Multiple resumes — all scored — best one selected
+  Scenario: Multiple resumes — all scored — best one selected — pipeline continues
     Given the user profile contains resumes labeled "backend" and "frontend"
+    And the profile contains skills and accomplishments
     When the user supplies a job description
     Then go-apply scores both resumes against the job description
     And the resume with the higher total score is selected as the best match
     And the result contains scores for both resumes
+    And the tailoring and cover letter steps run on the best-matching resume
 
   Scenario Outline: Cover letter channel affects letter style
     When the user supplies a job description with channel "<channel>"
@@ -85,84 +89,31 @@ Feature: Job Application Workflow
       | RECRUITER |
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # With tailoring (accomplishments provided)
-  # Tier-1 (keyword injection into Skills section) always runs.
-  # Tier-2 (bullet rewriting in Experience section) always runs when accomplishments are provided.
-  # The best score is updated if the tailored score is higher.
-  # ─────────────────────────────────────────────────────────────────────────────
-
-  Scenario: Tailoring — tailored score meets threshold — cover letter generated
-    Given accomplishments text is provided
-    When the user supplies a job description
-    Then go-apply scores all resumes against the job description
-    And the tailor step runs on the best-matching resume:
-      | tier | action                                              |
-      | T1   | injects missing JD keywords into the Skills section |
-      | T2   | rewrites relevant Experience bullets grounded in accomplishments |
-    And the tailored resume is re-scored
-    And the tailored score is >= 70
-    Then a cover letter is generated for the tailored resume
-    And the result contains the base score, tailored score, and cover letter
-
-  Scenario: Tailoring — tailored score still below threshold — no cover letter
-    Given accomplishments text is provided
-    When the user supplies a job description
-    Then go-apply scores all resumes against the job description
-    And the tailor step runs on the best-matching resume
-    And the tailored resume is re-scored
-    And the tailored score is < 70
-    Then no cover letter is generated
-    And the result contains the base score and tailored score
-
-  Scenario: No accomplishments provided — tailor step is skipped
-    Given no accomplishments text is provided
-    When the user supplies a job description
-    Then go-apply scores all resumes against the job description
-    And the tailor step does not run
-    And the result contains only base scores
-
-  # ─────────────────────────────────────────────────────────────────────────────
   # Degraded paths
-  # The pipeline never aborts on non-fatal failures — it degrades and continues.
+  # Orchestrator unavailable → INOPERABLE hard error.
+  # Embedder unavailable → orchestrator performs keyword matching as fallback.
   # ─────────────────────────────────────────────────────────────────────────────
 
-  Scenario: Keyword extraction fails — pipeline continues in degraded mode
+  Scenario: Pipeline inoperative — orchestrator unreachable
     Given the orchestrator LLM is unavailable
     When the user supplies a job description
-    Then go-apply cannot extract structured keywords from the job description
-    And still scores all stored resumes using whatever job text is available
-    And the result status is "degraded"
-    And the result includes a message explaining the keyword extraction failure
+    Then go-apply returns an error indicating the pipeline cannot run without the orchestrator
+    And the result status is "error"
+    And no scores or cover letter are returned
 
-  Scenario: Profile context retrieval fails — original resume text used for scoring
+  Scenario: Embedder unavailable — orchestrator performs keyword matching as fallback
     Given the embedder endpoint is unavailable
     When the user supplies a job description
     Then go-apply cannot retrieve profile context via vector search
-    And falls back to keyword-based profile retrieval
-    And if keyword retrieval also fails, scores the original resume text without augmentation
-    And the pipeline completes and returns a score result
-
-  Scenario: Vector search falls back to keyword matching when embedder is unavailable
-    Given the embedder endpoint is unavailable
-    When the user supplies a job description
-    Then go-apply attempts vector search for profile context
-    And falls back to keyword matching when vector search fails
+    And the orchestrator performs keyword matching to retrieve relevant profile chunks
     And uses the keyword-matched profile chunks to augment the resume for scoring
+    And the pipeline completes and returns a score result
 
   Scenario: All resumes fail to load — pipeline returns an error
     Given no resume files can be read from disk
     When the user supplies a job description
     Then go-apply returns an error indicating all resumes failed to load or score
     And the result status is "error"
-
-  Scenario: Tailor tier-2 LLM call fails — result degrades to tier-1
-    Given accomplishments text is provided
-    And the orchestrator LLM fails during bullet rewriting
-    When the user supplies a job description
-    Then tier-1 keyword injection completes successfully
-    And tier-2 bullet rewriting is skipped for affected bullets
-    And the result contains the tier-1 tailored resume
-    And a warning is recorded for the tier-2 failure
 
   # ─────────────────────────────────────────────────────────────────────────────
   # MCP-specific invocation
