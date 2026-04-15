@@ -77,17 +77,17 @@ ARCHIVE="go-apply_${VERSION}_${OS}_${ARCH}.tar.gz"
 BASE_URL="https://github.com/${REPO}/releases/download/v${VERSION}"
 
 # Create temp directory and clean up on exit
-TMPDIR="$(mktemp -d)"
-trap 'rm -rf "$TMPDIR"' EXIT
+TMP_DIR="$(mktemp -d)"
+trap 'rm -rf "$TMP_DIR"' EXIT
 
 echo "Installing go-apply v${VERSION} (${OS}/${ARCH})..."
 
 # Download archive and checksums
-curl -sSfL -o "${TMPDIR}/${ARCHIVE}" "${BASE_URL}/${ARCHIVE}"
-curl -sSfL -o "${TMPDIR}/checksums.txt" "${BASE_URL}/checksums.txt"
+curl -sSfL -o "${TMP_DIR}/${ARCHIVE}" "${BASE_URL}/${ARCHIVE}"
+curl -sSfL -o "${TMP_DIR}/checksums.txt" "${BASE_URL}/checksums.txt"
 
 # Verify checksum
-cd "$TMPDIR"
+cd "$TMP_DIR"
 if command -v sha256sum >/dev/null 2>&1; then
   grep "${ARCHIVE}" checksums.txt | sha256sum -c --quiet
 elif command -v shasum >/dev/null 2>&1; then
