@@ -76,14 +76,21 @@ func New(defaults *config.AppDefaults) *Service {
 }
 
 // Score computes a ScoreResult for the given ScorerInput.
-// Returns an error if input is nil, ResumeText is empty, or SeniorityMatch is
-// not a recognised key in the configured seniority multiplier map.
+// Returns an error if input is nil, ResumeText is empty, JD has no keywords,
+// or SeniorityMatch is not a recognised key in the configured seniority
+// multiplier map. An empty JD (no required or preferred keywords, no title,
+// no company) is rejected — scoring against a blank JD produces a meaningless
+// result and risks false positives.
 func (s *Service) Score(input *model.ScorerInput) (model.ScoreResult, error) {
 	if input == nil {
 		return model.ScoreResult{}, fmt.Errorf("scorer: input must not be nil")
 	}
 	if strings.TrimSpace(input.ResumeText) == "" {
 		return model.ScoreResult{}, fmt.Errorf("scorer: ResumeText must not be empty")
+	}
+	if len(input.JD.Required) == 0 && len(input.JD.Preferred) == 0 &&
+		strings.TrimSpace(input.JD.Title) == "" && strings.TrimSpace(input.JD.Company) == "" {
+		return model.ScoreResult{}, fmt.Errorf("scorer: JD has no keywords, title, or company — keyword extraction likely failed; refusing to score against an empty JD")
 	}
 	if _, ok := s.defaults.Scoring.SeniorityMultipliers[input.SeniorityMatch]; !ok {
 		valid := make([]string, 0, len(s.defaults.Scoring.SeniorityMultipliers))
@@ -169,9 +176,14 @@ func (s *Service) scoreKeywords(input *model.ScorerInput) kwScoreResult {
 	cfg := s.defaults.Scoring
 
 	if len(input.JD.Required) == 0 && len(input.JD.Preferred) == 0 {
+		// No keywords to match — score 0 rather than vacuously granting full
+		// marks. The Score guard above prevents reaching here with a fully
+		// empty JD; this branch fires only when the JD has a title/company
+		// but no keyword lists (e.g. the JD was parsed but extraction missed
+		// all skills). Score 0 on the keyword dimension in that case.
 		return kwScoreResult{
-			KeywordResult: model.KeywordResult{ReqPct: 1.0, PrefPct: 1.0},
-			score:         cfg.Weights.KeywordMatch,
+			KeywordResult: model.KeywordResult{ReqPct: 0.0, PrefPct: 0.0},
+			score:         0,
 		}
 	}
 

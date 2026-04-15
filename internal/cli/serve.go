@@ -207,7 +207,10 @@ func HandleGetScoreWithConfig(ctx context.Context, req *mcp.CallToolRequest, dep
 		Config:              resolveConfig(cfg),
 		AccomplishmentsText: accomplishmentsVal,
 	})
-	if runErr != nil {
+	// If the pipeline errored but the presenter captured a structured result
+	// (status "error" with a message), prefer that over a plain-text error —
+	// it gives the MCP host actionable JSON rather than an opaque string.
+	if runErr != nil && pres.Result == nil {
 		return errorResult(runErr.Error())
 	}
 

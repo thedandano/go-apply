@@ -2,8 +2,8 @@ package model
 
 // ChatMessage is a single turn in an LLM conversation.
 type ChatMessage struct {
-	Role    string
-	Content string
+	Role    string `json:"role"`
+	Content string `json:"content"`
 }
 
 // ChatOptions controls LLM generation parameters for a single call.

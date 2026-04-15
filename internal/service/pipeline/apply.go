@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/thedandano/go-apply/internal/config"
@@ -122,6 +123,27 @@ func (p *ApplyPipeline) Run(ctx context.Context, req ApplyRequest) error {
 	}
 
 	// Step 3: List and score resumes.
+	// Refuse to score when the JD is empty — no keywords, title, or company
+	// means keyword extraction failed and there is nothing meaningful to score
+	// against. Return a clear error so the caller (user or MCP host) can supply
+	// the job description text directly via the --text flag or get_score(text:).
+	emptyJD := len(jd.Required) == 0 && len(jd.Preferred) == 0 &&
+		strings.TrimSpace(jd.Title) == "" && strings.TrimSpace(jd.Company) == ""
+	if emptyJD {
+		jdErr := fmt.Errorf("could not extract a job description from the provided input — " +
+			"the page may have expired, require a login, or failed to load. " +
+			"Please provide the job description text directly using --text \"<jd text>\" " +
+			"or, if using the MCP tool, pass it via the text parameter")
+		slog.ErrorContext(ctx, "aborting pipeline — JD is empty", "error", jdErr)
+		result.Status = "error"
+		result.Error = jdErr.Error()
+		result.EndTime = time.Now()
+		// ShowResult before returning so MCP/headless presenters capture the
+		// structured error payload (ShowError is a no-op in MCP mode).
+		_ = p.presenter.ShowResult(result)
+		return jdErr
+	}
+
 	resumeFiles, err := p.resumes.ListResumes()
 	if err != nil {
 		result.Status = "error"
@@ -280,6 +302,9 @@ func (p *ApplyPipeline) extractKeywords(ctx context.Context, jdText string) (mod
 // extractKeywordsFromText is a package-level helper used by ApplyPipeline. It calls the LLM with a structured prompt and parses
 // the JSON response into a JDData.
 func extractKeywordsFromText(ctx context.Context, llmClient port.LLMClient, jdText string, defaults *config.AppDefaults) (model.JDData, error) {
+	if strings.TrimSpace(jdText) == "" {
+		return model.JDData{}, fmt.Errorf("jd text is empty — page may not have loaded correctly")
+	}
 	prompt := fmt.Sprintf(`Extract structured information from the following job description.
 
 Return ONLY a JSON object with these exact keys:
