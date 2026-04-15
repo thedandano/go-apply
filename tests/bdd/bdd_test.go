@@ -14,8 +14,7 @@ func TestBDD(t *testing.T) {
 	suite := godog.TestSuite{
 		Name: "go-apply BDD",
 		ScenarioInitializer: func(ctx *godog.ScenarioContext) {
-			steps.InitializeOnboardingScenario(ctx)
-			steps.InitializeWorkflowScenario(ctx)
+			steps.InitializeScenario(ctx)
 		},
 		Options: &godog.Options{
 			Format:   "pretty",
