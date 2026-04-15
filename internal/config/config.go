@@ -139,7 +139,9 @@ func Load() (*Config, error) {
 	return cfg, nil
 }
 
-// AllKeys returns all valid dot-notation config keys in canonical order.
+// AllKeys returns all user-facing dot-notation config keys in canonical order.
+// Internal keys (db_path, log_level, default_seniority) are intentionally excluded;
+// they can only be set by editing config.yaml directly.
 func AllKeys() []string {
 	return []string{
 		"orchestrator.base_url",
@@ -149,9 +151,6 @@ func AllKeys() []string {
 		"embedder.model",
 		"embedder.api_key",
 		"embedding_dim",
-		"db_path",
-		"log_level",
-		"default_seniority",
 		"user_name",
 		"occupation",
 		"location",
@@ -186,12 +185,6 @@ func (c *Config) SetField(key, value string) error {
 			return fmt.Errorf("embedding_dim must be an integer: %w", err)
 		}
 		c.EmbeddingDim = n
-	case "db_path":
-		c.DBPath = value
-	case "log_level":
-		c.LogLevel = value
-	case "default_seniority":
-		c.DefaultSeniority = value
 	case "user_name":
 		c.UserName = value
 	case "occupation":
@@ -229,12 +222,6 @@ func (c *Config) GetField(key string) (string, error) {
 		return c.Embedder.APIKey, nil
 	case "embedding_dim":
 		return strconv.Itoa(c.EmbeddingDim), nil
-	case "db_path":
-		return c.DBPath, nil
-	case "log_level":
-		return c.LogLevel, nil
-	case "default_seniority":
-		return c.DefaultSeniority, nil
 	case "user_name":
 		return c.UserName, nil
 	case "occupation":

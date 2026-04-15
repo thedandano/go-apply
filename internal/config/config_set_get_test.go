@@ -101,8 +101,8 @@ func TestSetField_FloatField_InvalidValue(t *testing.T) {
 
 func TestAllKeys_CoversAllFields(t *testing.T) {
 	keys := AllKeys()
-	if len(keys) != 15 {
-		t.Errorf("AllKeys() returned %d keys, want 15", len(keys))
+	if len(keys) != 12 {
+		t.Errorf("AllKeys() returned %d keys, want 12", len(keys))
 	}
 
 	// Each key must be settable and gettable on a zero-value Config.
