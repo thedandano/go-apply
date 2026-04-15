@@ -108,6 +108,36 @@ func TestResolveEmbeddingDim(t *testing.T) {
 	}
 }
 
+func TestValidateCLI_MissingBaseURL_ReturnsError(t *testing.T) {
+	cfg := &config.Config{
+		Orchestrator: config.LLMProviderConfig{Model: "some-model"},
+	}
+	if err := cfg.ValidateCLI(); err == nil {
+		t.Error("ValidateCLI() should return error when base_url is empty")
+	}
+}
+
+func TestValidateCLI_MissingModel_ReturnsError(t *testing.T) {
+	cfg := &config.Config{
+		Orchestrator: config.LLMProviderConfig{BaseURL: "https://api.example.com/v1"},
+	}
+	if err := cfg.ValidateCLI(); err == nil {
+		t.Error("ValidateCLI() should return error when model is empty")
+	}
+}
+
+func TestValidateCLI_Valid_ReturnsNil(t *testing.T) {
+	cfg := &config.Config{
+		Orchestrator: config.LLMProviderConfig{
+			BaseURL: "https://api.example.com/v1",
+			Model:   "some-model",
+		},
+	}
+	if err := cfg.ValidateCLI(); err != nil {
+		t.Errorf("ValidateCLI() unexpected error: %v", err)
+	}
+}
+
 func TestResolveDBPath(t *testing.T) {
 	cfg := &config.Config{DBPath: "/custom/path/db"}
 	if got := cfg.ResolveDBPath(); got != "/custom/path/db" {

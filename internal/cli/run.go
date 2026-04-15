@@ -55,6 +55,9 @@ Outputs a JSON result to stdout when --headless is set.`,
 			if err != nil {
 				return fmt.Errorf("load config: %w", err)
 			}
+			if err := cfg.ValidateCLI(); err != nil {
+				return err
+			}
 
 			defaults, err := config.LoadDefaults()
 			if err != nil {
