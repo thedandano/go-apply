@@ -339,7 +339,7 @@ func TestHandleUpdateConfig_UnknownKey_ReturnsError(t *testing.T) {
 
 func TestHandleUpdateConfig_APIKey_ResponseRedacted(t *testing.T) {
 	req := callToolRequest("update_config", map[string]any{
-		"key":   "orchestrator.api_key",
+		"key":   "embedder.api_key",
 		"value": "sk-super-secret",
 	})
 	cfg := &config.Config{}
@@ -371,9 +371,7 @@ func TestHandleGetConfigWith_RedactsAPIKeys(t *testing.T) {
 	if err := json.Unmarshal([]byte(text), &fields); err != nil {
 		t.Fatalf("response is not JSON: %v", err)
 	}
-	if fields["orchestrator.api_key"] != "***" {
-		t.Errorf("orchestrator.api_key = %q, want ***", fields["orchestrator.api_key"])
-	}
+	// orchestrator keys are not exposed in MCP mode — only check embedder
 	if fields["embedder.api_key"] != "***" {
 		t.Errorf("embedder.api_key = %q, want ***", fields["embedder.api_key"])
 	}
@@ -390,7 +388,82 @@ func TestHandleGetConfigWith_EmptyAPIKey_NotRedacted(t *testing.T) {
 	if err := json.Unmarshal([]byte(text), &fields); err != nil {
 		t.Fatalf("response is not JSON: %v", err)
 	}
-	if fields["orchestrator.api_key"] == "***" {
+	if fields["embedder.api_key"] == "***" {
 		t.Error("empty API key should not be redacted")
+	}
+}
+
+func TestHandleGetConfigWith_ExcludesOrchestratorKeys(t *testing.T) {
+	result := cli.HandleGetConfigWith(&config.Config{})
+
+	text := extractText(t, result)
+	var fields map[string]string
+	if err := json.Unmarshal([]byte(text), &fields); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	for _, key := range []string{"orchestrator.base_url", "orchestrator.model", "orchestrator.api_key"} {
+		if _, found := fields[key]; found {
+			t.Errorf("get_config must not expose %q in MCP mode", key)
+		}
+	}
+}
+
+func TestHandleUpdateConfig_RejectsOrchestratorKey(t *testing.T) {
+	req := callToolRequest("update_config", map[string]any{
+		"key":   "orchestrator.model",
+		"value": "gpt-4o",
+	})
+	result := cli.HandleUpdateConfig(context.Background(), &req, &config.Config{})
+
+	text := extractText(t, result)
+	var payload map[string]string
+	if err := json.Unmarshal([]byte(text), &payload); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if payload["error"] == "" {
+		t.Error("expected error when setting orchestrator key in MCP mode")
+	}
+}
+
+// TestHandleGetScore_NilServices_ResultContainsJDText verifies that the full
+// handler path (nil LLM, nil CLGen, nil Augment → pipeline → JSON marshal)
+// includes jd_text in the response. This guards against regressions where
+// JDText is stripped during serialization.
+func TestHandleGetScore_NilServices_ResultContainsJDText(t *testing.T) {
+	defaults, err := config.LoadDefaults()
+	if err != nil {
+		t.Fatalf("LoadDefaults: %v", err)
+	}
+	deps := pipeline.ApplyConfig{
+		Fetcher:  &stubJDFetcher{},
+		LLM:      nil,
+		Scorer:   &stubScorer{},
+		CLGen:    nil,
+		Resumes:  &stubResumeRepo{},
+		Loader:   &stubDocumentLoader{},
+		AppRepo:  &stubApplicationRepository{},
+		Augment:  nil,
+		Defaults: defaults,
+		Tailor:   nil,
+	}
+
+	req := callToolRequest("get_score", map[string]any{
+		"text":    "Software Engineer role at Acme Corp",
+		"channel": "COLD",
+	})
+
+	result := cli.HandleGetScore(context.Background(), &req, &deps)
+
+	text := extractText(t, result)
+	var payload model.PipelineResult
+	if err := json.Unmarshal([]byte(text), &payload); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	// status must be "degraded" (keyword extraction skipped, not a hard error).
+	if payload.Status == "error" {
+		t.Errorf("expected status degraded, got error: %s", payload.Error)
+	}
+	if payload.JDText == "" {
+		t.Error("expected non-empty jd_text in result, got empty or missing")
 	}
 }

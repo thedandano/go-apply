@@ -4,6 +4,7 @@ package pipeline
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -94,6 +95,7 @@ func (p *ApplyPipeline) Run(ctx context.Context, req ApplyRequest) error {
 		p.presenter.ShowError(err)
 		return err
 	}
+	result.JDText = jdText // returned so the MCP host (Claude) can extract keywords and reason over it
 
 	// Step 2: Extract keywords from JD text via LLM.
 	jd, degraded, kwErr := p.extractKeywords(ctx, jdText)
@@ -167,8 +169,9 @@ func (p *ApplyPipeline) Run(ctx context.Context, req ApplyRequest) error {
 		}
 	}
 
-	// Step 5: Generate cover letter — only when the best resume score meets the threshold.
-	if result.BestScore >= p.defaults.Thresholds.ScorePass {
+	// Step 5: Generate cover letter — only when CLGen is configured and score meets threshold.
+	switch {
+	case p.clGen != nil && result.BestScore >= p.defaults.Thresholds.ScorePass:
 		clStart := time.Now()
 		p.presenter.OnEvent(model.StepStartedEvent{StepID: "05", Label: "Cover Letter"})
 		clResult, clErr := p.clGen.Generate(ctx, &model.CoverLetterInput{
@@ -193,7 +196,9 @@ func (p *ApplyPipeline) Run(ctx context.Context, req ApplyRequest) error {
 			})
 			result.CoverLetter = clResult
 		}
-	} else {
+	case p.clGen == nil:
+		slog.InfoContext(ctx, "cover letter skipped — CLGen not configured (MCP mode: Claude generates cover letters)")
+	default:
 		slog.InfoContext(ctx, "cover letter skipped — best score below threshold",
 			"best_score", result.BestScore,
 			"threshold", p.defaults.Thresholds.ScorePass,
@@ -251,6 +256,10 @@ func (p *ApplyPipeline) acquireJDText(ctx context.Context, req ApplyRequest) (st
 // extractKeywords calls the LLM to extract structured JD data from raw text.
 // Returns the JDData, a degraded flag (true if extraction failed), and an error.
 func (p *ApplyPipeline) extractKeywords(ctx context.Context, jdText string) (model.JDData, bool, error) {
+	if p.llm == nil {
+		// No orchestrator LLM configured — MCP host handles keyword extraction.
+		return model.JDData{}, true, errors.New("no LLM configured: keyword extraction skipped")
+	}
 	kwStart := time.Now()
 	p.presenter.OnEvent(model.StepStartedEvent{StepID: "keywords", Label: "Extracting keywords"})
 
@@ -347,16 +356,21 @@ func (p *ApplyPipeline) scoreResumes(
 			continue
 		}
 
-		// Augment resume text with profile context before scoring.
-		augmented, refData, augErr := p.augment.AugmentResumeText(ctx, model.AugmentInput{
-			ResumeText: text,
-			RefData:    nil,
-			JDKeywords: append(jd.Required, jd.Preferred...),
-		})
-		if augErr != nil {
-			slog.WarnContext(ctx, "augmentation failed — using original text", "label", r.Label, "error", augErr)
-			augmented = text
-			refData = nil
+		// Augment resume text with profile context before scoring (skipped when Augment is nil).
+		augmented := text
+		var refData *model.ReferenceData
+		if p.augment != nil {
+			var augErr error
+			augmented, refData, augErr = p.augment.AugmentResumeText(ctx, model.AugmentInput{
+				ResumeText: text,
+				RefData:    nil,
+				JDKeywords: append(jd.Required, jd.Preferred...),
+			})
+			if augErr != nil {
+				slog.WarnContext(ctx, "augmentation failed — using original text", "label", r.Label, "error", augErr)
+				augmented = text
+				refData = nil
+			}
 		}
 
 		seniorityMatch := resolveSeniorityMatch(cfg.DefaultSeniority, jd)

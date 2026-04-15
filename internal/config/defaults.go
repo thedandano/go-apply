@@ -52,6 +52,7 @@ type TailorDefaults struct {
 type FetcherDefaults struct {
 	ChromedpTimeoutMS    int `json:"chromedp_timeout_ms"`
 	MinJDTextLengthChars int `json:"min_jd_text_length_chars"`
+	MaxJDTextLengthChars int `json:"max_jd_text_length_chars"`
 }
 
 type VectorSearchDefaults struct {

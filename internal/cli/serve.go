@@ -15,13 +15,9 @@ import (
 	"github.com/thedandano/go-apply/internal/loader"
 	mcppres "github.com/thedandano/go-apply/internal/presenter/mcp"
 	"github.com/thedandano/go-apply/internal/repository/fs"
-	"github.com/thedandano/go-apply/internal/service/augment"
-	"github.com/thedandano/go-apply/internal/service/coverletter"
 	"github.com/thedandano/go-apply/internal/service/fetcher"
-	"github.com/thedandano/go-apply/internal/service/llm"
 	"github.com/thedandano/go-apply/internal/service/pipeline"
 	"github.com/thedandano/go-apply/internal/service/scorer"
-	tailor "github.com/thedandano/go-apply/internal/service/tailor"
 )
 
 // NewServeCommand returns the cobra command for "go-apply serve".
@@ -86,7 +82,7 @@ func NewServeCommand() *cobra.Command {
 
 			srv.AddTool(
 				mcp.NewTool("update_config",
-					mcp.WithDescription("Set a go-apply config field by dot-notation key (e.g. orchestrator.model)."),
+					mcp.WithDescription("Set a go-apply config field by dot-notation key (e.g. embedder.model, embedding_dim, user_name). Orchestrator keys are not used in MCP mode."),
 					mcp.WithString("key", mcp.Description("Dot-notation config key"), mcp.Required()),
 					mcp.WithString("value", mcp.Description("New value for the key"), mcp.Required()),
 				),
@@ -112,6 +108,13 @@ func NewServeCommand() *cobra.Command {
 				},
 			)
 
+			srv.AddPrompt(
+				mcp.NewPrompt("job_application_workflow",
+					mcp.WithPromptDescription("Orchestration guide: how Claude should use go-apply MCP tools to evaluate job fit and generate cover letters"),
+				),
+				HandleWorkflowPrompt,
+			)
+
 			return server.ServeStdio(srv)
 		},
 	}
@@ -119,6 +122,8 @@ func NewServeCommand() *cobra.Command {
 
 // loadDeps loads configuration and wires all pipeline dependencies.
 // Config is loaded fresh per invocation so changes take effect immediately.
+// In MCP mode Claude is the orchestrator — LLM, CLGen, Augment, and Tailor are nil;
+// Claude handles keyword extraction, cover letter generation, augmentation, and tailoring.
 func loadDeps() (*config.Config, pipeline.ApplyConfig, error) {
 	log := slog.Default()
 
@@ -132,36 +137,25 @@ func loadDeps() (*config.Config, pipeline.ApplyConfig, error) {
 		return nil, pipeline.ApplyConfig{}, fmt.Errorf("load defaults: %w", err)
 	}
 
-	llmClient := llm.New(cfg.Orchestrator.BaseURL, cfg.Orchestrator.Model, cfg.Orchestrator.APIKey, defaults, log)
-	embedderClient := llm.New(cfg.Embedder.BaseURL, cfg.Embedder.Model, cfg.Embedder.APIKey, defaults, log)
-
 	dataDir := config.DataDir()
 	appRepo := fs.NewApplicationRepository(dataDir)
 	resumeRepo := fs.NewResumeRepository(dataDir)
 	docLoader := loader.New()
 
-	profileRepo, err := newSQLiteProfile(cfg)
-	if err != nil {
-		return nil, pipeline.ApplyConfig{}, err
-	}
-
-	augmentSvc := augment.New(profileRepo, profileRepo, embedderClient, llmClient, defaults, log)
 	scorerSvc := scorer.New(defaults)
-	clGen := coverletter.New(llmClient, defaults, log)
 	fetcherSvc := fetcher.NewFallback(defaults, log)
-	tailorSvc := tailor.New(llmClient, defaults, log)
 
 	deps := pipeline.ApplyConfig{
 		Fetcher:  fetcherSvc,
-		LLM:      llmClient,
+		LLM:      nil, // Claude handles keyword extraction
 		Scorer:   scorerSvc,
-		CLGen:    clGen,
+		CLGen:    nil, // Claude generates cover letters
 		Resumes:  resumeRepo,
 		Loader:   docLoader,
 		AppRepo:  appRepo,
-		Augment:  augmentSvc,
+		Augment:  nil, // augment requires LLM to incorporate chunks — skipped in MCP mode
 		Defaults: defaults,
-		Tailor:   tailorSvc,
+		Tailor:   nil, // Claude handles tailoring
 		// Presenter is set per-invocation inside each handler.
 	}
 

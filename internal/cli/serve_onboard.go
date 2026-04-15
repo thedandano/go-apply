@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 
@@ -78,6 +79,9 @@ func HandleUpdateConfig(_ context.Context, req *mcp.CallToolRequest, cfg *config
 	if key == "" {
 		return errorResult("key is required")
 	}
+	if strings.HasPrefix(key, "orchestrator.") {
+		return errorResult("orchestrator config is not used in MCP mode: Claude is the orchestrator. To configure for CLI/TUI use, edit ~/.config/go-apply/config.yaml directly.")
+	}
 	if err := cfg.SetField(key, value); err != nil {
 		return errorResult(err.Error())
 	}
@@ -93,9 +97,11 @@ func HandleUpdateConfig(_ context.Context, req *mcp.CallToolRequest, cfg *config
 }
 
 // HandleGetConfigWith renders the config as redacted JSON. Exported for testing.
+// Only MCP-relevant keys are included; orchestrator keys are excluded because
+// in MCP mode Claude is the orchestrator.
 func HandleGetConfigWith(cfg *config.Config) *mcp.CallToolResult {
-	fields := make(map[string]string, len(config.AllKeys()))
-	for _, key := range config.AllKeys() {
+	fields := make(map[string]string, len(config.MCPKeys()))
+	for _, key := range config.MCPKeys() {
 		value, _ := cfg.GetField(key)
 		if config.IsAPIKey(key) && value != "" {
 			value = "***"
