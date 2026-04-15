@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"unicode"
 
 	"github.com/cucumber/godog"
 )
@@ -16,23 +15,15 @@ import (
 // object and returns it. The pipeline writes progress lines followed by the
 // final result, all to stdout, so s.lastOutput is not a single JSON document.
 func extractFinalJSON(output string) (string, error) {
-	trimmed := strings.TrimRightFunc(output, unicode.IsSpace)
-	if !strings.HasSuffix(trimmed, "}") {
-		return "", fmt.Errorf("no JSON object found in output: %s", output)
-	}
-	depth := 0
-	for i := len(trimmed) - 1; i >= 0; i-- {
-		switch trimmed[i] {
-		case '}':
-			depth++
-		case '{':
-			depth--
-			if depth == 0 {
-				return trimmed[i:], nil
+	for i := len(output) - 1; i >= 0; i-- {
+		if output[i] == '{' {
+			candidate := output[i:]
+			if json.Valid([]byte(candidate)) {
+				return candidate, nil
 			}
 		}
 	}
-	return "", fmt.Errorf("unbalanced braces in output: %s", output)
+	return "", fmt.Errorf("no valid JSON object found in output: %s", output)
 }
 
 // ── Given ─────────────────────────────────────────────────────────────────
@@ -43,6 +34,9 @@ func (s *bddState) profileWithResume() error {
 		"resume_content": "Experienced Go engineer with 5 years of backend development",
 		"resume_label":   "backend",
 	})
+	if s.exitCode != 0 {
+		return fmt.Errorf("failed to seed profile resume: exit %d, output: %s", s.exitCode, s.lastOutput)
+	}
 	return nil
 }
 
@@ -66,10 +60,16 @@ func (s *bddState) profileWithTwoResumes(label1, label2 string) error {
 		"resume_content": "Backend Go engineer resume",
 		"resume_label":   label1,
 	})
+	if s.exitCode != 0 {
+		return fmt.Errorf("failed to seed resume %q: exit %d, output: %s", label1, s.exitCode, s.lastOutput)
+	}
 	s.callMCPTool("onboard_user", map[string]any{
 		"resume_content": "Frontend React engineer resume",
 		"resume_label":   label2,
 	})
+	if s.exitCode != 0 {
+		return fmt.Errorf("failed to seed resume %q: exit %d, output: %s", label2, s.exitCode, s.lastOutput)
+	}
 	return nil
 }
 
@@ -213,7 +213,11 @@ func (s *bddState) cliRunUnknownChannel(url, channel string) error {
 	return nil
 }
 
-// ── Then ──────────────────────────────────────────────────────────────────
+// ── Then ─────────────────────────────────────────────────────────────────────
+// NOTE: The test environment runs without a real orchestrator LLM. Assertions
+// verify structural correctness (valid JSON, non-empty output, expected fields)
+// rather than semantic correctness (exact scores, cover letter content).
+// Full semantic validation belongs in an integration suite with a real LLM.
 
 func (s *bddState) assertPipelineRan() error {
 	if s.exitCode != 0 {

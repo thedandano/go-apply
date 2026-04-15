@@ -20,9 +20,10 @@ import (
 )
 
 var (
-	binaryPath string
-	buildOnce  sync.Once
-	buildErr   error
+	binaryPath   string
+	binaryTmpDir string
+	buildOnce    sync.Once
+	buildErr     error
 )
 
 // minimalPDF is a syntactically valid, minimal PDF-1.4 document with no content.
@@ -61,8 +62,17 @@ func buildBinary() (string, error) {
 			return
 		}
 		binaryPath = bin
+		binaryTmpDir = tmp
 	})
 	return binaryPath, buildErr
+}
+
+// CleanupBinary removes the temp directory holding the compiled binary.
+// Call from TestMain after the suite finishes.
+func CleanupBinary() {
+	if binaryTmpDir != "" {
+		os.RemoveAll(binaryTmpDir)
+	}
 }
 
 // runCLI runs the go-apply binary with the given arguments in an isolated environment.
@@ -127,36 +137,81 @@ func (s *bddState) callMCPTool(toolName string, args map[string]any) {
 	}
 
 	// MCP initialize handshake
-	writeJSON(stdin, map[string]any{
+	if err := writeJSON(stdin, map[string]any{
 		"jsonrpc": "2.0", "id": 1, "method": "initialize",
 		"params": map[string]any{
 			"protocolVersion": "2024-11-05",
 			"capabilities":    map[string]any{},
 			"clientInfo":      map[string]any{"name": "bdd-test", "version": "1.0"},
 		},
-	})
+	}); err != nil {
+		s.lastError = err.Error()
+		s.exitCode = 1
+		stdin.Close()
+		if cmd.Process != nil {
+			cmd.Process.Kill() //nolint:errcheck
+		}
+		cmd.Wait() //nolint:errcheck
+		return
+	}
 	// initialized notification (no id)
-	writeJSON(stdin, map[string]any{
+	if err := writeJSON(stdin, map[string]any{
 		"jsonrpc": "2.0", "method": "notifications/initialized",
-	})
+	}); err != nil {
+		s.lastError = err.Error()
+		s.exitCode = 1
+		stdin.Close()
+		if cmd.Process != nil {
+			cmd.Process.Kill() //nolint:errcheck
+		}
+		cmd.Wait() //nolint:errcheck
+		return
+	}
 	// tool call
-	writeJSON(stdin, map[string]any{
+	if err := writeJSON(stdin, map[string]any{
 		"jsonrpc": "2.0", "id": 2, "method": "tools/call",
 		"params": map[string]any{"name": toolName, "arguments": args},
-	})
+	}); err != nil {
+		s.lastError = err.Error()
+		s.exitCode = 1
+		stdin.Close()
+		if cmd.Process != nil {
+			cmd.Process.Kill() //nolint:errcheck
+		}
+		cmd.Wait() //nolint:errcheck
+		return
+	}
 	stdin.Close()
 
-	cmd.Wait() //nolint:errcheck
+	if waitErr := cmd.Wait(); waitErr != nil {
+		if exitErr, ok := waitErr.(*exec.ExitError); ok {
+			s.exitCode = exitErr.ExitCode()
+		} else {
+			s.exitCode = 1
+			if s.lastError == "" {
+				s.lastError = waitErr.Error()
+			}
+		}
+	} else {
+		s.exitCode = 0
+	}
 
 	output := stdout.String()
 	s.lastOutput = extractMCPResult(output)
-	s.exitCode = 0
 }
 
-func writeJSON(w io.Writer, v any) {
-	data, _ := json.Marshal(v)
-	w.Write(data)         //nolint:errcheck
-	w.Write([]byte("\n")) //nolint:errcheck
+func writeJSON(w io.Writer, v any) error {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return fmt.Errorf("marshal JSON: %w", err)
+	}
+	if _, err := w.Write(data); err != nil {
+		return fmt.Errorf("write JSON: %w", err)
+	}
+	if _, err := w.Write([]byte("\n")); err != nil {
+		return fmt.Errorf("write newline: %w", err)
+	}
+	return nil
 }
 
 // extractMCPResult finds the last JSON-RPC response with id=2 in the output
@@ -165,18 +220,25 @@ func extractMCPResult(raw string) string {
 	lines := strings.Split(strings.TrimSpace(raw), "\n")
 	for i := len(lines) - 1; i >= 0; i-- {
 		line := strings.TrimSpace(lines[i])
-		if !strings.Contains(line, `"id":2`) {
+		if !strings.Contains(line, `"id"`) {
 			continue
 		}
-		var resp struct {
+		var msg struct {
+			ID     json.RawMessage `json:"id"`
 			Result struct {
 				Content []struct {
 					Text string `json:"text"`
 				} `json:"content"`
 			} `json:"result"`
 		}
-		if err := json.Unmarshal([]byte(line), &resp); err == nil && len(resp.Result.Content) > 0 {
-			return resp.Result.Content[0].Text
+		if err := json.Unmarshal([]byte(line), &msg); err != nil {
+			continue
+		}
+		if string(msg.ID) != "2" {
+			continue
+		}
+		if len(msg.Result.Content) > 0 {
+			return msg.Result.Content[0].Text
 		}
 	}
 	return raw

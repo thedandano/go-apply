@@ -3,6 +3,7 @@
 package bdd_test
 
 import (
+	"os"
 	"testing"
 
 	"github.com/cucumber/godog"
@@ -26,4 +27,10 @@ func TestBDD(t *testing.T) {
 	if suite.Run() != 0 {
 		t.Fatal("BDD suite failed")
 	}
+}
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	steps.CleanupBinary()
+	os.Exit(code)
 }

@@ -43,6 +43,9 @@ func (s *bddState) resumeLabeledExists(label string) error {
 		"resume_content": "Existing resume content",
 		"resume_label":   label,
 	})
+	if s.exitCode != 0 {
+		return fmt.Errorf("failed to seed resume %q: exit %d, output: %s", label, s.exitCode, s.lastOutput)
+	}
 	return nil
 }
 
