@@ -36,7 +36,7 @@ Provide url OR text (not both). Set channel: COLD (default) | REFERRAL | RECRUIT
 |-------|---------|
 | status | "success", "degraded", or "error" |
 | jd_text | Raw job description — YOUR input for keyword extraction and reasoning |
-| best_score | 0.0–1.0 embedding-based fit score |
+| best_score | 0.0–1.0 keyword and heuristic fit score |
 | best_resume | Which stored resume matched best |
 | keywords.required/preferred | May be empty in MCP mode — extract from jd_text yourself |
 | warnings | Degraded step notices |

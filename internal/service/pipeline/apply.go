@@ -195,6 +195,8 @@ func (p *ApplyPipeline) Run(ctx context.Context, req ApplyRequest) error {
 			})
 			result.CoverLetter = clResult
 		}
+	} else if p.clGen == nil {
+		slog.InfoContext(ctx, "cover letter skipped — CLGen not configured (MCP mode: Claude generates cover letters)")
 	} else {
 		slog.InfoContext(ctx, "cover letter skipped — best score below threshold",
 			"best_score", result.BestScore,

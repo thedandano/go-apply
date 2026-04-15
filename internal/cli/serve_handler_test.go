@@ -424,3 +424,46 @@ func TestHandleUpdateConfig_RejectsOrchestratorKey(t *testing.T) {
 		t.Error("expected error when setting orchestrator key in MCP mode")
 	}
 }
+
+// TestHandleGetScore_NilServices_ResultContainsJDText verifies that the full
+// handler path (nil LLM, nil CLGen, nil Augment → pipeline → JSON marshal)
+// includes jd_text in the response. This guards against regressions where
+// JDText is stripped during serialization.
+func TestHandleGetScore_NilServices_ResultContainsJDText(t *testing.T) {
+	defaults, err := config.LoadDefaults()
+	if err != nil {
+		t.Fatalf("LoadDefaults: %v", err)
+	}
+	deps := pipeline.ApplyConfig{
+		Fetcher:  &stubJDFetcher{},
+		LLM:      nil,
+		Scorer:   &stubScorer{},
+		CLGen:    nil,
+		Resumes:  &stubResumeRepo{},
+		Loader:   &stubDocumentLoader{},
+		AppRepo:  &stubApplicationRepository{},
+		Augment:  nil,
+		Defaults: defaults,
+		Tailor:   nil,
+	}
+
+	req := callToolRequest("get_score", map[string]any{
+		"text":    "Software Engineer role at Acme Corp",
+		"channel": "COLD",
+	})
+
+	result := cli.HandleGetScore(context.Background(), &req, &deps)
+
+	text := extractText(t, result)
+	var payload model.PipelineResult
+	if err := json.Unmarshal([]byte(text), &payload); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	// status must be "degraded" (keyword extraction skipped, not a hard error).
+	if payload.Status == "error" {
+		t.Errorf("expected status degraded, got error: %s", payload.Error)
+	}
+	if payload.JDText == "" {
+		t.Error("expected non-empty jd_text in result, got empty or missing")
+	}
+}

@@ -162,18 +162,16 @@ func AllKeys() []string {
 // MCPKeys returns the config keys relevant in MCP mode.
 // Orchestrator keys are excluded: in MCP mode Claude (the MCP host) is the orchestrator
 // and no separately-configured LLM is needed for reasoning tasks.
+// Derived from AllKeys() by filtering orchestrator.* so new keys are automatically included.
 func MCPKeys() []string {
-	return []string{
-		"embedder.base_url",
-		"embedder.model",
-		"embedder.api_key",
-		"embedding_dim",
-		"user_name",
-		"occupation",
-		"location",
-		"linkedin_url",
-		"years_of_experience",
+	all := AllKeys()
+	out := make([]string, 0, len(all))
+	for _, k := range all {
+		if !strings.HasPrefix(k, "orchestrator.") {
+			out = append(out, k)
+		}
 	}
+	return out
 }
 
 // IsAPIKey reports whether a dot-notation config key holds an API key value.
