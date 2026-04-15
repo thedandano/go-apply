@@ -108,6 +108,13 @@ func NewServeCommand() *cobra.Command {
 				},
 			)
 
+			srv.AddPrompt(
+				mcp.NewPrompt("job_application_workflow",
+					mcp.WithPromptDescription("Orchestration guide: how Claude should use go-apply MCP tools to evaluate job fit and generate cover letters"),
+				),
+				HandleWorkflowPrompt,
+			)
+
 			return server.ServeStdio(srv)
 		},
 	}
