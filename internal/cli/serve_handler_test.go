@@ -3,6 +3,7 @@ package cli_test
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -255,21 +256,15 @@ func TestHandleOnboardUser_HappyPath_ReturnsStored(t *testing.T) {
 	}
 }
 
-func TestHandleOnboardUser_SkillsOnly_Valid(t *testing.T) {
-	svc := &stubOnboarder{
-		result: model.OnboardResult{Stored: []string{"ref:skills"}},
-	}
+func TestHandleOnboardUser_SkillsOnly_ReturnsError(t *testing.T) {
+	svc := &stubOnboarder{}
 	req := callToolRequest("onboard_user", map[string]any{
 		"skills": "Go, Python",
 	})
 	result := cli.HandleOnboardUser(context.Background(), &req, svc)
 	text := extractText(t, result)
-	var resp model.OnboardResult
-	if err := json.Unmarshal([]byte(text), &resp); err != nil {
-		t.Fatalf("response is not valid JSON: %v", err)
-	}
-	if len(resp.Stored) == 0 || resp.Stored[0] != "ref:skills" {
-		t.Errorf("Stored = %v, want [ref:skills]", resp.Stored)
+	if !strings.Contains(text, "resume is required") {
+		t.Errorf("expected 'resume is required' error, got: %s", text)
 	}
 }
 
