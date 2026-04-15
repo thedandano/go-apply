@@ -15,7 +15,7 @@ import (
 var _ port.ResumeRepository = (*ResumeRepository)(nil)
 
 // ResumeRepository lists resume files from the inputs subdirectory of dataDir.
-// Only .docx and .pdf files are returned; all other extensions are ignored.
+// Supported formats: .docx, .pdf, .txt, .md, .markdown, .text.
 type ResumeRepository struct {
 	inputsDir string
 }
@@ -25,7 +25,18 @@ func NewResumeRepository(dataDir string) *ResumeRepository {
 	return &ResumeRepository{inputsDir: filepath.Join(dataDir, "inputs")}
 }
 
-// ListResumes returns all .docx and .pdf files found in the inputs directory.
+// resumeExts is the set of file extensions ListResumes will include.
+var resumeExts = map[string]bool{
+	".docx":     true,
+	".pdf":      true,
+	".txt":      true,
+	".text":     true,
+	".md":       true,
+	".markdown": true,
+}
+
+// ListResumes returns all resume files found in the inputs directory.
+// Supported formats: .docx, .pdf, .txt, .text, .md, .markdown.
 func (r *ResumeRepository) ListResumes() ([]model.ResumeFile, error) {
 	entries, err := os.ReadDir(r.inputsDir)
 	if err != nil {
@@ -37,7 +48,7 @@ func (r *ResumeRepository) ListResumes() ([]model.ResumeFile, error) {
 			continue
 		}
 		ext := strings.ToLower(filepath.Ext(e.Name()))
-		if ext != ".docx" && ext != ".pdf" {
+		if !resumeExts[ext] {
 			continue
 		}
 		label := strings.TrimSuffix(e.Name(), filepath.Ext(e.Name()))

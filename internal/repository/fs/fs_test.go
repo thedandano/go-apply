@@ -32,8 +32,8 @@ func TestResumeRepository_ListResumes_FiltersExtensions(t *testing.T) {
 	inputsDir := filepath.Join(dir, "inputs")
 	os.MkdirAll(inputsDir, config.DirPerm) //nolint:errcheck
 
-	// Only .docx and .pdf should be listed.
-	for _, name := range []string{"resume.docx", "resume.pdf", "readme.txt", "ignore.xlsx"} {
+	// Supported: .docx, .pdf, .txt, .md, .markdown, .text. Ignored: .xlsx, .csv.
+	for _, name := range []string{"resume.docx", "resume.pdf", "resume.txt", "resume.md", "ignore.xlsx", "ignore.csv"} {
 		os.WriteFile(filepath.Join(inputsDir, name), []byte("content"), config.FilePerm) //nolint:errcheck
 	}
 
@@ -42,8 +42,8 @@ func TestResumeRepository_ListResumes_FiltersExtensions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(resumes) != 2 {
-		t.Errorf("expected 2 resumes (.docx + .pdf), got %d", len(resumes))
+	if len(resumes) != 4 {
+		t.Errorf("expected 4 resumes (.docx + .pdf + .txt + .md), got %d", len(resumes))
 	}
 	for _, r := range resumes {
 		if r.Label == "" {

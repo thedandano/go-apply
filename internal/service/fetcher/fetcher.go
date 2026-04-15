@@ -61,12 +61,43 @@ func (f *ChromedpFetcher) Fetch(ctx context.Context, url string) (string, error)
 	timeoutCtx, timeoutCancel := context.WithTimeout(chromeCtx, timeout)
 	defer timeoutCancel()
 
+	// jobContentSelectors is the ordered list of CSS selectors to wait for
+	// before capturing the page body. We try each one; if none appear within
+	// the timeout we fall back to capturing whatever is in the body.
+	jobContentSelectors := []string{
+		"main",
+		"article",
+		"[role='main']",
+		"[class*='job-description']",
+		"[class*='job-detail']",
+		"[class*='jobDescription']",
+		"[class*='description']",
+	}
+
 	var body string
-	err := chromedp.Run(timeoutCtx,
+	actions := []chromedp.Action{
 		chromedp.Navigate(url),
 		chromedp.WaitReady("body"),
-		chromedp.InnerHTML("body", &body),
-	)
+		// Give JS-rendered pages 2 s to load their content before capturing.
+		chromedp.Sleep(2 * time.Second),
+	}
+
+	// Best-effort: wait for a known job-content container to appear.
+	// Failures are silently ignored — we still capture whatever is in body.
+	for _, sel := range jobContentSelectors {
+		sel := sel
+		actions = append(actions, chromedp.ActionFunc(func(ctx context.Context) error {
+			waitCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+			defer cancel()
+			_ = chromedp.WaitVisible(sel, chromedp.ByQuery).Do(waitCtx)
+			return nil
+		}))
+		break // try only the first selector; break after one attempt
+	}
+
+	actions = append(actions, chromedp.InnerHTML("body", &body))
+
+	err := chromedp.Run(timeoutCtx, actions...)
 	if err != nil {
 		return "", fmt.Errorf("chromedp fetch %s: %w", url, err)
 	}

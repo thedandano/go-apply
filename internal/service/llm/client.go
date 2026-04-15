@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"math/rand/v2"
 	"net/http"
@@ -177,8 +178,13 @@ func (c *HTTPClient) doWithRetry(ctx context.Context, url string, body []byte, o
 				"attempt", attempt+1,
 			)
 		default:
+			var bodySnippet string
+			if b, readErr := io.ReadAll(io.LimitReader(resp.Body, 512)); readErr == nil {
+				bodySnippet = string(b)
+			}
 			_ = resp.Body.Close()
-			return fmt.Errorf("llm: API returned status %d", resp.StatusCode)
+			c.log.ErrorContext(ctx, "llm: non-retryable error", "status", resp.StatusCode, "body", bodySnippet, "url", url)
+			return fmt.Errorf("llm: API returned status %d: %s", resp.StatusCode, bodySnippet)
 		}
 	}
 	return fmt.Errorf("llm: all %d attempts failed: %w", maxAttempts, lastErr)

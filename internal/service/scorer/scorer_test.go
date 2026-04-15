@@ -111,19 +111,16 @@ func TestScore_KeywordMatchCaseInsensitive(t *testing.T) {
 	within(t, "KeywordMatch", 45.0, result.Breakdown.KeywordMatch, 0.1)
 }
 
-func TestScore_NoJDKeywords_FullKeywordScore(t *testing.T) {
+func TestScore_NoJDKeywords_ReturnsError(t *testing.T) {
 	svc := scorer.New(defaults())
 
 	input := baseInput()
-	input.JD.Required = []string{}
-	input.JD.Preferred = []string{}
+	input.JD = model.JDData{} // fully empty JD — no keywords, no title, no company
 
-	result, err := svc.Score(&input)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	_, err := svc.Score(&input)
+	if err == nil {
+		t.Fatal("expected error for empty JD, got nil")
 	}
-
-	within(t, "KeywordMatch", 45.0, result.Breakdown.KeywordMatch, 0.01)
 }
 
 func TestScore_OnlyPreferredKeywords_FullWeightOnPreferred(t *testing.T) {

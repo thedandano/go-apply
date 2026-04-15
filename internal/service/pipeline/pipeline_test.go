@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/thedandano/go-apply/internal/config"
@@ -263,7 +264,7 @@ func minimalApplyConfig(pres *capturingPresenter) *pipeline.ApplyConfig {
 	}
 }
 
-func TestApplyPipeline_NilLLM_DegradesGracefully(t *testing.T) {
+func TestApplyPipeline_NilLLM_ErrorsOnEmptyJD(t *testing.T) {
 	pres := &capturingPresenter{}
 	cfg := minimalApplyConfig(pres)
 	cfg.LLM = nil
@@ -276,34 +277,43 @@ func TestApplyPipeline_NilLLM_DegradesGracefully(t *testing.T) {
 		Channel:   model.ChannelCold,
 		Config:    &config.Config{},
 	})
-	if err != nil {
-		t.Fatalf("unexpected hard error: %v", err)
+	if err == nil {
+		t.Fatal("expected error when JD cannot be extracted, got nil")
 	}
-	if pres.result == nil {
-		t.Fatal("expected result, got nil")
-	}
-	if pres.result.JDText == "" {
-		t.Error("expected JDText to be populated even when LLM is nil")
-	}
-	if pres.result.Status != "degraded" {
-		t.Errorf("expected status degraded, got %q", pres.result.Status)
+	if !strings.Contains(err.Error(), "could not extract a job description") {
+		t.Errorf("expected actionable error message, got: %v", err)
 	}
 }
 
 func TestApplyPipeline_NilAugment_ScoresWithoutAugmentation(t *testing.T) {
+	// This test requires a real LLM response so the JD is populated before scoring.
+	// minimalApplyConfig uses nil LLM; wire a stub that returns a minimal valid JD.
+	llmSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
+			"choices": []map[string]any{
+				{"message": map[string]any{
+					"content": `{"title":"SWE","company":"Acme","required":["go"],"preferred":[],"location":"Remote","seniority":"mid","required_years":2}`,
+				}},
+			},
+		})
+	}))
+	defer llmSrv.Close()
+
 	pres := &capturingPresenter{}
 	cfg := minimalApplyConfig(pres)
 	cfg.Augment = nil
+	defaults, _ := config.LoadDefaults()
+	cfg.LLM = llm.New(llmSrv.URL, "test-model", "test-key", defaults, nil)
 
 	pl := pipeline.NewApplyPipeline(cfg)
 	err := pl.Run(context.Background(), pipeline.ApplyRequest{
-		URLOrText: "Software Engineer at Acme",
+		URLOrText: "Software Engineer at Acme requiring Go",
 		IsText:    true,
 		Channel:   model.ChannelCold,
-		Config:    &config.Config{},
+		Config:    &config.Config{DefaultSeniority: "mid", YearsOfExperience: 3},
 	})
 	if err != nil {
-		t.Fatalf("unexpected hard error: %v", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if pres.result == nil {
 		t.Fatal("expected result, got nil")

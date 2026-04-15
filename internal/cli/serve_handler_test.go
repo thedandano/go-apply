@@ -425,11 +425,11 @@ func TestHandleUpdateConfig_RejectsOrchestratorKey(t *testing.T) {
 	}
 }
 
-// TestHandleGetScore_NilServices_ResultContainsJDText verifies that the full
-// handler path (nil LLM, nil CLGen, nil Augment → pipeline → JSON marshal)
-// includes jd_text in the response. This guards against regressions where
-// JDText is stripped during serialization.
-func TestHandleGetScore_NilServices_ResultContainsJDText(t *testing.T) {
+// TestHandleGetScore_NilLLM_ErrorsWithActionableMessage verifies that when
+// keyword extraction cannot produce a JD (nil LLM → empty JD), the handler
+// returns an error result with an actionable message directing the user to
+// supply the job description text directly.
+func TestHandleGetScore_NilLLM_ErrorsWithActionableMessage(t *testing.T) {
 	defaults, err := config.LoadDefaults()
 	if err != nil {
 		t.Fatalf("LoadDefaults: %v", err)
@@ -459,11 +459,10 @@ func TestHandleGetScore_NilServices_ResultContainsJDText(t *testing.T) {
 	if err := json.Unmarshal([]byte(text), &payload); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	// status must be "degraded" (keyword extraction skipped, not a hard error).
-	if payload.Status == "error" {
-		t.Errorf("expected status degraded, got error: %s", payload.Error)
+	if payload.Status != "error" {
+		t.Errorf("expected status error when JD is empty, got %q", payload.Status)
 	}
-	if payload.JDText == "" {
-		t.Error("expected non-empty jd_text in result, got empty or missing")
+	if !strings.Contains(payload.Error, "could not extract a job description") {
+		t.Errorf("expected actionable error message, got: %s", payload.Error)
 	}
 }
