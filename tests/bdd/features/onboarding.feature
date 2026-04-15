@@ -101,14 +101,13 @@ Feature: User Onboarding
     Then go-apply returns an error: "resume_content and resume_label are both required"
 
   @mcp
-  Scenario: Configure orchestrator model and endpoint via update_config
+  Scenario: update_config rejects orchestrator keys in MCP mode
     When Claude invokes the update_config tool with key "orchestrator.model" and value "claude-opus-4-6"
-    Then go-apply saves the config
-    And the response confirms key "orchestrator.model" was updated
+    Then go-apply returns an error: "orchestrator config is not used in MCP mode"
 
   @mcp
   Scenario: API key value is redacted in update_config response
-    When Claude invokes the update_config tool with key "orchestrator.api_key" and value "sk-super-secret"
+    When Claude invokes the update_config tool with key "embedder.api_key" and value "sk-super-secret"
     Then go-apply saves the API key
     And the response shows value "***" instead of the plaintext key
 
@@ -119,17 +118,16 @@ Feature: User Onboarding
 
   @mcp
   Scenario: View current configuration via get_config
-    Given the orchestrator API key is set
+    Given the embedder API key is set
     When Claude invokes the get_config tool
     Then go-apply returns all user-facing configuration fields
-    And the orchestrator.api_key field is shown as "***"
     And the embedder.api_key field is shown as "***"
 
   @mcp
   Scenario: Empty API key is not redacted in get_config response
-    Given the orchestrator API key is not set
+    Given the embedder API key is not set
     When Claude invokes the get_config tool
-    Then the orchestrator.api_key field is shown as an empty string
+    Then the embedder.api_key field is shown as an empty string
 
   # ─────────────────────────────────────────────────────────────────────────────
   # CLI

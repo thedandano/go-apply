@@ -61,6 +61,18 @@ func (s *bddState) orchestratorAPIKeyNotSet() error {
 	return nil
 }
 
+func (s *bddState) embedderAPIKeyIsSet() error {
+	s.writeConfig(map[string]string{
+		"embedder.api_key": "sk-embedder-key",
+	})
+	return nil
+}
+
+func (s *bddState) embedderAPIKeyNotSet() error {
+	// Default config has no embedder API key; nothing to do.
+	return nil
+}
+
 // ── When (MCP) ─────────────────────────────────────────────────────────────
 
 func (s *bddState) invokeOnboardUserWithResume(content, label string) error {
@@ -386,6 +398,14 @@ func (s *bddState) assertOrchestratorAPIKeyEmpty() error {
 	// orchestrator.api_key should be an empty string — check it's not "***"
 	if strings.Contains(s.lastOutput, "orchestrator.api_key") && strings.Contains(s.lastOutput, "***") {
 		return fmt.Errorf("expected orchestrator.api_key to be empty, but got redacted value\nstdout: %s", s.lastOutput)
+	}
+	return nil
+}
+
+func (s *bddState) assertEmbedderAPIKeyEmpty() error {
+	// embedder.api_key should be present but not redacted as "***"
+	if strings.Contains(s.lastOutput, "embedder.api_key") && strings.Contains(s.lastOutput, "***") {
+		return fmt.Errorf("expected embedder.api_key to be empty (not redacted), got:\nstdout: %s", s.lastOutput)
 	}
 	return nil
 }

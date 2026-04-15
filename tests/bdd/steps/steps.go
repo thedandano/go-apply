@@ -56,6 +56,8 @@ func InitializeScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^a resume labeled "([^"]*)" already exists$`, s.resumeLabeledExists)
 	ctx.Given(`^the orchestrator API key is set$`, s.orchestratorAPIKeyIsSet)
 	ctx.Given(`^the orchestrator API key is not set$`, s.orchestratorAPIKeyNotSet)
+	ctx.Given(`^the embedder API key is set$`, s.embedderAPIKeyIsSet)
+	ctx.Given(`^the embedder API key is not set$`, s.embedderAPIKeyNotSet)
 
 	// ── Onboarding: When (MCP) ─────────────────────────────────────────────
 	ctx.When(`^Claude invokes the onboard_user tool with resume_content "([^"]*)" and resume_label "([^"]*)"$`, s.invokeOnboardUserWithResume)
@@ -101,6 +103,7 @@ func InitializeScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the orchestrator\.api_key field is shown as "([^"]*)"$`, s.assertOrchestratorAPIKey)
 	ctx.Then(`^the embedder\.api_key field is shown as "([^"]*)"$`, s.assertEmbedderAPIKey)
 	ctx.Then(`^the orchestrator\.api_key field is shown as an empty string$`, s.assertOrchestratorAPIKeyEmpty)
+	ctx.Then(`^the embedder\.api_key field is shown as an empty string$`, s.assertEmbedderAPIKeyEmpty)
 	ctx.Then(`^prints a JSON result listing all stored keys$`, s.assertJSONResultStored)
 	ctx.Then(`^prints a JSON result listing "([^"]*)" as stored$`, s.assertJSONResultKey)
 	ctx.Then(`^prints a JSON result listing both stored keys$`, s.assertJSONResultBothKeys)
