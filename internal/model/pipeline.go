@@ -36,6 +36,7 @@ type PipelineResult struct {
 	Status  string `json:"status"`
 	Error   string `json:"error,omitempty"`
 	Message string `json:"message,omitempty"`
+	JDText  string `json:"jd_text,omitempty"` // raw JD text; returned so Claude can reason over it in MCP mode
 
 	JD         JDData                 `json:"jd"`
 	Scores     map[string]ScoreResult `json:"scores"`

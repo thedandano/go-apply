@@ -151,6 +151,9 @@ func TestApplyPipeline_HeadlessE2E(t *testing.T) {
 	if result.Status != "success" {
 		t.Errorf("status = %q, want success", result.Status)
 	}
+	if result.JDText == "" {
+		t.Error("expected JDText to be populated, got empty string")
+	}
 	if result.BestScore == 0 {
 		t.Error("best_score is 0 — scoring did not run")
 	}

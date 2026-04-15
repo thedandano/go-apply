@@ -94,6 +94,7 @@ func (p *ApplyPipeline) Run(ctx context.Context, req ApplyRequest) error {
 		p.presenter.ShowError(err)
 		return err
 	}
+	result.JDText = jdText // returned so the MCP host (Claude) can extract keywords and reason over it
 
 	// Step 2: Extract keywords from JD text via LLM.
 	jd, degraded, kwErr := p.extractKeywords(ctx, jdText)
