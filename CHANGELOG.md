@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.3](https://github.com/thedandano/go-apply/compare/v0.1.2...v0.1.3) (2026-04-15)
+
+
+### Documentation
+
+* update README — fix MCP tools, TUI coming soon, add roadmap ([#42](https://github.com/thedandano/go-apply/issues/42)) ([b51af4b](https://github.com/thedandano/go-apply/commit/b51af4b2a466c20388fa3712dcecbcc0613e0807))
+
 ## [0.1.2](https://github.com/thedandano/go-apply/compare/v0.1.1...v0.1.2) (2026-04-15)
 
 
