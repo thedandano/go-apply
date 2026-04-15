@@ -187,3 +187,4 @@ The command is idempotent — running it again reports "already registered" and 
 | Resume tailoring (keyword injection + bullet rewriting) | Coming soon |
 | Multi-resume scoring with full breakdown | Available via `get_score` |
 | MCP integration (Claude Code) | Available |
+| Headless agent support (openclaw, hermes) | Available |
