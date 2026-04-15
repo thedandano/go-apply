@@ -5,9 +5,10 @@ import (
 	"encoding/json"
 	"testing"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/thedandano/go-apply/internal/port"
 	"github.com/thedandano/go-apply/internal/service/agentconfig"
-	"gopkg.in/yaml.v3"
 )
 
 var testEntry = port.MCPServerEntry{
