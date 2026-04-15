@@ -4,8 +4,10 @@
 tools:
 	@bash scripts/install-tools.sh
 
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+
 build:
-	go build -o bin/go-apply ./cmd/go-apply/
+	go build -ldflags "-s -w -X main.version=$(VERSION)" -o bin/go-apply ./cmd/go-apply/
 
 test: test-unit test-integration
 
