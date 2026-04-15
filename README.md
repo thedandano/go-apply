@@ -7,7 +7,7 @@ AI-powered job application CLI. Scores your resume against job postings, tailors
 | Mode | Command | Use case |
 |------|---------|----------|
 | Headless / Agent | `go-apply run --url <url>` | Scripts, openclaw, hermes |
-| MCP Server | `go-apply serve` | Claude Code integration |
+| MCP Server | `go-apply serve` | Claude Code, openclaw, hermes |
 | Interactive TUI | _(coming soon)_ | Human at terminal |
 
 After installing, run `go-apply setup mcp --agent claude` to register with Claude Code.
