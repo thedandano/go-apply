@@ -37,7 +37,7 @@ func TestGoqueryFetcher_ReturnsBodyText(t *testing.T) {
 	srv := htmlSrv(`<html><body><p>golang engineer role</p></body></html>`)
 	defer srv.Close()
 
-	f := fetcher.NewGoquery(nil)
+	f := fetcher.NewGoquery(8000, nil)
 	text, err := f.Fetch(context.Background(), srv.URL)
 	if err != nil {
 		t.Fatal(err)
@@ -51,7 +51,7 @@ func TestGoqueryFetcher_StripsScriptAndStyle(t *testing.T) {
 	srv := htmlSrv(`<html><body><script>alert(1)</script><style>body{}</style><p>job description</p></body></html>`)
 	defer srv.Close()
 
-	f := fetcher.NewGoquery(nil)
+	f := fetcher.NewGoquery(8000, nil)
 	text, err := f.Fetch(context.Background(), srv.URL)
 	if err != nil {
 		t.Fatal(err)
@@ -71,7 +71,7 @@ func TestGoqueryFetcher_ErrorOnCancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	f := fetcher.NewGoquery(nil)
+	f := fetcher.NewGoquery(8000, nil)
 	_, err := f.Fetch(ctx, srv.URL)
 	if err == nil {
 		t.Fatal("expected error on cancelled context, got nil")
@@ -217,5 +217,44 @@ func TestExtractJDMarkdown_PreservesMarkdownStructure(t *testing.T) {
 	}
 	if !strings.Contains(result, "AWS") {
 		t.Errorf("list items should be present, got: %q", result)
+	}
+}
+
+func TestGoqueryFetcher_ScopesToMainAndProducesMarkdown(t *testing.T) {
+	srv := htmlSrv(`<html><body>
+		<nav>Site nav noise</nav>
+		<main><h2>Backend Engineer</h2><ul><li>Python</li><li>AWS</li></ul></main>
+		<footer>Footer noise</footer>
+	</body></html>`)
+	defer srv.Close()
+
+	f := fetcher.NewGoquery(8000, nil)
+	text, err := f.Fetch(context.Background(), srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(text, "Site nav noise") {
+		t.Errorf("nav content should be excluded, got: %q", text)
+	}
+	if strings.Contains(text, "Footer noise") {
+		t.Errorf("footer content should be excluded, got: %q", text)
+	}
+	if !strings.Contains(text, "Backend Engineer") {
+		t.Errorf("main content should be included, got: %q", text)
+	}
+}
+
+func TestGoqueryFetcher_TruncatesLargePage(t *testing.T) {
+	longText := strings.Repeat("word ", 5000) // ~25000 chars
+	srv := htmlSrv(fmt.Sprintf(`<html><body><main><p>%s</p></main></body></html>`, longText))
+	defer srv.Close()
+
+	f := fetcher.NewGoquery(200, nil)
+	text, err := f.Fetch(context.Background(), srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(text) > 200 {
+		t.Errorf("result should be truncated to 200 chars, got %d", len(text))
 	}
 }

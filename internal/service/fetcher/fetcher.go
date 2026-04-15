@@ -30,6 +30,7 @@ var _ port.JDFetcher = (*FallbackFetcher)(nil)
 // It handles JavaScript-rendered pages that GoqueryFetcher cannot parse.
 type ChromedpFetcher struct {
 	timeoutMS int
+	maxChars  int
 	log       *slog.Logger
 }
 
@@ -38,7 +39,11 @@ func New(defaults *config.AppDefaults, log *slog.Logger) *ChromedpFetcher {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &ChromedpFetcher{timeoutMS: defaults.Fetcher.ChromedpTimeoutMS, log: log}
+	return &ChromedpFetcher{
+		timeoutMS: defaults.Fetcher.ChromedpTimeoutMS,
+		maxChars:  defaults.Fetcher.MaxJDTextLengthChars,
+		log:       log,
+	}
 }
 
 // Fetch navigates to url with a headless browser and returns the visible body text.
@@ -65,23 +70,26 @@ func (f *ChromedpFetcher) Fetch(ctx context.Context, url string) (string, error)
 	if err != nil {
 		return "", fmt.Errorf("chromedp fetch %s: %w", url, err)
 	}
-	f.log.DebugContext(ctx, "fetcher: chromedp fetched page", "url", url, "bytes", len(body))
-	return ExtractJDMarkdown(body, 0), nil
+	text := ExtractJDMarkdown(body, f.maxChars)
+	f.log.DebugContext(ctx, "fetcher: chromedp fetched page", "url", url, "chars", len(text))
+	return text, nil
 }
 
 // GoqueryFetcher fetches JD text using a plain HTTP GET + HTML parsing.
 // It does not execute JavaScript, making it fast but unsuitable for SPA pages.
 type GoqueryFetcher struct {
-	http *http.Client
-	log  *slog.Logger
+	http     *http.Client
+	maxChars int
+	log      *slog.Logger
 }
 
-// NewGoquery constructs a GoqueryFetcher. log may be nil — slog.Default() is used then.
-func NewGoquery(log *slog.Logger) *GoqueryFetcher {
+// NewGoquery constructs a GoqueryFetcher. maxChars is the max length of the returned
+// Markdown string (0 = no limit). log may be nil — slog.Default() is used then.
+func NewGoquery(maxChars int, log *slog.Logger) *GoqueryFetcher {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &GoqueryFetcher{http: &http.Client{}, log: log}
+	return &GoqueryFetcher{http: &http.Client{}, maxChars: maxChars, log: log}
 }
 
 // Fetch issues a GET request to url and returns the visible body text.
@@ -100,8 +108,11 @@ func (f *GoqueryFetcher) Fetch(ctx context.Context, url string) (string, error) 
 	if err != nil {
 		return "", fmt.Errorf("goquery parse %s: %w", url, err)
 	}
-	doc.Find("script,style,nav,header,footer").Remove()
-	text := strings.TrimSpace(doc.Find("body").Text())
+	bodyHTML, err := doc.Find("body").Html()
+	if err != nil {
+		return "", fmt.Errorf("goquery extract body %s: %w", url, err)
+	}
+	text := ExtractJDMarkdown(bodyHTML, f.maxChars)
 	f.log.DebugContext(ctx, "fetcher: goquery fetched page", "url", url, "chars", len(text))
 	return text, nil
 }
@@ -123,7 +134,7 @@ func NewFallback(defaults *config.AppDefaults, log *slog.Logger) *FallbackFetche
 	}
 	return &FallbackFetcher{
 		primary:              New(defaults, log),
-		fallback:             NewGoquery(log),
+		fallback:             NewGoquery(defaults.Fetcher.MaxJDTextLengthChars, log),
 		minJDTextLengthChars: defaults.Fetcher.MinJDTextLengthChars,
 		log:                  log,
 	}
