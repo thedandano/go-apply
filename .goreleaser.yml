@@ -47,6 +47,7 @@ release:
 
 brews:
   - name: go-apply
+    skip_upload: true
     repository:
       owner: thedandano
       name: homebrew-tap
