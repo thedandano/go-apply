@@ -246,11 +246,9 @@ func (s *bddState) assertGoApplyStoresResumeLabel(label string) error {
 }
 
 func (s *bddState) assertGoApplyStoresAll() error {
-	combined := s.lastOutput + s.lastError
 	if s.exitCode != 0 {
 		return fmt.Errorf("expected success exit code, got %d\nstdout: %s\nstderr: %s", s.exitCode, s.lastOutput, s.lastError)
 	}
-	_ = combined
 	return nil
 }
 

@@ -27,10 +27,4 @@ type bddState struct {
 	jdText          string
 	channel         string
 	accomplishments string
-
-	// URLs fetched by the stub server (for cache scenario)
-	httpRequests []string
-
-	// previous run state (for cache scenario)
-	prevOutput string
 }
