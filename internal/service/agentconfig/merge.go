@@ -17,10 +17,13 @@ func MergeJSON(existing []byte, keyPath []string, serverName string, entry port.
 		return nil, false, fmt.Errorf("MergeJSON: unmarshal: %w", err)
 	}
 
-	leaf := walkOrCreate(root, keyPath)
+	leaf, err := walkOrCreate(root, keyPath)
+	if err != nil {
+		return nil, false, fmt.Errorf("MergeJSON: %w", err)
+	}
 
 	if current, ok := leaf[serverName]; ok {
-		if entryMatchesJSON(current, entry) {
+		if entryMatches(current, entry) {
 			return existing, true, nil
 		}
 	}
@@ -45,10 +48,13 @@ func MergeYAML(existing []byte, keyPath []string, serverName string, entry port.
 		return nil, false, fmt.Errorf("MergeYAML: unmarshal: %w", err)
 	}
 
-	leaf := walkOrCreate(root, keyPath)
+	leaf, err := walkOrCreate(root, keyPath)
+	if err != nil {
+		return nil, false, fmt.Errorf("MergeYAML: %w", err)
+	}
 
 	if current, ok := leaf[serverName]; ok {
-		if entryMatchesYAML(current, entry) {
+		if entryMatches(current, entry) {
 			return existing, true, nil
 		}
 	}
@@ -157,25 +163,22 @@ func unmarshalYAMLMap(existing []byte) (map[string]any, error) {
 }
 
 // walkOrCreate traverses root along keyPath, creating intermediate maps as needed,
-// and returns the leaf map.
-func walkOrCreate(root map[string]any, keyPath []string) map[string]any {
+// and returns the leaf map. It returns an error if an intermediate key holds a non-map value.
+func walkOrCreate(root map[string]any, keyPath []string) (map[string]any, error) {
 	current := root
 	for _, k := range keyPath {
-		v, ok := current[k]
-		if !ok {
+		switch v := current[k].(type) {
+		case map[string]any:
+			current = v
+		case nil:
 			child := map[string]any{}
 			current[k] = child
 			current = child
-			continue
+		default:
+			return nil, fmt.Errorf("key %q exists but is not an object (got %T)", k, current[k])
 		}
-		child, ok := v.(map[string]any)
-		if !ok {
-			child = map[string]any{}
-			current[k] = child
-		}
-		current = child
 	}
-	return current
+	return current, nil
 }
 
 // walkExisting traverses root along keyPath without creating intermediate maps.
@@ -196,9 +199,10 @@ func walkExisting(root map[string]any, keyPath []string) (map[string]any, bool) 
 	return current, true
 }
 
-// entryMatchesJSON reports whether a raw JSON-decoded value matches the given entry.
-// JSON numbers unmarshal as float64; args unmarshal as []any.
-func entryMatchesJSON(raw any, entry port.MCPServerEntry) bool {
+// entryMatches reports whether raw (from json.Unmarshal or yaml.v3 Unmarshal into any)
+// represents an MCPServerEntry with the same Command and Args as entry.
+// Both json.Unmarshal and yaml.v3 decode strings as string and arrays as []any.
+func entryMatches(raw any, entry port.MCPServerEntry) bool {
 	m, ok := raw.(map[string]any)
 	if !ok {
 		return false
@@ -212,32 +216,7 @@ func entryMatchesJSON(raw any, entry port.MCPServerEntry) bool {
 		return false
 	}
 	for i, a := range rawArgs {
-		s, ok := a.(string)
-		if !ok || s != entry.Args[i] {
-			return false
-		}
-	}
-	return true
-}
-
-// entryMatchesYAML reports whether a raw YAML-decoded value matches the given entry.
-// gopkg.in/yaml.v3 decodes strings as string and sequences as []any.
-func entryMatchesYAML(raw any, entry port.MCPServerEntry) bool {
-	m, ok := raw.(map[string]any)
-	if !ok {
-		return false
-	}
-	cmd, _ := m["command"].(string)
-	if cmd != entry.Command {
-		return false
-	}
-	rawArgs, _ := m["args"].([]any)
-	if len(rawArgs) != len(entry.Args) {
-		return false
-	}
-	for i, a := range rawArgs {
-		s, ok := a.(string)
-		if !ok || s != entry.Args[i] {
+		if a.(string) != entry.Args[i] {
 			return false
 		}
 	}

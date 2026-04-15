@@ -29,7 +29,6 @@ func TestMergeJSON(t *testing.T) {
 		wantAlready       bool
 		wantErr           bool
 		checkKeys         []string // top-level JSON keys that must be present
-		checkAbsentKeys   []string // top-level JSON keys that must be absent
 		checkServerExists bool     // serverName must be in the leaf map
 	}{
 		{
@@ -518,6 +517,7 @@ func TestRemoveYAML(t *testing.T) {
 		keyPath     []string
 		serverName  string
 		wantPresent bool
+		wantErr     bool
 		checkAbsent bool
 		checkKey    string
 	}{
@@ -584,6 +584,12 @@ func TestRemoveYAML(t *testing.T) {
 			serverName:  "go-apply",
 			wantPresent: false,
 		},
+		{
+			name:     "invalid YAML returns error",
+			keyPath:  []string{"mcp_servers"},
+			existing: []byte("{corrupt: : yaml"),
+			wantErr:  true,
+		},
 	}
 
 	for _, tc := range cases {
@@ -592,6 +598,12 @@ func TestRemoveYAML(t *testing.T) {
 			t.Parallel()
 
 			got, wasPresent, err := agentconfig.RemoveYAML(tc.existing, tc.keyPath, tc.serverName)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
