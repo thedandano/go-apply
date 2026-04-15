@@ -95,7 +95,7 @@ func TestSetupMCP_Register_Idempotent(t *testing.T) {
 	}
 
 	second, _ := os.ReadFile(cfgPath)
-	if string(first) != string(second) {
+	if !bytes.Equal(first, second) {
 		t.Errorf("config file changed on second run:\nbefore:\n%s\nafter:\n%s", first, second)
 	}
 }
