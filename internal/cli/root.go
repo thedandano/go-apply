@@ -3,7 +3,7 @@ package cli
 import "github.com/spf13/cobra"
 
 // NewRootCommand returns the root cobra command for go-apply.
-func NewRootCommand() *cobra.Command {
+func NewRootCommand(version string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "go-apply",
 		Short: "AI-powered job application assistant",
@@ -12,5 +12,6 @@ func NewRootCommand() *cobra.Command {
 	cmd.AddCommand(NewServeCommand())
 	cmd.AddCommand(NewConfigCommand())
 	cmd.AddCommand(NewOnboardCommand())
+	cmd.AddCommand(NewVersionCommand(version))
 	return cmd
 }

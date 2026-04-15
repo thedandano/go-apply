@@ -10,6 +10,8 @@ import (
 	"github.com/thedandano/go-apply/internal/logger"
 )
 
+var version = "dev"
+
 func main() {
 	os.Exit(run())
 }
@@ -24,7 +26,7 @@ func run() int {
 	}
 	defer cleanup()
 
-	root := cli.NewRootCommand()
+	root := cli.NewRootCommand(version)
 	if err := root.Execute(); err != nil {
 		log.Error("command failed", "error", err)
 		return 1
