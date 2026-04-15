@@ -82,7 +82,7 @@ func NewServeCommand() *cobra.Command {
 
 			srv.AddTool(
 				mcp.NewTool("update_config",
-					mcp.WithDescription("Set a go-apply config field by dot-notation key (e.g. orchestrator.model)."),
+					mcp.WithDescription("Set a go-apply config field by dot-notation key (e.g. embedder.model, embedding_dim, user_name). Orchestrator keys are not used in MCP mode."),
 					mcp.WithString("key", mcp.Description("Dot-notation config key"), mcp.Required()),
 					mcp.WithString("value", mcp.Description("New value for the key"), mcp.Required()),
 				),
