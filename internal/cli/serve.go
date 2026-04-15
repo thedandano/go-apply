@@ -50,6 +50,68 @@ func NewServeCommand() *cobra.Command {
 				},
 			)
 
+			srv.AddTool(
+				mcp.NewTool("onboard_user",
+					mcp.WithDescription("Store a resume, skills, and accomplishments into the profile database. All inputs are raw text extracted from the vector store."),
+					mcp.WithString("resume_content", mcp.Description("Resume text (required when resume_label is provided)")),
+					mcp.WithString("resume_label", mcp.Description("Short identifier for the resume, e.g. 'backend' (required when resume_content is provided)")),
+					mcp.WithString("skills", mcp.Description("Skills reference text (optional)")),
+					mcp.WithString("accomplishments", mcp.Description("Accomplishments text (optional)")),
+				),
+				func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+					svc, cleanup, err := newOnboardSvc()
+					if err != nil {
+						return errorResult(fmt.Sprintf("setup: %v", err)), nil
+					}
+					defer cleanup()
+					return HandleOnboardUser(ctx, &req, svc), nil
+				},
+			)
+
+			srv.AddTool(
+				mcp.NewTool("add_resume",
+					mcp.WithDescription("Add or replace a single resume in the profile database."),
+					mcp.WithString("resume_content", mcp.Description("Resume text"), mcp.Required()),
+					mcp.WithString("resume_label", mcp.Description("Short identifier, e.g. 'backend'"), mcp.Required()),
+				),
+				func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+					svc, cleanup, err := newOnboardSvc()
+					if err != nil {
+						return errorResult(fmt.Sprintf("setup: %v", err)), nil
+					}
+					defer cleanup()
+					return HandleAddResume(ctx, &req, svc), nil
+				},
+			)
+
+			srv.AddTool(
+				mcp.NewTool("update_config",
+					mcp.WithDescription("Set a go-apply config field by dot-notation key (e.g. orchestrator.model)."),
+					mcp.WithString("key", mcp.Description("Dot-notation config key"), mcp.Required()),
+					mcp.WithString("value", mcp.Description("New value for the key"), mcp.Required()),
+				),
+				func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+					cfg, err := config.Load()
+					if err != nil {
+						return errorResult(fmt.Sprintf("load config: %v", err)), nil
+					}
+					return HandleUpdateConfig(ctx, &req, cfg), nil
+				},
+			)
+
+			srv.AddTool(
+				mcp.NewTool("get_config",
+					mcp.WithDescription("Return all go-apply config fields. API keys are redacted."),
+				),
+				func(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+					cfg, err := config.Load()
+					if err != nil {
+						return errorResult(fmt.Sprintf("load config: %v", err)), nil
+					}
+					return HandleGetConfigWith(cfg), nil
+				},
+			)
+
 			return server.ServeStdio(srv)
 		},
 	}

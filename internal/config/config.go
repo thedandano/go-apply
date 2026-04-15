@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -136,6 +137,104 @@ func Load() (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// AllKeys returns all user-facing dot-notation config keys in canonical order.
+// Internal keys (db_path, log_level, default_seniority) are intentionally excluded;
+// they can only be set by editing config.yaml directly.
+func AllKeys() []string {
+	return []string{
+		"orchestrator.base_url",
+		"orchestrator.model",
+		"orchestrator.api_key",
+		"embedder.base_url",
+		"embedder.model",
+		"embedder.api_key",
+		"embedding_dim",
+		"user_name",
+		"occupation",
+		"location",
+		"linkedin_url",
+		"years_of_experience",
+	}
+}
+
+// IsAPIKey reports whether a dot-notation config key holds an API key value.
+func IsAPIKey(key string) bool {
+	return strings.HasSuffix(key, ".api_key")
+}
+
+// SetField sets a config field by dot-notation key, parsing the value string to the correct type.
+func (c *Config) SetField(key, value string) error {
+	switch key {
+	case "orchestrator.base_url":
+		c.Orchestrator.BaseURL = value
+	case "orchestrator.model":
+		c.Orchestrator.Model = value
+	case "orchestrator.api_key":
+		c.Orchestrator.APIKey = value
+	case "embedder.base_url":
+		c.Embedder.BaseURL = value
+	case "embedder.model":
+		c.Embedder.Model = value
+	case "embedder.api_key":
+		c.Embedder.APIKey = value
+	case "embedding_dim":
+		n, err := strconv.Atoi(value)
+		if err != nil {
+			return fmt.Errorf("embedding_dim must be an integer: %w", err)
+		}
+		c.EmbeddingDim = n
+	case "user_name":
+		c.UserName = value
+	case "occupation":
+		c.Occupation = value
+	case "location":
+		c.Location = value
+	case "linkedin_url":
+		c.LinkedInURL = value
+	case "years_of_experience":
+		f, err := strconv.ParseFloat(value, 64)
+		if err != nil {
+			return fmt.Errorf("years_of_experience must be a number: %w", err)
+		}
+		c.YearsOfExperience = f
+	default:
+		return fmt.Errorf("unknown config key %q", key)
+	}
+	return nil
+}
+
+// GetField returns the string representation of a config field by dot-notation key.
+func (c *Config) GetField(key string) (string, error) {
+	switch key {
+	case "orchestrator.base_url":
+		return c.Orchestrator.BaseURL, nil
+	case "orchestrator.model":
+		return c.Orchestrator.Model, nil
+	case "orchestrator.api_key":
+		return c.Orchestrator.APIKey, nil
+	case "embedder.base_url":
+		return c.Embedder.BaseURL, nil
+	case "embedder.model":
+		return c.Embedder.Model, nil
+	case "embedder.api_key":
+		return c.Embedder.APIKey, nil
+	case "embedding_dim":
+		return strconv.Itoa(c.EmbeddingDim), nil
+	case "user_name":
+		return c.UserName, nil
+	case "occupation":
+		return c.Occupation, nil
+	case "location":
+		return c.Location, nil
+	case "linkedin_url":
+		return c.LinkedInURL, nil
+	case "years_of_experience":
+		return strconv.FormatFloat(c.YearsOfExperience, 'f', -1, 64), nil
+	default:
+		return "", fmt.Errorf("unknown config key %q", key)
+	}
 }
 
 func (c *Config) Save() error {
