@@ -170,7 +170,8 @@ func (p *ApplyPipeline) Run(ctx context.Context, req ApplyRequest) error {
 	}
 
 	// Step 5: Generate cover letter — only when CLGen is configured and score meets threshold.
-	if p.clGen != nil && result.BestScore >= p.defaults.Thresholds.ScorePass {
+	switch {
+	case p.clGen != nil && result.BestScore >= p.defaults.Thresholds.ScorePass:
 		clStart := time.Now()
 		p.presenter.OnEvent(model.StepStartedEvent{StepID: "05", Label: "Cover Letter"})
 		clResult, clErr := p.clGen.Generate(ctx, &model.CoverLetterInput{
@@ -195,9 +196,9 @@ func (p *ApplyPipeline) Run(ctx context.Context, req ApplyRequest) error {
 			})
 			result.CoverLetter = clResult
 		}
-	} else if p.clGen == nil {
+	case p.clGen == nil:
 		slog.InfoContext(ctx, "cover letter skipped — CLGen not configured (MCP mode: Claude generates cover letters)")
-	} else {
+	default:
 		slog.InfoContext(ctx, "cover letter skipped — best score below threshold",
 			"best_score", result.BestScore,
 			"threshold", p.defaults.Thresholds.ScorePass,
