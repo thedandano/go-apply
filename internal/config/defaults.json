@@ -54,7 +54,8 @@
   },
   "fetcher": {
     "chromedp_timeout_ms":     60000,
-    "min_jd_text_length_chars": 100
+    "min_jd_text_length_chars": 100,
+    "max_jd_text_length_chars": 8000
   },
   "vector_search": {
     "similarity_threshold": 0.6,
