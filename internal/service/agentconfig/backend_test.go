@@ -7,8 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/thedandano/go-apply/internal/port"
 	"gopkg.in/yaml.v3"
+
+	"github.com/thedandano/go-apply/internal/port"
 )
 
 // testEntry is the MCP server entry used across all backend tests.

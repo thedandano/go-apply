@@ -4,8 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/thedandano/go-apply/internal/port"
 	"gopkg.in/yaml.v3"
+
+	"github.com/thedandano/go-apply/internal/port"
 )
 
 // MergeJSON inserts serverName+entry into JSON bytes at keyPath, preserving other content.
