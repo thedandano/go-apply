@@ -244,19 +244,30 @@ func extractMCPResult(raw string) string {
 	return raw
 }
 
-// newEmbedderStub creates an httptest server that responds to OpenAI-compatible embedding requests.
+// newEmbedderStub creates an httptest server that handles both OpenAI-compatible
+// embeddings and chat completions requests. This allows tests to point both the
+// embedder client and the orchestrator client at the same stub URL.
 func newEmbedderStub() *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/embeddings") {
-			w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/embeddings"):
 			json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
 				"data": []map[string]any{
 					{"embedding": []float64{0.1, 0.2, 0.3}},
 				},
 			})
-			return
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/chat/completions"):
+			// Return a minimal valid JD extraction response for keyword extraction.
+			jdJSON := `{"title":"Software Engineer","company":"Acme","required":["go"],"preferred":["docker"],"location":"Remote","seniority":"senior","required_years":3}`
+			json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
+				"choices": []map[string]any{
+					{"message": map[string]string{"content": jdJSON}},
+				},
+			})
+		default:
+			http.NotFound(w, r)
 		}
-		http.NotFound(w, r)
 	}))
 }
 

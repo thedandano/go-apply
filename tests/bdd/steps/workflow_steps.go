@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/cucumber/godog"
@@ -111,7 +112,18 @@ func (s *bddState) embedderUnavailable() error {
 }
 
 func (s *bddState) noResumesOnDisk() error {
-	// Don't seed any resumes — profile DB will be empty.
+	// Make all resume files unreadable so ListResumes finds them but Load fails.
+	// The Background seeds a "backend" resume before every scenario; removing it
+	// would result in an empty file list, which the pipeline handles as success.
+	// We need files to exist (so scoreResumes enters the loop) but fail to load.
+	inputsDir := filepath.Join(s.tmpHome, ".local", "share", "go-apply", "inputs")
+	entries, err := os.ReadDir(inputsDir)
+	if err != nil {
+		return nil // dir doesn't exist yet — nothing to do
+	}
+	for _, e := range entries {
+		os.Chmod(filepath.Join(inputsDir, e.Name()), 0o000) //nolint:errcheck
+	}
 	return nil
 }
 
