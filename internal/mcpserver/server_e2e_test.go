@@ -222,8 +222,8 @@ func TestServerDispatch_GetScore_BlockedUntilOnboarded(t *testing.T) {
 	cl := newMCPClient(t)
 
 	raw := callTool(t, cl, "get_score", map[string]any{
-		"text":    jdRawText,
-		"channel": "COLD",
+		"jd_raw_text": jdRawText,
+		"channel":     "COLD",
 	})
 
 	var resp map[string]any
@@ -328,8 +328,8 @@ func TestServerDispatch_OnboardThenScore(t *testing.T) {
 
 	// Step 2: score against a realistic job description.
 	scoreRaw := callTool(t, cl, "get_score", map[string]any{
-		"text":    jdRawText,
-		"channel": "COLD",
+		"jd_raw_text": jdRawText,
+		"channel":     "COLD",
 	})
 	var scoreResp map[string]any
 	if err := json.Unmarshal([]byte(scoreRaw), &scoreResp); err != nil {
@@ -345,5 +345,19 @@ func TestServerDispatch_OnboardThenScore(t *testing.T) {
 	}
 	if scoreResp["best_resume"] != "main" {
 		t.Errorf("best_resume = %v, want main", scoreResp["best_resume"])
+	}
+
+	// Verify the pipeline extracted keywords (required/preferred) from the JD.
+	keywords, _ := scoreResp["keywords"].(map[string]any)
+	if keywords == nil {
+		t.Fatal("score response missing 'keywords' field")
+	}
+	required, _ := keywords["required"].([]any)
+	if len(required) == 0 {
+		t.Error("keywords.required is empty — expected extracted required skills")
+	}
+	preferred, _ := keywords["preferred"].([]any)
+	if len(preferred) == 0 {
+		t.Error("keywords.preferred is empty — expected extracted preferred skills")
 	}
 }

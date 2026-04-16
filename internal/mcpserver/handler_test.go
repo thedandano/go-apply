@@ -156,8 +156,8 @@ func extractText(t *testing.T, result *mcp.CallToolResult) string {
 func TestGetScore_BothURLAndText_ReturnsError(t *testing.T) {
 	cfg := stubApplyConfig()
 	req := callToolRequest("get_score", map[string]any{
-		"url":  "https://example.com/job",
-		"text": "raw jd text",
+		"jd_url":      "https://example.com/job",
+		"jd_raw_text": "raw jd text",
 	})
 
 	result := mcpserver.HandleGetScore(context.Background(), &req, &cfg)
@@ -175,7 +175,7 @@ func TestGetScore_BothURLAndText_ReturnsError(t *testing.T) {
 func TestGetScore_URLOnly_ReturnsResult(t *testing.T) {
 	cfg := stubApplyConfig()
 	req := callToolRequest("get_score", map[string]any{
-		"url": "https://example.com/job",
+		"jd_url": "https://example.com/job",
 	})
 
 	result := mcpserver.HandleGetScore(context.Background(), &req, &cfg)
@@ -448,8 +448,8 @@ func TestHandleGetScore_NilLLM_ErrorsWithActionableMessage(t *testing.T) {
 	}
 
 	req := callToolRequest("get_score", map[string]any{
-		"text":    "Software Engineer role at Acme Corp",
-		"channel": "COLD",
+		"jd_raw_text": "Software Engineer role at Acme Corp",
+		"channel":     "COLD",
 	})
 
 	result := mcpserver.HandleGetScore(context.Background(), &req, &deps)

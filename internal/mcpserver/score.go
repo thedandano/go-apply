@@ -52,7 +52,7 @@ func loadDeps() (*config.Config, pipeline.ApplyConfig, error) {
 		log.Info("orchestrator LLM configured — pipeline will extract keywords", "model", cfg.Orchestrator.Model)
 		llmClient = llm.New(cfg.Orchestrator.BaseURL, cfg.Orchestrator.Model, cfg.Orchestrator.APIKey, defaults, log)
 	} else {
-		log.Info("no orchestrator LLM — Claude handles keyword extraction in MCP mode")
+		log.Info("no orchestrator LLM — MCP host handles keyword extraction")
 	}
 
 	deps := pipeline.ApplyConfig{
@@ -82,8 +82,8 @@ func HandleGetScore(ctx context.Context, req *mcp.CallToolRequest, deps *pipelin
 // HandleGetScoreWithConfig is the full handler with optional *config.Config.
 // When cfg is nil (tests), a zero-value config is used for non-nil fields.
 func HandleGetScoreWithConfig(ctx context.Context, req *mcp.CallToolRequest, deps *pipeline.ApplyConfig, cfg *config.Config) *mcp.CallToolResult {
-	jdURL := req.GetString("url", "")
-	jdRawText := req.GetString("text", "")
+	jdURL := req.GetString("jd_url", "")
+	jdRawText := req.GetString("jd_raw_text", "")
 	channelVal := req.GetString("channel", "COLD")
 	accomplishmentsVal := req.GetString("accomplishments", "")
 

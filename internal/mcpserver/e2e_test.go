@@ -121,8 +121,8 @@ func TestOnboardThenScore(t *testing.T) {
 	}
 
 	req := callToolRequest("get_score", map[string]any{
-		"text":    "Senior Go Engineer at Acme. Requires: go, kubernetes. Nice to have: docker.",
-		"channel": "COLD",
+		"jd_raw_text": "Senior Go Engineer at Acme. Requires: go, kubernetes. Nice to have: docker.",
+		"channel":     "COLD",
 	})
 
 	scoreResult := mcpserver.HandleGetScore(context.Background(), &req, &deps)
