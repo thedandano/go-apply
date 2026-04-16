@@ -12,25 +12,11 @@ import (
 )
 
 // NewServer creates and configures the MCP server with all tools and prompts registered.
+// Tool ordering: setup tools first (always available), then workflow tools (require onboarding).
 func NewServer() *server.MCPServer {
 	srv := server.NewMCPServer("go-apply", "0.1.0")
 
-	srv.AddTool(
-		mcp.NewTool("get_score",
-			mcp.WithDescription("Score resumes against a job description. Returns jd_text, best_score, best_resume, and warnings. The MCP host is the orchestrator: extract keywords from jd_text, interpret the score, identify skill gaps, and generate a cover letter when appropriate. LLM-dependent steps (keyword injection, bullet rewriting) are skipped — handle them yourself using the result data."),
-			mcp.WithString("jd_url", mcp.Description("URL of the job posting to fetch")),
-			mcp.WithString("jd_raw_text", mcp.Description("Raw job description text (alternative to jd_url)")),
-			mcp.WithString("channel", mcp.Description("Application channel: COLD, REFERRAL, or RECRUITER"), mcp.DefaultString("COLD")),
-			mcp.WithString("accomplishments", mcp.Description("Path to accomplishments doc for tier-2 bullet rewriting (optional)")),
-		),
-		requireOnboarded(func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			cfg, deps, err := loadDeps()
-			if err != nil {
-				return errorResult(fmt.Sprintf("load config: %v", err)), nil
-			}
-			return HandleGetScoreWithConfig(ctx, &req, &deps, cfg), nil
-		}),
-	)
+	// ── Setup tools (no onboarding required) ──────────────────────────────────
 
 	srv.AddTool(
 		mcp.NewTool("onboard_user",
@@ -67,6 +53,19 @@ func NewServer() *server.MCPServer {
 	)
 
 	srv.AddTool(
+		mcp.NewTool("get_config",
+			mcp.WithDescription("Return all go-apply config fields. API keys are redacted."),
+		),
+		func(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			cfg, err := config.Load()
+			if err != nil {
+				return errorResult(fmt.Sprintf("load config: %v", err)), nil
+			}
+			return HandleGetConfigWith(cfg), nil
+		},
+	)
+
+	srv.AddTool(
 		mcp.NewTool("update_config",
 			mcp.WithDescription("Set a go-apply config field by dot-notation key (e.g. embedder.model, embedding_dim, user_name). Orchestrator keys are not used in MCP mode."),
 			mcp.WithString("key", mcp.Description("Dot-notation config key"), mcp.Required()),
@@ -81,16 +80,38 @@ func NewServer() *server.MCPServer {
 		},
 	)
 
+	// ── Workflow tools (require onboarding) ───────────────────────────────────
+
 	srv.AddTool(
-		mcp.NewTool("get_config",
-			mcp.WithDescription("Return all go-apply config fields. API keys are redacted."),
+		mcp.NewTool("load_jd",
+			mcp.WithDescription("Start a job application workflow: fetch the job description by URL or accept raw text. Returns jd_text for keyword extraction and a session_id to use in subsequent calls."),
+			mcp.WithString("jd_url", mcp.Description("URL of the job posting to fetch")),
+			mcp.WithString("jd_raw_text", mcp.Description("Raw job description text (alternative to jd_url)")),
 		),
-		func(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			cfg, err := config.Load()
-			if err != nil {
-				return errorResult(fmt.Sprintf("load config: %v", err)), nil
-			}
-			return HandleGetConfigWith(cfg), nil
+		requireOnboarded(func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return HandleLoadJD(ctx, &req), nil
+		}),
+	)
+
+	srv.AddTool(
+		mcp.NewTool("submit_keywords",
+			mcp.WithDescription("Submit extracted keywords to score resumes. Call after load_jd: extract keywords from jd_text yourself, then provide them here as jd_json. Returns scores and a next_action directive."),
+			mcp.WithString("session_id", mcp.Description("Session ID returned by load_jd"), mcp.Required()),
+			mcp.WithString("jd_json", mcp.Description("JSON-encoded JDData with title, company, required, preferred, location, seniority, required_years"), mcp.Required()),
+		),
+		requireOnboarded(func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return HandleSubmitKeywords(ctx, &req), nil
+		}),
+	)
+
+	srv.AddTool(
+		mcp.NewTool("finalize",
+			mcp.WithDescription("Persist the application record and close the session. Optionally include a cover letter. Call after submit_keywords (and optionally submit_tailor_t1/t2)."),
+			mcp.WithString("session_id", mcp.Description("Session ID from load_jd"), mcp.Required()),
+			mcp.WithString("cover_letter", mcp.Description("Cover letter text to store with the record (optional)")),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return HandleFinalize(ctx, &req), nil
 		},
 	)
 

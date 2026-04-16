@@ -133,7 +133,7 @@ func (p *ApplyPipeline) Run(ctx context.Context, req ApplyRequest) error {
 	// Refuse to score when the JD is empty — no keywords, title, or company
 	// means keyword extraction failed and there is nothing meaningful to score
 	// against. Return a clear error so the caller (user or MCP host) can supply
-	// the job description text directly via the --text flag or get_score(text:).
+	// the job description text directly via the --text flag or load_jd(jd_raw_text:).
 	emptyJD := len(jd.Required) == 0 && len(jd.Preferred) == 0 &&
 		strings.TrimSpace(jd.Title) == "" && strings.TrimSpace(jd.Company) == ""
 	if emptyJD {
@@ -243,6 +243,36 @@ func (p *ApplyPipeline) Run(ctx context.Context, req ApplyRequest) error {
 	result.EndTime = time.Now()
 
 	return p.presenter.ShowResult(result)
+}
+
+// ScoreResumeResult holds the output of ScoreResumes.
+type ScoreResumeResult struct {
+	Scores    map[string]model.ScoreResult
+	BestLabel string
+	BestScore float64
+}
+
+// AcquireJD returns the raw JD text for the given URL or raw text input.
+// It checks the local cache before fetching, emitting step events via the presenter.
+func (p *ApplyPipeline) AcquireJD(ctx context.Context, urlOrText string, isText bool) (string, error) {
+	return p.acquireJDText(ctx, ApplyRequest{URLOrText: urlOrText, IsText: isText})
+}
+
+// ScoreResumes lists all stored resumes and scores them against the given JD.
+func (p *ApplyPipeline) ScoreResumes(ctx context.Context, jd *model.JDData, cfg *config.Config) (ScoreResumeResult, error) {
+	resumeFiles, err := p.resumes.ListResumes()
+	if err != nil {
+		return ScoreResumeResult{}, fmt.Errorf("list resumes: %w", err)
+	}
+	scores, bestLabel, bestScore, err := p.scoreResumes(ctx, resumeFiles, jd, cfg)
+	if err != nil {
+		return ScoreResumeResult{}, err
+	}
+	return ScoreResumeResult{
+		Scores:    scores,
+		BestLabel: bestLabel,
+		BestScore: bestScore,
+	}, nil
 }
 
 // acquireJDText returns the raw JD text, either from the cache (for URLs) or

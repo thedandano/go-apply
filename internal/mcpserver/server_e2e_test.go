@@ -34,37 +34,13 @@ func newEmbedderStub(t *testing.T) *httptest.Server {
 	}))
 }
 
-// newLLMStub returns a stub HTTP server that serves a structured JD JSON
-// response at /chat/completions. Used by get_score to extract keywords
-// without a real LLM.
-func newLLMStub(t *testing.T) *httptest.Server {
-	t.Helper()
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/chat/completions" {
-			jdJSON := `{"title":"Senior Go Engineer","company":"Acme Corp","required":["go","kubernetes"],"preferred":["docker","terraform"],"location":"Remote","seniority":"senior","required_years":5}`
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"choices": []map[string]any{
-					{"message": map[string]string{"content": jdJSON}},
-				},
-			})
-			return
-		}
-		http.NotFound(w, r)
-	}))
-}
-
-// testEnvOptions configures optional fields for setupTestEnv.
-type testEnvOptions struct {
-	llmURL string // when set, configures the orchestrator LLM for keyword extraction
-}
-
 // setupTestEnv redirects all config and data I/O to isolated temp dirs by
 // setting XDG_CONFIG_HOME and XDG_DATA_HOME, then writes a config.yaml with
 // the given embedder base URL (no /v1 suffix — the LLM client appends
 // /embeddings directly to whatever base_url is set).
 // It also pre-creates the data subdirectories (go-apply/ and inputs/) so that
 // both SQLite and the resume repository can operate without missing-dir errors.
-func setupTestEnv(t *testing.T, embedderURL string, opts ...testEnvOptions) {
+func setupTestEnv(t *testing.T, embedderURL string) {
 	t.Helper()
 	tmp := t.TempDir()
 	cfgBase := filepath.Join(tmp, "config")
@@ -78,9 +54,6 @@ func setupTestEnv(t *testing.T, embedderURL string, opts ...testEnvOptions) {
 	}
 
 	cfgContent := "embedder:\n  base_url: " + embedderURL + "\n  model: test-model\nembedding_dim: 3\n"
-	if len(opts) > 0 && opts[0].llmURL != "" {
-		cfgContent += "orchestrator:\n  base_url: " + opts[0].llmURL + "\n  model: test-model\n"
-	}
 	if err := os.WriteFile(filepath.Join(cfgDir, "config.yaml"), []byte(cfgContent), 0o600); err != nil {
 		t.Fatalf("write config.yaml: %v", err)
 	}
@@ -140,7 +113,7 @@ func callTool(t *testing.T, cl *client.Client, name string, args map[string]any)
 }
 
 // jdRawText is a realistic job description used across tests. In the MCP flow
-// this is the raw text that the MCP host (Claude) would provide to get_score.
+// this is the raw text that the MCP host (Claude) would provide to load_jd.
 const jdRawText = "We are looking for a Senior Go Engineer to join our platform team at Acme Corp. " +
 	"You will design and build microservices on Kubernetes, mentor junior engineers, and drive best practices across the org. " +
 	"Requirements: 5+ years of Go, strong Kubernetes experience, familiarity with Docker and Terraform. " +
@@ -162,11 +135,13 @@ func TestServerDispatch_ToolsRegistered(t *testing.T) {
 	}
 
 	want := map[string]bool{
-		"get_score":     false,
-		"onboard_user":  false,
-		"add_resume":    false,
-		"update_config": false,
-		"get_config":    false,
+		"load_jd":         false,
+		"submit_keywords": false,
+		"finalize":        false,
+		"onboard_user":    false,
+		"add_resume":      false,
+		"update_config":   false,
+		"get_config":      false,
 	}
 	for _, tool := range result.Tools {
 		want[tool.Name] = true
@@ -213,17 +188,16 @@ func TestServerDispatch_PromptsRegistered(t *testing.T) {
 	}
 }
 
-// TestServerDispatch_GetScore_BlockedUntilOnboarded verifies that the
-// requireOnboarded middleware rejects get_score calls when no resumes exist.
-func TestServerDispatch_GetScore_BlockedUntilOnboarded(t *testing.T) {
+// TestServerDispatch_LoadJD_BlockedUntilOnboarded verifies that the
+// requireOnboarded middleware rejects load_jd calls when no resumes exist.
+func TestServerDispatch_LoadJD_BlockedUntilOnboarded(t *testing.T) {
 	stub := newEmbedderStub(t)
 	defer stub.Close()
 	setupTestEnv(t, stub.URL)
 	cl := newMCPClient(t)
 
-	raw := callTool(t, cl, "get_score", map[string]any{
+	raw := callTool(t, cl, "load_jd", map[string]any{
 		"jd_raw_text": jdRawText,
-		"channel":     "COLD",
 	})
 
 	var resp map[string]any
@@ -237,9 +211,6 @@ func TestServerDispatch_GetScore_BlockedUntilOnboarded(t *testing.T) {
 	// Middleware-level errors must not contain scoring fields.
 	if _, hasScore := resp["best_score"]; hasScore {
 		t.Error("middleware-blocked response should not contain best_score")
-	}
-	if _, hasStatus := resp["status"]; hasStatus {
-		t.Error("middleware-blocked response should not contain status (not a PipelineResult)")
 	}
 }
 
@@ -298,25 +269,20 @@ func TestServerDispatch_UpdateConfig_PersistsField(t *testing.T) {
 	}
 }
 
-// TestServerDispatch_OnboardThenScore verifies the full onboard → score flow
-// through the MCP server: onboard_user stores a resume (with skills and
-// accomplishments), then get_score passes the requireOnboarded middleware,
-// extracts keywords via the LLM stub, scores the resume, and returns a
-// PipelineResult with a positive score.
+// TestServerDispatch_OnboardThenScore verifies the full onboard → load_jd →
+// submit_keywords flow through the MCP server: onboard_user stores a resume,
+// load_jd starts a session, and submit_keywords (with host-extracted keywords)
+// scores the resume and returns an envelope with a positive best_score.
 func TestServerDispatch_OnboardThenScore(t *testing.T) {
 	embedder := newEmbedderStub(t)
 	defer embedder.Close()
-	llmStub := newLLMStub(t)
-	defer llmStub.Close()
-	setupTestEnv(t, embedder.URL, testEnvOptions{llmURL: llmStub.URL})
+	setupTestEnv(t, embedder.URL)
 	cl := newMCPClient(t)
 
-	// Step 1: onboard resume, skills, and accomplishments.
+	// Step 1: onboard resume.
 	onboardRaw := callTool(t, cl, "onboard_user", map[string]any{
-		"resume_content":  "Senior Go Engineer with 5 years of experience building distributed systems in Go. Proficient in Kubernetes, Docker, Terraform, and gRPC. Led migration of monolith to microservices architecture serving 10M requests/day.",
-		"resume_label":    "main",
-		"skills":          "Go, Kubernetes, Docker, Terraform, gRPC, PostgreSQL, Redis, CI/CD, Microservices, Distributed Systems",
-		"accomplishments": "Led monolith-to-microservices migration reducing p99 latency by 40%. Built internal developer platform adopted by 12 teams. Mentored 4 junior engineers to mid-level promotions.",
+		"resume_content": "Senior Go Engineer with 5 years of experience building distributed systems in Go. Proficient in Kubernetes, Docker, Terraform, and gRPC.",
+		"resume_label":   "main",
 	})
 	var onboardResp map[string]any
 	if err := json.Unmarshal([]byte(onboardRaw), &onboardResp); err != nil {
@@ -326,38 +292,46 @@ func TestServerDispatch_OnboardThenScore(t *testing.T) {
 		t.Fatalf("onboard_user failed: %v", errMsg)
 	}
 
-	// Step 2: score against a realistic job description.
-	scoreRaw := callTool(t, cl, "get_score", map[string]any{
+	// Step 2: load_jd — start a session with the raw JD text.
+	loadRaw := callTool(t, cl, "load_jd", map[string]any{
 		"jd_raw_text": jdRawText,
-		"channel":     "COLD",
+	})
+	var loadResp map[string]any
+	if err := json.Unmarshal([]byte(loadRaw), &loadResp); err != nil {
+		t.Fatalf("unmarshal load_jd: %v — raw: %s", err, loadRaw)
+	}
+	if loadResp["status"] != "ok" {
+		t.Fatalf("load_jd status = %v, want ok — full: %s", loadResp["status"], loadRaw)
+	}
+	sessionID, _ := loadResp["session_id"].(string)
+	if sessionID == "" {
+		t.Fatal("load_jd returned no session_id")
+	}
+
+	// Step 3: submit_keywords — the test plays the MCP host role by providing
+	// pre-extracted keywords (matching the stub JD content).
+	const jdJSON = `{"title":"Senior Go Engineer","company":"Acme Corp","required":["go","kubernetes"],"preferred":["docker","terraform"],"location":"Remote","seniority":"senior","required_years":5}`
+	scoreRaw := callTool(t, cl, "submit_keywords", map[string]any{
+		"session_id": sessionID,
+		"jd_json":    jdJSON,
 	})
 	var scoreResp map[string]any
 	if err := json.Unmarshal([]byte(scoreRaw), &scoreResp); err != nil {
-		t.Fatalf("unmarshal score: %v — raw: %s", err, scoreRaw)
+		t.Fatalf("unmarshal submit_keywords: %v — raw: %s", err, scoreRaw)
 	}
 
-	if scoreResp["status"] != "success" {
-		t.Errorf("status = %v, want success — full response: %s", scoreResp["status"], scoreRaw)
+	if scoreResp["status"] != "ok" {
+		t.Errorf("status = %v, want ok — full response: %s", scoreResp["status"], scoreRaw)
 	}
-	bestScore, _ := scoreResp["best_score"].(float64)
+	data, _ := scoreResp["data"].(map[string]any)
+	if data == nil {
+		t.Fatalf("expected data in submit_keywords response")
+	}
+	bestScore, _ := data["best_score"].(float64)
 	if bestScore <= 0 {
-		t.Errorf("best_score = %v, want > 0", scoreResp["best_score"])
+		t.Errorf("best_score = %v, want > 0", data["best_score"])
 	}
-	if scoreResp["best_resume"] != "main" {
-		t.Errorf("best_resume = %v, want main", scoreResp["best_resume"])
-	}
-
-	// Verify the pipeline extracted keywords (required/preferred) from the JD.
-	keywords, _ := scoreResp["keywords"].(map[string]any)
-	if keywords == nil {
-		t.Fatal("score response missing 'keywords' field")
-	}
-	required, _ := keywords["required"].([]any)
-	if len(required) == 0 {
-		t.Error("keywords.required is empty — expected extracted required skills")
-	}
-	preferred, _ := keywords["preferred"].([]any)
-	if len(preferred) == 0 {
-		t.Error("keywords.preferred is empty — expected extracted preferred skills")
+	if data["best_resume"] != "main" {
+		t.Errorf("best_resume = %v, want main", data["best_resume"])
 	}
 }

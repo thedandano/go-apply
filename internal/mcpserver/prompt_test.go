@@ -27,7 +27,7 @@ func TestWorkflowPromptHandler_ContainsKeyWorkflowConcepts(t *testing.T) {
 	result, _ := mcpserver.HandleWorkflowPrompt(context.Background(), mcp.GetPromptRequest{})
 	text := result.Messages[0].Content.(mcp.TextContent).Text
 
-	for _, keyword := range []string{"get_score", "onboard_user", "jd_text", "best_score", "embedder"} {
+	for _, keyword := range []string{"load_jd", "submit_keywords", "finalize", "onboard_user", "jd_text", "best_score", "embedder"} {
 		if !strings.Contains(text, keyword) {
 			t.Errorf("workflow prompt missing keyword %q", keyword)
 		}

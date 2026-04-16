@@ -12,7 +12,6 @@ import (
 	"github.com/thedandano/go-apply/internal/mcpserver"
 	"github.com/thedandano/go-apply/internal/model"
 	"github.com/thedandano/go-apply/internal/port"
-	"github.com/thedandano/go-apply/internal/service/pipeline"
 )
 
 // ── onboard stubs ─────────────────────────────────────────────────────────────
@@ -111,22 +110,6 @@ func (s *stubAugmenter) AugmentResumeText(_ context.Context, input model.Augment
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-// stubApplyConfig returns an ApplyConfig with all stubs — no filesystem/SQLite.
-func stubApplyConfig() pipeline.ApplyConfig {
-	return pipeline.ApplyConfig{
-		Fetcher:   &stubJDFetcher{},
-		LLM:       &stubLLMClient{},
-		Scorer:    &stubScorer{},
-		CLGen:     &stubCoverLetterGen{},
-		Resumes:   &stubResumeRepo{},
-		Loader:    &stubDocumentLoader{},
-		AppRepo:   &stubApplicationRepository{},
-		Augment:   &stubAugmenter{},
-		Defaults:  &config.AppDefaults{},
-		Presenter: nil, // overridden by handler internals
-	}
-}
-
 // callToolRequest builds an mcp.CallToolRequest with the given arguments map.
 // Arguments must be map[string]any (not json.RawMessage) so that GetString works correctly.
 func callToolRequest(name string, args map[string]any) mcp.CallToolRequest {
@@ -149,42 +132,6 @@ func extractText(t *testing.T, result *mcp.CallToolResult) string {
 		t.Fatalf("content[0] is not TextContent: %T", result.Content[0])
 	}
 	return tc.Text
-}
-
-// ── tests ─────────────────────────────────────────────────────────────────────
-
-func TestGetScore_BothURLAndText_ReturnsError(t *testing.T) {
-	cfg := stubApplyConfig()
-	req := callToolRequest("get_score", map[string]any{
-		"jd_url":      "https://example.com/job",
-		"jd_raw_text": "raw jd text",
-	})
-
-	result := mcpserver.HandleGetScore(context.Background(), &req, &cfg)
-
-	text := extractText(t, result)
-	var resp map[string]string
-	if err := json.Unmarshal([]byte(text), &resp); err != nil {
-		t.Fatalf("response is not valid JSON: %v — got: %s", err, text)
-	}
-	if _, ok := resp["error"]; !ok {
-		t.Errorf("expected error key in response, got: %v", resp)
-	}
-}
-
-func TestGetScore_URLOnly_ReturnsResult(t *testing.T) {
-	cfg := stubApplyConfig()
-	req := callToolRequest("get_score", map[string]any{
-		"jd_url": "https://example.com/job",
-	})
-
-	result := mcpserver.HandleGetScore(context.Background(), &req, &cfg)
-
-	text := extractText(t, result)
-	var pipelineResult model.PipelineResult
-	if err := json.Unmarshal([]byte(text), &pipelineResult); err != nil {
-		t.Fatalf("response is not valid PipelineResult JSON: %v — got: %s", err, text)
-	}
 }
 
 // ── HandleOnboardUser tests ────────────────────────────────────────────────────
@@ -422,47 +369,5 @@ func TestHandleUpdateConfig_RejectsOrchestratorKey(t *testing.T) {
 	}
 	if payload["error"] == "" {
 		t.Error("expected error when setting orchestrator key in MCP mode")
-	}
-}
-
-// TestHandleGetScore_NilLLM_ErrorsWithActionableMessage verifies that when
-// keyword extraction cannot produce a JD (nil LLM → empty JD), the handler
-// returns an error result with an actionable message directing the user to
-// supply the job description text directly.
-func TestHandleGetScore_NilLLM_ErrorsWithActionableMessage(t *testing.T) {
-	defaults, err := config.LoadDefaults()
-	if err != nil {
-		t.Fatalf("LoadDefaults: %v", err)
-	}
-	deps := pipeline.ApplyConfig{
-		Fetcher:  &stubJDFetcher{},
-		LLM:      nil,
-		Scorer:   &stubScorer{},
-		CLGen:    nil,
-		Resumes:  &stubResumeRepo{},
-		Loader:   &stubDocumentLoader{},
-		AppRepo:  &stubApplicationRepository{},
-		Augment:  nil,
-		Defaults: defaults,
-		Tailor:   nil,
-	}
-
-	req := callToolRequest("get_score", map[string]any{
-		"jd_raw_text": "Software Engineer role at Acme Corp",
-		"channel":     "COLD",
-	})
-
-	result := mcpserver.HandleGetScore(context.Background(), &req, &deps)
-
-	text := extractText(t, result)
-	var payload model.PipelineResult
-	if err := json.Unmarshal([]byte(text), &payload); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if payload.Status != "error" {
-		t.Errorf("expected status error when JD is empty, got %q", payload.Status)
-	}
-	if !strings.Contains(payload.Error, "could not extract a job description") {
-		t.Errorf("expected actionable error message, got: %s", payload.Error)
 	}
 }
