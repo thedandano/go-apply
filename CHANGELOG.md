@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.5](https://github.com/thedandano/go-apply/compare/v0.1.4...v0.1.5) (2026-04-16)
+
+
+### Bug Fixes
+
+* **install:** shasum on macOS, version from build info, CI release_created output ([#49](https://github.com/thedandano/go-apply/issues/49)) ([ffe3dbb](https://github.com/thedandano/go-apply/commit/ffe3dbbe490f327f2bedd33961c3dfe24cb4039e))
+
 ## [0.1.4](https://github.com/thedandano/go-apply/compare/v0.1.3...v0.1.4) (2026-04-16)
 
 
