@@ -13,6 +13,7 @@ import (
 
 	"github.com/thedandano/go-apply/internal/config"
 	"github.com/thedandano/go-apply/internal/loader"
+	"github.com/thedandano/go-apply/internal/model"
 	mcppres "github.com/thedandano/go-apply/internal/presenter/mcp"
 	"github.com/thedandano/go-apply/internal/repository/fs"
 	"github.com/thedandano/go-apply/internal/service/fetcher"
@@ -184,7 +185,7 @@ func HandleGetScoreWithConfig(ctx context.Context, req *mcp.CallToolRequest, dep
 		return errorResult("exactly one of url or text is required")
 	}
 
-	channel, err := resolveChannel(channelVal)
+	channel, err := model.ParseChannel(channelVal)
 	if err != nil {
 		return errorResult(err.Error())
 	}
