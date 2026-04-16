@@ -219,22 +219,22 @@ func (s *bddState) userSuppliesTextWithChannel(channel string) error {
 
 func (s *bddState) mcpGetScoreURL() error {
 	s.callMCPTool("get_score", map[string]any{
-		"url": "https://example.com/job",
+		"jd_url": "https://example.com/job",
 	})
 	return nil
 }
 
 func (s *bddState) mcpGetScoreText() error {
 	s.callMCPTool("get_score", map[string]any{
-		"text": "Senior Go engineer wanted.",
+		"jd_raw_text": "Senior Go engineer wanted.",
 	})
 	return nil
 }
 
 func (s *bddState) mcpGetScoreBothArgs() error {
 	s.callMCPTool("get_score", map[string]any{
-		"url":  "https://example.com/job",
-		"text": "raw jd text",
+		"jd_url":      "https://example.com/job",
+		"jd_raw_text": "raw jd text",
 	})
 	return nil
 }
