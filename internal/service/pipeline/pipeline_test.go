@@ -423,13 +423,13 @@ var _ port.Orchestrator = (*stubOrchestrator)(nil)
 func (s *stubOrchestrator) ExtractKeywords(_ context.Context, _ port.ExtractKeywordsInput) (model.JDData, error) {
 	return s.jd, s.err
 }
-func (s *stubOrchestrator) PlanT1(_ context.Context, _ port.PlanT1Input) (port.PlanT1Output, error) {
+func (s *stubOrchestrator) PlanT1(_ context.Context, _ *port.PlanT1Input) (port.PlanT1Output, error) {
 	return port.PlanT1Output{}, nil
 }
-func (s *stubOrchestrator) PlanT2(_ context.Context, _ port.PlanT2Input) (port.PlanT2Output, error) {
+func (s *stubOrchestrator) PlanT2(_ context.Context, _ *port.PlanT2Input) (port.PlanT2Output, error) {
 	return port.PlanT2Output{}, nil
 }
-func (s *stubOrchestrator) GenerateCoverLetter(_ context.Context, _ port.CoverLetterInput) (string, error) {
+func (s *stubOrchestrator) GenerateCoverLetter(_ context.Context, _ *port.CoverLetterInput) (string, error) {
 	return "", nil
 }
 

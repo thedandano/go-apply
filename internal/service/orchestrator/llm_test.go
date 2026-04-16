@@ -91,7 +91,7 @@ func TestLLMOrchestrator_PlanT1_HappyPath(t *testing.T) {
 	client := &stubLLMClient{response: payload}
 	orch := orchestrator.NewLLMOrchestrator(client)
 
-	out, err := orch.PlanT1(context.Background(), port.PlanT1Input{
+	out, err := orch.PlanT1(context.Background(), &port.PlanT1Input{
 		JDData:     model.JDData{Required: []string{"rust", "terraform"}},
 		ResumeText: "experience in Go",
 		SkillsRef:  "Skills: Go, Python",
@@ -109,7 +109,7 @@ func TestLLMOrchestrator_PlanT2_HappyPath(t *testing.T) {
 	client := &stubLLMClient{response: payload}
 	orch := orchestrator.NewLLMOrchestrator(client)
 
-	out, err := orch.PlanT2(context.Background(), port.PlanT2Input{
+	out, err := orch.PlanT2(context.Background(), &port.PlanT2Input{
 		JDData:          model.JDData{Required: []string{"distributed systems"}},
 		ResumeText:      "built systems",
 		Accomplishments: "led migration to distributed system",
@@ -130,7 +130,7 @@ func TestLLMOrchestrator_GenerateCoverLetter_HappyPath(t *testing.T) {
 	client := &stubLLMClient{response: expected}
 	orch := orchestrator.NewLLMOrchestrator(client)
 
-	out, err := orch.GenerateCoverLetter(context.Background(), port.CoverLetterInput{
+	out, err := orch.GenerateCoverLetter(context.Background(), &port.CoverLetterInput{
 		JDData:        model.JDData{Title: "Engineer", Company: "Acme"},
 		ResumeText:    "resume text",
 		CandidateName: "Alice",

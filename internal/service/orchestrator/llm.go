@@ -84,7 +84,7 @@ Job Description:
 }
 
 // PlanT1 asks the LLM which skills should be injected into the Skills section.
-func (o *LLMOrchestrator) PlanT1(ctx context.Context, input port.PlanT1Input) (port.PlanT1Output, error) {
+func (o *LLMOrchestrator) PlanT1(ctx context.Context, input *port.PlanT1Input) (port.PlanT1Output, error) {
 	allKeywords := append(input.JDData.Required, input.JDData.Preferred...) //nolint:gocritic // fresh slice intentional
 	prompt := fmt.Sprintf(`You are a resume tailoring assistant.
 
@@ -128,7 +128,7 @@ Return ONLY a JSON object with this key:
 }
 
 // PlanT2 asks the LLM for bullet rewrites grounded in accomplishments.
-func (o *LLMOrchestrator) PlanT2(ctx context.Context, input port.PlanT2Input) (port.PlanT2Output, error) {
+func (o *LLMOrchestrator) PlanT2(ctx context.Context, input *port.PlanT2Input) (port.PlanT2Output, error) {
 	allKeywords := append(input.JDData.Required, input.JDData.Preferred...) //nolint:gocritic // fresh slice intentional
 	prompt := fmt.Sprintf(`You are a resume tailoring assistant.
 
@@ -174,7 +174,7 @@ Return ONLY a JSON object with this key:
 }
 
 // GenerateCoverLetter asks the LLM to write a cover letter and returns the raw text.
-func (o *LLMOrchestrator) GenerateCoverLetter(ctx context.Context, input port.CoverLetterInput) (string, error) {
+func (o *LLMOrchestrator) GenerateCoverLetter(ctx context.Context, input *port.CoverLetterInput) (string, error) {
 	prompt := fmt.Sprintf(`Write a professional cover letter for %s applying to the %s role at %s.
 
 Resume summary:

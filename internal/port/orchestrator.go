@@ -54,7 +54,7 @@ type CoverLetterInput struct {
 // is not used — the pipeline receives pre-computed results from the MCP tools.
 type Orchestrator interface {
 	ExtractKeywords(ctx context.Context, input ExtractKeywordsInput) (model.JDData, error)
-	PlanT1(ctx context.Context, input PlanT1Input) (PlanT1Output, error)
-	PlanT2(ctx context.Context, input PlanT2Input) (PlanT2Output, error)
-	GenerateCoverLetter(ctx context.Context, input CoverLetterInput) (string, error)
+	PlanT1(ctx context.Context, input *PlanT1Input) (PlanT1Output, error)
+	PlanT2(ctx context.Context, input *PlanT2Input) (PlanT2Output, error)
+	GenerateCoverLetter(ctx context.Context, input *CoverLetterInput) (string, error)
 }
