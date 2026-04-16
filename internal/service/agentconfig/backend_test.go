@@ -21,8 +21,8 @@ var testEntry = port.MCPServerEntry{
 // newTestOps builds a fileOps that uses real OS functions scoped to dir.
 // getenv always returns "" to keep tests isolated from the real environment.
 // homeDir is set to dir; goos defaults to "linux".
-func newTestOps(dir string) fileOps {
-	return fileOps{
+func newTestOps(dir string) *fileOps {
+	return &fileOps{
 		readFile:   os.ReadFile,
 		writeFile:  os.WriteFile,
 		stat:       os.Stat,
@@ -37,7 +37,7 @@ func newTestOps(dir string) fileOps {
 
 // withEnv returns a copy of ops with getenv replaced by a lookup map.
 // Keys not present in the map return "".
-func withEnv(ops fileOps, env map[string]string) fileOps {
+func withEnv(ops *fileOps, env map[string]string) *fileOps {
 	ops.getenv = func(key string) string { return env[key] }
 	return ops
 }

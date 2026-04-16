@@ -29,12 +29,12 @@ type fileOps struct {
 // newProdFileOps builds a fileOps using real OS functions. It resolves
 // homeDir eagerly so callers get an error at construction time rather than
 // at first use.
-func newProdFileOps() (fileOps, error) {
+func newProdFileOps() (*fileOps, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return fileOps{}, fmt.Errorf("resolve home directory: %w", err)
+		return nil, fmt.Errorf("resolve home directory: %w", err)
 	}
-	return fileOps{
+	return &fileOps{
 		readFile:   os.ReadFile,
 		writeFile:  os.WriteFile,
 		stat:       os.Stat,
@@ -48,16 +48,16 @@ func newProdFileOps() (fileOps, error) {
 }
 
 // exists returns true when the path stat-check succeeds.
-func (f fileOps) exists(path string) bool {
+func (f *fileOps) exists(path string) bool {
 	_, err := f.stat(path)
 	return err == nil
 }
 
 // ---- Per-agent backend structs ----------------------------------------------
 
-type claudeBackend struct{ ops fileOps }
-type openclawBackend struct{ ops fileOps }
-type hermesBackend struct{ ops fileOps }
+type claudeBackend struct{ ops *fileOps }
+type openclawBackend struct{ ops *fileOps }
+type hermesBackend struct{ ops *fileOps }
 
 // Compile-time interface assertions.
 var _ port.AgentConfigRegistrar = (*claudeBackend)(nil)
@@ -66,9 +66,9 @@ var _ port.AgentConfigRegistrar = (*hermesBackend)(nil)
 
 // ---- Unexported constructors (used by tests) --------------------------------
 
-func newClaudeBackend(ops fileOps) *claudeBackend     { return &claudeBackend{ops: ops} }
-func newOpenclawBackend(ops fileOps) *openclawBackend { return &openclawBackend{ops: ops} }
-func newHermesBackend(ops fileOps) *hermesBackend     { return &hermesBackend{ops: ops} }
+func newClaudeBackend(ops *fileOps) *claudeBackend     { return &claudeBackend{ops: ops} }
+func newOpenclawBackend(ops *fileOps) *openclawBackend { return &openclawBackend{ops: ops} }
+func newHermesBackend(ops *fileOps) *hermesBackend     { return &hermesBackend{ops: ops} }
 
 // ---- Path resolution --------------------------------------------------------
 
@@ -130,7 +130,7 @@ type mergeFunc func([]byte, []string, string, port.MCPServerEntry) ([]byte, bool
 type removeFunc func([]byte, []string, string) ([]byte, bool, error)
 
 // registerWith performs the shared register flow for any backend.
-func registerWith(ops fileOps, path string, keyPath []string, serverName string, entry port.MCPServerEntry, merge mergeFunc) (port.RegistrationResult, error) {
+func registerWith(ops *fileOps, path string, keyPath []string, serverName string, entry port.MCPServerEntry, merge mergeFunc) (port.RegistrationResult, error) {
 	existing, err := ops.readFile(path)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return port.RegistrationResult{}, fmt.Errorf("read %s: %w", path, err)
@@ -160,7 +160,7 @@ func registerWith(ops fileOps, path string, keyPath []string, serverName string,
 }
 
 // unregisterWith performs the shared unregister flow for any backend.
-func unregisterWith(ops fileOps, path string, keyPath []string, serverName string, remove removeFunc) (port.RegistrationResult, error) {
+func unregisterWith(ops *fileOps, path string, keyPath []string, serverName string, remove removeFunc) (port.RegistrationResult, error) {
 	existing, err := ops.readFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return port.RegistrationResult{ConfigPath: path, Action: port.ActionNotFound}, nil
