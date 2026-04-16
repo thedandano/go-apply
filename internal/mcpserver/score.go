@@ -11,17 +11,21 @@ import (
 	"github.com/thedandano/go-apply/internal/config"
 	"github.com/thedandano/go-apply/internal/loader"
 	"github.com/thedandano/go-apply/internal/model"
+	"github.com/thedandano/go-apply/internal/port"
 	mcppres "github.com/thedandano/go-apply/internal/presenter/mcp"
 	"github.com/thedandano/go-apply/internal/repository/fs"
 	"github.com/thedandano/go-apply/internal/service/fetcher"
+	"github.com/thedandano/go-apply/internal/service/llm"
 	"github.com/thedandano/go-apply/internal/service/pipeline"
 	"github.com/thedandano/go-apply/internal/service/scorer"
 )
 
 // loadDeps loads configuration and wires all pipeline dependencies.
 // Config is loaded fresh per invocation so changes take effect immediately.
-// In MCP mode Claude is the orchestrator — LLM, CLGen, Augment, and Tailor are nil;
-// Claude handles keyword extraction, cover letter generation, augmentation, and tailoring.
+// By default Claude is the orchestrator in MCP mode — LLM, CLGen, Augment, and
+// Tailor are nil so Claude handles keyword extraction, cover letters, etc.
+// When the orchestrator section is configured (base_url + model), an LLM client
+// is created so the pipeline can extract keywords autonomously.
 func loadDeps() (*config.Config, pipeline.ApplyConfig, error) {
 	log := slog.Default()
 
@@ -43,9 +47,14 @@ func loadDeps() (*config.Config, pipeline.ApplyConfig, error) {
 	scorerSvc := scorer.New(defaults)
 	fetcherSvc := fetcher.NewFallback(defaults, log)
 
+	var llmClient port.LLMClient
+	if cfg.Orchestrator.BaseURL != "" && cfg.Orchestrator.Model != "" {
+		llmClient = llm.New(cfg.Orchestrator.BaseURL, cfg.Orchestrator.Model, cfg.Orchestrator.APIKey, defaults, log)
+	}
+
 	deps := pipeline.ApplyConfig{
 		Fetcher:  fetcherSvc,
-		LLM:      nil, // Claude handles keyword extraction
+		LLM:      llmClient,
 		Scorer:   scorerSvc,
 		CLGen:    nil, // Claude generates cover letters
 		Resumes:  resumeRepo,

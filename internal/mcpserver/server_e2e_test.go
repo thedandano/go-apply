@@ -19,8 +19,8 @@ import (
 )
 
 // newEmbedderStub returns a stub HTTP server that serves a fixed 3-element
-// embedding vector at /embeddings. Used by onboard_user (and indirectly
-// get_score after onboarding) to avoid a real LLM dependency.
+// embedding vector at /embeddings. Used by onboard_user to avoid a real
+// embedding model dependency.
 func newEmbedderStub(t *testing.T) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -34,13 +34,37 @@ func newEmbedderStub(t *testing.T) *httptest.Server {
 	}))
 }
 
+// newLLMStub returns a stub HTTP server that serves a structured JD JSON
+// response at /chat/completions. Used by get_score to extract keywords
+// without a real LLM.
+func newLLMStub(t *testing.T) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/chat/completions" {
+			jdJSON := `{"title":"Senior Go Engineer","company":"Acme Corp","required":["go","kubernetes"],"preferred":["docker","terraform"],"location":"Remote","seniority":"senior","required_years":5}`
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"choices": []map[string]any{
+					{"message": map[string]string{"content": jdJSON}},
+				},
+			})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+}
+
+// testEnvOptions configures optional fields for setupTestEnv.
+type testEnvOptions struct {
+	llmURL string // when set, configures the orchestrator LLM for keyword extraction
+}
+
 // setupTestEnv redirects all config and data I/O to isolated temp dirs by
-// setting XDG_CONFIG_HOME and XDG_DATA_HOME, then writes a minimal
-// config.yaml with the given embedder base URL (no /v1 suffix — the LLM
-// client appends /embeddings directly to whatever base_url is set).
+// setting XDG_CONFIG_HOME and XDG_DATA_HOME, then writes a config.yaml with
+// the given embedder base URL (no /v1 suffix — the LLM client appends
+// /embeddings directly to whatever base_url is set).
 // It also pre-creates the data subdirectories (go-apply/ and inputs/) so that
-// both SQLite and the resume repository can operate without hitting missing-dir errors.
-func setupTestEnv(t *testing.T, embedderURL string) {
+// both SQLite and the resume repository can operate without missing-dir errors.
+func setupTestEnv(t *testing.T, embedderURL string, opts ...testEnvOptions) {
 	t.Helper()
 	tmp := t.TempDir()
 	cfgBase := filepath.Join(tmp, "config")
@@ -52,7 +76,11 @@ func setupTestEnv(t *testing.T, embedderURL string) {
 	if err := os.MkdirAll(cfgDir, 0o700); err != nil {
 		t.Fatalf("mkdirall cfgDir: %v", err)
 	}
+
 	cfgContent := "embedder:\n  base_url: " + embedderURL + "\n  model: test-model\nembedding_dim: 3\n"
+	if len(opts) > 0 && opts[0].llmURL != "" {
+		cfgContent += "orchestrator:\n  base_url: " + opts[0].llmURL + "\n  model: test-model\n"
+	}
 	if err := os.WriteFile(filepath.Join(cfgDir, "config.yaml"), []byte(cfgContent), 0o600); err != nil {
 		t.Fatalf("write config.yaml: %v", err)
 	}
@@ -187,7 +215,7 @@ func TestServerDispatch_GetScore_BlockedUntilOnboarded(t *testing.T) {
 	cl := newMCPClient(t)
 
 	raw := callTool(t, cl, "get_score", map[string]any{
-		"text":    "Senior Go Engineer. Requires go, kubernetes.",
+		"text":    "We are looking for a Senior Go Engineer to join our platform team at Acme Corp. You will design and build microservices on Kubernetes, mentor junior engineers, and drive best practices across the org. Requirements: 5+ years of Go, strong Kubernetes experience, familiarity with Docker and Terraform. Nice to have: experience with gRPC and observability tooling.",
 		"channel": "COLD",
 	})
 
@@ -256,19 +284,24 @@ func TestServerDispatch_UpdateConfig_PersistsField(t *testing.T) {
 }
 
 // TestServerDispatch_OnboardThenScore verifies the full onboard → score flow
-// through the MCP server: onboard_user stores a resume, then get_score passes
-// the requireOnboarded middleware and returns a PipelineResult (identified by
-// the presence of a "status" field).
+// through the MCP server: onboard_user stores a resume (with skills and
+// accomplishments), then get_score passes the requireOnboarded middleware,
+// extracts keywords via the LLM stub, scores the resume, and returns a
+// PipelineResult with a positive score.
 func TestServerDispatch_OnboardThenScore(t *testing.T) {
-	stub := newEmbedderStub(t)
-	defer stub.Close()
-	setupTestEnv(t, stub.URL)
+	embedder := newEmbedderStub(t)
+	defer embedder.Close()
+	llmStub := newLLMStub(t)
+	defer llmStub.Close()
+	setupTestEnv(t, embedder.URL, testEnvOptions{llmURL: llmStub.URL})
 	cl := newMCPClient(t)
 
-	// Step 1: onboard a resume.
+	// Step 1: onboard resume, skills, and accomplishments.
 	onboardRaw := callTool(t, cl, "onboard_user", map[string]any{
-		"resume_content": "golang kubernetes senior engineer five years experience",
-		"resume_label":   "main",
+		"resume_content":  "Senior Go Engineer with 5 years of experience building distributed systems in Go. Proficient in Kubernetes, Docker, Terraform, and gRPC. Led migration of monolith to microservices architecture serving 10M requests/day.",
+		"resume_label":    "main",
+		"skills":          "Go, Kubernetes, Docker, Terraform, gRPC, PostgreSQL, Redis, CI/CD, Microservices, Distributed Systems",
+		"accomplishments": "Led monolith-to-microservices migration reducing p99 latency by 40%. Built internal developer platform adopted by 12 teams. Mentored 4 junior engineers to mid-level promotions.",
 	})
 	var onboardResp map[string]any
 	if err := json.Unmarshal([]byte(onboardRaw), &onboardResp); err != nil {
@@ -278,19 +311,24 @@ func TestServerDispatch_OnboardThenScore(t *testing.T) {
 		t.Fatalf("onboard_user failed: %v", errMsg)
 	}
 
-	// Step 2: get_score should now pass the middleware and reach the pipeline.
-	// In MCP mode LLM is nil, so the pipeline returns a structured error result
-	// (status "error") rather than a plain-text error — the important thing is
-	// that the response has a "status" field, proving middleware was not blocking.
+	// Step 2: score against a realistic job description.
 	scoreRaw := callTool(t, cl, "get_score", map[string]any{
-		"text":    "Senior Go Engineer at Acme. Requires: go, kubernetes.",
+		"text":    "We are looking for a Senior Go Engineer to join our platform team at Acme Corp. You will design and build microservices on Kubernetes, mentor junior engineers, and drive best practices across the org. Requirements: 5+ years of Go, strong Kubernetes experience, familiarity with Docker and Terraform. Nice to have: experience with gRPC and observability tooling.",
 		"channel": "COLD",
 	})
 	var scoreResp map[string]any
 	if err := json.Unmarshal([]byte(scoreRaw), &scoreResp); err != nil {
 		t.Fatalf("unmarshal score: %v — raw: %s", err, scoreRaw)
 	}
-	if _, hasStatus := scoreResp["status"]; !hasStatus {
-		t.Errorf("get_score response missing 'status' field — middleware may still be blocking: %s", scoreRaw)
+
+	if scoreResp["status"] != "success" {
+		t.Errorf("status = %v, want success — full response: %s", scoreResp["status"], scoreRaw)
+	}
+	bestScore, _ := scoreResp["best_score"].(float64)
+	if bestScore <= 0 {
+		t.Errorf("best_score = %v, want > 0", scoreResp["best_score"])
+	}
+	if scoreResp["best_resume"] != "main" {
+		t.Errorf("best_resume = %v, want main", scoreResp["best_resume"])
 	}
 }
