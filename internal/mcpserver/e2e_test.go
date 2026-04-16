@@ -24,9 +24,10 @@ import (
 	"github.com/thedandano/go-apply/internal/service/scorer"
 )
 
-// TestOnboardThenScore exercises the full onboard → score flow using real
-// SQLite, real file I/O, real scorer, and stub HTTP servers for the LLM and
-// embedder.  This test automates the manual flow from the first MCP session.
+// TestOnboardThenScore exercises the full onboard → load_jd → submit_keywords flow
+// using real SQLite, real file I/O, real scorer, and a stub embedder.
+// Keyword extraction is performed by the test (mimicking the MCP host role), so no
+// LLM stub is needed for scoring.
 func TestOnboardThenScore(t *testing.T) {
 	// ── 1. Setup ───────────────────────────────────────────────────────────────
 
@@ -46,21 +47,6 @@ func TestOnboardThenScore(t *testing.T) {
 		http.NotFound(w, r)
 	}))
 	defer embedderStub.Close()
-
-	// Stub LLM: returns a structured JD JSON with go and kubernetes keywords.
-	llmStub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/chat/completions" {
-			jdJSON := `{"title":"Go Engineer","company":"Acme","required":["go","kubernetes"],"preferred":["docker"],"location":"Remote","seniority":"senior","required_years":3}`
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"choices": []map[string]any{
-					{"message": map[string]string{"content": jdJSON}},
-				},
-			})
-			return
-		}
-		http.NotFound(w, r)
-	}))
-	defer llmStub.Close()
 
 	defaults, err := config.LoadDefaults()
 	if err != nil {
@@ -92,15 +78,13 @@ func TestOnboardThenScore(t *testing.T) {
 		t.Fatalf("onboard stored nothing — warnings: %v", onboardResult.Warnings)
 	}
 
-	// Assert the resume file was written to disk.
 	resumePath := filepath.Join(dataDir, "inputs", "main.txt")
 	if _, statErr := os.Stat(resumePath); statErr != nil {
 		t.Fatalf("resume file not written at %s: %v", resumePath, statErr)
 	}
 
-	// ── 3. Scoring ─────────────────────────────────────────────────────────────
+	// ── 3. Build pipeline deps (no LLM — MCP host extracts keywords) ───────────
 
-	llmClient := llm.New(llmStub.URL, "test-model", "", defaults, log)
 	scorerSvc := scorer.New(defaults)
 	resumeRepo := fsrepo.NewResumeRepository(dataDir)
 	docLoader := loader.New()
@@ -108,7 +92,7 @@ func TestOnboardThenScore(t *testing.T) {
 
 	deps := pipeline.ApplyConfig{
 		Fetcher:   nil,
-		LLM:       llmClient,
+		LLM:       nil, // MCP host (this test) provides keywords via submit_keywords
 		Scorer:    scorerSvc,
 		CLGen:     nil,
 		Resumes:   resumeRepo,
@@ -120,28 +104,55 @@ func TestOnboardThenScore(t *testing.T) {
 		Presenter: nil,
 	}
 
-	req := callToolRequest("get_score", map[string]any{
+	// ── 4. load_jd ─────────────────────────────────────────────────────────────
+
+	loadReq := callToolRequest("load_jd", map[string]any{
 		"jd_raw_text": "Senior Go Engineer at Acme. Requires: go, kubernetes. Nice to have: docker.",
-		"channel":     "COLD",
 	})
+	loadResult := mcpserver.HandleLoadJDWithConfig(context.Background(), &loadReq, &deps)
+	loadText := extractText(t, loadResult)
 
-	scoreResult := mcpserver.HandleGetScore(context.Background(), &req, &deps)
-	rawText := extractText(t, scoreResult)
-
-	var pr model.PipelineResult
-	if err := json.Unmarshal([]byte(rawText), &pr); err != nil {
-		t.Fatalf("unmarshal PipelineResult: %v — raw: %s", err, rawText)
+	var loadEnv map[string]any
+	if err := json.Unmarshal([]byte(loadText), &loadEnv); err != nil {
+		t.Fatalf("load_jd response not JSON: %v — raw: %s", err, loadText)
+	}
+	if loadEnv["status"] != "ok" {
+		t.Fatalf("load_jd status = %v, want ok — full: %s", loadEnv["status"], loadText)
+	}
+	sessionID, _ := loadEnv["session_id"].(string)
+	if sessionID == "" {
+		t.Fatal("load_jd returned no session_id")
 	}
 
-	// ── 4. Assertions ──────────────────────────────────────────────────────────
+	// ── 5. submit_keywords (test plays the MCP host role) ─────────────────────
 
-	if pr.Status != "success" {
-		t.Errorf("status = %q (error: %s), want success", pr.Status, pr.Error)
+	const jdJSON = `{"title":"Go Engineer","company":"Acme","required":["go","kubernetes"],"preferred":["docker"],"location":"Remote","seniority":"senior","required_years":3}`
+	kwReq := callToolRequest("submit_keywords", map[string]any{
+		"session_id": sessionID,
+		"jd_json":    jdJSON,
+	})
+	kwResult := mcpserver.HandleSubmitKeywordsWithConfig(context.Background(), &kwReq, &deps, &config.Config{})
+	kwText := extractText(t, kwResult)
+
+	var kwEnv map[string]any
+	if err := json.Unmarshal([]byte(kwText), &kwEnv); err != nil {
+		t.Fatalf("submit_keywords response not JSON: %v — raw: %s", err, kwText)
 	}
-	if pr.BestScore <= 0 {
-		t.Errorf("best_score = %f, want > 0", pr.BestScore)
+
+	// ── 6. Assertions ──────────────────────────────────────────────────────────
+
+	if kwEnv["status"] != "ok" {
+		t.Errorf("status = %v, want ok — full: %s", kwEnv["status"], kwText)
 	}
-	if pr.BestResume != "main" {
-		t.Errorf("best_resume = %q, want main", pr.BestResume)
+	data, _ := kwEnv["data"].(map[string]any)
+	if data == nil {
+		t.Fatalf("expected data in submit_keywords response")
+	}
+	bestScore, _ := data["best_score"].(float64)
+	if bestScore <= 0 {
+		t.Errorf("best_score = %v, want > 0", data["best_score"])
+	}
+	if data["best_resume"] != "main" {
+		t.Errorf("best_resume = %v, want main", data["best_resume"])
 	}
 }

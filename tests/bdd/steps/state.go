@@ -27,4 +27,5 @@ type bddState struct {
 	jdText          string
 	channel         string
 	accomplishments string
+	sessionID       string // multi-turn MCP session
 }

@@ -122,26 +122,24 @@ Feature: Job Application Workflow
   # ─────────────────────────────────────────────────────────────────────────────
 
   @mcp
-  Scenario: Score resume via get_score MCP tool with a URL
-    When Claude invokes the get_score tool with a job posting URL
-    Then go-apply runs the full pipeline
-    And returns a JSON result with scores, extracted keywords, and (if score >= 70) a cover letter
+  Scenario: load_jd accepts raw text and returns session_id
+    When Claude invokes load_jd with raw job description text
+    Then go-apply returns a session_id and jd_text for keyword extraction
 
   @mcp
-  Scenario: Score resume via get_score MCP tool with raw text
-    When Claude invokes the get_score tool with raw job description text
-    Then go-apply runs the full pipeline
-    And returns a JSON result with scores and extracted keywords
+  Scenario: Multi-turn flow: load_jd then submit_keywords returns scores
+    When Claude invokes load_jd and submit_keywords for scoring
+    Then go-apply returns a JSON result with scores and best_resume
 
   @mcp
-  Scenario: get_score rejects both url and text provided together
-    When Claude invokes the get_score tool with both url and text arguments
-    Then go-apply returns an error: "exactly one of url or text is required"
+  Scenario: load_jd rejects both url and text provided together
+    When Claude invokes load_jd with both url and text arguments
+    Then go-apply returns an error: "exactly one of jd_url or jd_raw_text is required"
 
   @mcp
-  Scenario: get_score rejects neither url nor text provided
-    When Claude invokes the get_score tool with neither url nor text
-    Then go-apply returns an error: "exactly one of url or text is required"
+  Scenario: load_jd rejects neither url nor text provided
+    When Claude invokes load_jd with neither url nor text
+    Then go-apply returns an error: "exactly one of jd_url or jd_raw_text is required"
 
   # ─────────────────────────────────────────────────────────────────────────────
   # CLI-specific invocation
