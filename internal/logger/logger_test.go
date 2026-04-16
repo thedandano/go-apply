@@ -3,7 +3,6 @@ package logger_test
 import (
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,7 +14,7 @@ import (
 
 func TestNew_WritesJSONToDailyFile(t *testing.T) {
 	dir := t.TempDir()
-	log, cleanup, err := logger.New(dir, slog.LevelInfo)
+	log, cleanup, err := logger.New(dir)
 	if err != nil {
 		t.Fatalf("New() error: %v", err)
 	}
@@ -56,7 +55,7 @@ func TestNew_PrunesOldLogFiles(t *testing.T) {
 		name := fmt.Sprintf("go-apply-2025-%02d-01.log", i+1)
 		os.WriteFile(filepath.Join(dir, name), []byte("old"), 0640)
 	}
-	log, cleanup, _ := logger.New(dir, slog.LevelInfo)
+	log, cleanup, _ := logger.New(dir)
 	defer cleanup()
 	_ = log
 
@@ -67,7 +66,7 @@ func TestNew_PrunesOldLogFiles(t *testing.T) {
 }
 
 func TestNew_FallsBackToStderrWhenDirUnwritable(t *testing.T) {
-	log, cleanup, err := logger.New("/proc/unwritable/path", slog.LevelInfo)
+	log, cleanup, err := logger.New("/proc/unwritable/path")
 	if err != nil {
 		t.Fatalf("New() should not fail on unwritable dir, got: %v", err)
 	}
@@ -78,13 +77,13 @@ func TestNew_FallsBackToStderrWhenDirUnwritable(t *testing.T) {
 	log.Warn("fallback smoke test") // verifies fallback logger is functional, not just non-nil
 }
 
-func TestNew_DebugLevelFiltersInfo(t *testing.T) {
+func TestNew_FileReceivesDebugLogs(t *testing.T) {
 	dir := t.TempDir()
-	log, cleanup, _ := logger.New(dir, slog.LevelWarn)
+	log, cleanup, _ := logger.New(dir)
 	defer cleanup()
 
-	log.Info("this should be filtered")
-	log.Warn("this should appear")
+	log.Debug("debug message")
+	log.Info("info message")
 
 	cleanup()
 
@@ -96,13 +95,13 @@ func TestNew_DebugLevelFiltersInfo(t *testing.T) {
 	if len(data) == 0 {
 		t.Skip("no log output — file may be empty before flush")
 	}
-	lines := splitLines(string(data))
-	for _, line := range lines {
-		var r map[string]any
-		json.Unmarshal([]byte(line), &r)
-		if r["level"] == "INFO" {
-			t.Error("INFO log appeared despite Warn level")
-		}
+
+	content := string(data)
+	if !strings.Contains(content, "debug message") {
+		t.Error("DEBUG log must appear in log file")
+	}
+	if !strings.Contains(content, "info message") {
+		t.Error("INFO log must appear in log file")
 	}
 }
 

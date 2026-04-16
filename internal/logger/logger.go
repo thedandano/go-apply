@@ -20,12 +20,12 @@ const (
 // New creates a *slog.Logger writing JSON lines to a daily log file in logDir.
 //
 // File naming: go-apply-2006-01-02.log (one per day; multiple invocations append)
-// Dual output: file at configured level + stderr at WARN+ (keeps TUI clean)
+// Dual output: file at DEBUG+ (full diagnostics) + stderr at WARN+ (keeps TUI clean)
 // Retention: keeps the last maxLogFiles files, prunes older ones on startup
-// Fallback: if logDir is unwritable → stderr-only logger, no error returned
-func New(logDir string, level slog.Level) (*slog.Logger, func(), error) {
+// Fallback: if logDir is unwritable → stderr-only logger at WARN+, no error returned
+func New(logDir string) (*slog.Logger, func(), error) {
 	if err := os.MkdirAll(logDir, 0750); err != nil {
-		return stderrOnly(level), func() {}, nil
+		return stderrOnly(), func() {}, nil
 	}
 
 	// Keep maxLogFiles-1 existing files so the new file below brings the total to maxLogFiles.
@@ -36,11 +36,11 @@ func New(logDir string, level slog.Level) (*slog.Logger, func(), error) {
 
 	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600) // #nosec G304 -- logPath built from os.UserHomeDir() + fixed suffix, not user input
 	if err != nil {
-		return stderrOnly(level), func() {}, nil
+		return stderrOnly(), func() {}, nil
 	}
 
 	log := slog.New(&multiHandler{
-		file:   slog.NewJSONHandler(f, &slog.HandlerOptions{Level: level}),
+		file:   slog.NewJSONHandler(f, &slog.HandlerOptions{Level: slog.LevelDebug}),
 		stderr: slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}),
 	})
 
@@ -48,8 +48,8 @@ func New(logDir string, level slog.Level) (*slog.Logger, func(), error) {
 	return log, func() { once.Do(func() { _ = f.Close() }) }, nil //nolint:gosec // G104: close error in cleanup is non-fatal
 }
 
-func stderrOnly(level slog.Level) *slog.Logger {
-	return slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
+func stderrOnly() *slog.Logger {
+	return slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 }
 
 func pruneOldLogs(logDir string, keep int) {

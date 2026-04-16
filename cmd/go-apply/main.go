@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"log/slog"
 	"os"
 	"runtime/debug"
 
@@ -30,7 +29,7 @@ func main() {
 func run() int {
 	logDir := config.LogDir()
 
-	log, cleanup, err := logger.New(logDir, slog.LevelInfo)
+	log, cleanup, err := logger.New(logDir)
 	if err != nil {
 		// New() only returns nil errors per API contract; this is a safeguard.
 		fmt.Fprintf(os.Stderr, "logger init: %v\n", err)
