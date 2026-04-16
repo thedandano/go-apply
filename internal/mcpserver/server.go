@@ -17,7 +17,7 @@ func NewServer() *server.MCPServer {
 
 	srv.AddTool(
 		mcp.NewTool("get_score",
-			mcp.WithDescription("Score resumes against a job description. Runs the full pipeline; a cover letter is included in the result if the best score meets the configured threshold."),
+			mcp.WithDescription("Score resumes against a job description. Returns jd_text, best_score, best_resume, and warnings. You (Claude) are the orchestrator: extract keywords from jd_text, interpret the score, identify skill gaps, and generate a cover letter when appropriate. LLM-dependent steps (keyword injection, bullet rewriting) are skipped — handle them yourself using the result data."),
 			mcp.WithString("url", mcp.Description("URL of the job posting to fetch")),
 			mcp.WithString("text", mcp.Description("Raw job description text (alternative to url)")),
 			mcp.WithString("channel", mcp.Description("Application channel: COLD, REFERRAL, or RECRUITER"), mcp.DefaultString("COLD")),
