@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -64,7 +63,7 @@ Outputs a JSON result to stdout when --headless is set.`,
 				return fmt.Errorf("load defaults: %w", err)
 			}
 
-			channel, err := resolveChannel(channelFlag)
+			channel, err := model.ParseChannel(channelFlag)
 			if err != nil {
 				return err
 			}
@@ -145,18 +144,4 @@ Outputs a JSON result to stdout when --headless is set.`,
 	cmd.Flags().StringVar(&accomplishmentsFlag, "accomplishments", "", "Path to accomplishments doc for tier-2 bullet rewriting (optional)")
 
 	return cmd
-}
-
-// resolveChannel parses a channel string into a model.ChannelType.
-func resolveChannel(s string) (model.ChannelType, error) {
-	switch strings.ToUpper(s) {
-	case "COLD":
-		return model.ChannelCold, nil
-	case "REFERRAL":
-		return model.ChannelReferral, nil
-	case "RECRUITER":
-		return model.ChannelRecruiter, nil
-	default:
-		return "", fmt.Errorf("unknown channel %q — valid values: COLD, REFERRAL, RECRUITER", s)
-	}
 }
