@@ -412,6 +412,108 @@ func TestAcquireJD_URLInput_FetchesText(t *testing.T) {
 	}
 }
 
+// stubOrchestrator is a hand-rolled mock for port.Orchestrator.
+type stubOrchestrator struct {
+	jd  model.JDData
+	err error
+}
+
+var _ port.Orchestrator = (*stubOrchestrator)(nil)
+
+func (s *stubOrchestrator) ExtractKeywords(_ context.Context, _ port.ExtractKeywordsInput) (model.JDData, error) {
+	return s.jd, s.err
+}
+func (s *stubOrchestrator) PlanT1(_ context.Context, _ *port.PlanT1Input) (port.PlanT1Output, error) {
+	return port.PlanT1Output{}, nil
+}
+func (s *stubOrchestrator) PlanT2(_ context.Context, _ *port.PlanT2Input) (port.PlanT2Output, error) {
+	return port.PlanT2Output{}, nil
+}
+func (s *stubOrchestrator) GenerateCoverLetter(_ context.Context, _ *port.CoverLetterInput) (string, error) {
+	return "", nil
+}
+
+// TestApplyPipeline_WithOrchestrator verifies that Run delegates keyword extraction
+// to the Orchestrator when one is wired (and no LLMClient is needed).
+func TestApplyPipeline_WithOrchestrator(t *testing.T) {
+	pres := &capturingPresenter{}
+	defaults, _ := config.LoadDefaults()
+
+	jd := model.JDData{
+		Title:     "Go Engineer",
+		Company:   "Acme",
+		Required:  []string{"golang", "kubernetes"},
+		Preferred: []string{"docker"},
+		Seniority: model.SenioritySenior,
+	}
+	orch := &stubOrchestrator{jd: jd}
+
+	pl := pipeline.NewApplyPipeline(&pipeline.ApplyConfig{
+		Fetcher:      &stubJDFetcher{},
+		LLM:          nil, // no direct LLM — orchestrator provides keywords
+		Scorer:       scorer.New(defaults),
+		CLGen:        nil,
+		Resumes:      &stubResumeRepo{},
+		Loader:       &stubDocumentLoader{},
+		AppRepo:      &stubAppRepo{},
+		Augment:      &stubAugmentService{},
+		Presenter:    pres,
+		Defaults:     defaults,
+		Tailor:       nil,
+		Orchestrator: orch,
+	})
+
+	err := pl.Run(context.Background(), pipeline.ApplyRequest{
+		URLOrText: "Senior Go engineer role",
+		IsText:    true,
+		Channel:   model.ChannelCold,
+		Config:    &config.Config{YearsOfExperience: 5, DefaultSeniority: "senior"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if pres.result == nil {
+		t.Fatal("expected result, got nil")
+	}
+	if pres.result.JD.Title != "Go Engineer" {
+		t.Errorf("JD.Title = %q, want %q", pres.result.JD.Title, "Go Engineer")
+	}
+}
+
+// TestApplyPipeline_OrchestratorError_ReturnsError verifies that a keyword extraction
+// error from the orchestrator propagates as an error from Run.
+func TestApplyPipeline_OrchestratorError_ReturnsError(t *testing.T) {
+	pres := &capturingPresenter{}
+	defaults, _ := config.LoadDefaults()
+
+	orch := &stubOrchestrator{err: fmt.Errorf("orchestrator unavailable")}
+
+	pl := pipeline.NewApplyPipeline(&pipeline.ApplyConfig{
+		Fetcher:      &stubJDFetcher{},
+		LLM:          nil,
+		Scorer:       scorer.New(defaults),
+		CLGen:        nil,
+		Resumes:      &stubResumeRepo{},
+		Loader:       &stubDocumentLoader{},
+		AppRepo:      &stubAppRepo{},
+		Augment:      nil,
+		Presenter:    pres,
+		Defaults:     defaults,
+		Tailor:       nil,
+		Orchestrator: orch,
+	})
+
+	err := pl.Run(context.Background(), pipeline.ApplyRequest{
+		URLOrText: "some job text",
+		IsText:    true,
+		Channel:   model.ChannelCold,
+		Config:    &config.Config{},
+	})
+	if err == nil {
+		t.Fatal("expected error when orchestrator fails keyword extraction, got nil")
+	}
+}
+
 func TestScoreResumes_ReturnsScoresAndBest(t *testing.T) {
 	pres := &capturingPresenter{}
 	cfg := minimalApplyConfig(pres)
