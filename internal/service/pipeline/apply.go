@@ -96,15 +96,22 @@ func (p *ApplyPipeline) Run(ctx context.Context, req ApplyRequest) error {
 		p.presenter.ShowError(err)
 		return err
 	}
-	result.JDText = jdText // returned so the MCP host (Claude) can extract keywords and reason over it
+	result.JDText = jdText // returned so the MCP host can extract keywords and reason over it
+	// TODO: (priority critical) MCP host needs to be able to return the keywords to the pipeline with provided structure
 
 	// Step 2: Extract keywords from JD text via LLM.
-	jd, degraded, kwErr := p.extractKeywords(ctx, jdText)
+	jd, _, kwErr := p.extractKeywords(ctx, jdText)
 	if kwErr != nil {
-		slog.WarnContext(ctx, "keyword extraction failed — continuing with empty JD", "error", kwErr)
-		result.Status = "degraded"
-		result.Message = fmt.Sprintf("keyword extraction failed: %v", kwErr)
-		result.Error = kwErr.Error()
+		jdErr := fmt.Errorf("could not extract a job description from the provided input — " +
+			"the page may have expired, require a login, or failed to load. " +
+			"Please provide the job description text directly using --text \"<jd text>\" " +
+			"or, if using the MCP tool, pass it via the text parameter")
+		slog.ErrorContext(ctx, "aborting pipeline — keyword extraction failed", "error", kwErr)
+		result.Status = "error"
+		result.Error = jdErr.Error()
+		result.EndTime = time.Now()
+		_ = p.presenter.ShowResult(result)
+		return jdErr
 	}
 	result.JD = jd
 	result.Keywords.Required = jd.Required
@@ -164,6 +171,8 @@ func (p *ApplyPipeline) Run(ctx context.Context, req ApplyRequest) error {
 	result.Scores = scores
 	result.BestResume = bestLabel
 	result.BestScore = bestScore
+
+	// TODO (priority critical)
 
 	// Step 4 (optional): Tailor the best-matching resume when --accomplishments is set.
 	if req.AccomplishmentsText != "" && result.BestResume != "" && p.tailor != nil {
@@ -229,11 +238,7 @@ func (p *ApplyPipeline) Run(ctx context.Context, req ApplyRequest) error {
 
 	// Finalize result status.
 	if result.Status == "" {
-		if degraded {
-			result.Status = "degraded"
-		} else {
-			result.Status = "success"
-		}
+		result.Status = "success"
 	}
 	result.EndTime = time.Now()
 
@@ -280,7 +285,7 @@ func (p *ApplyPipeline) acquireJDText(ctx context.Context, req ApplyRequest) (st
 func (p *ApplyPipeline) extractKeywords(ctx context.Context, jdText string) (model.JDData, bool, error) {
 	if p.llm == nil {
 		// No orchestrator LLM configured — MCP host handles keyword extraction.
-		return model.JDData{}, true, errors.New("no LLM configured: keyword extraction skipped")
+		return model.JDData{}, true, errors.New("no LLM configured: MCP host to extract keywords")
 	}
 	kwStart := time.Now()
 	p.presenter.OnEvent(model.StepStartedEvent{StepID: "keywords", Label: "Extracting keywords"})
@@ -506,6 +511,8 @@ func (p *ApplyPipeline) runTailorStep(
 	resumeFiles []model.ResumeFile,
 ) (*model.TailorResult, error) {
 	// Find and load the best resume from the already-scored file list.
+
+	// TODO: (priority low) this should be a func called getBestResume(resumeFiles, bestLabel)
 	var bestFile model.ResumeFile
 	for _, r := range resumeFiles {
 		if r.Label == result.BestResume {
