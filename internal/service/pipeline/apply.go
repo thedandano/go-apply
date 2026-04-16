@@ -259,12 +259,12 @@ func (p *ApplyPipeline) AcquireJD(ctx context.Context, urlOrText string, isText 
 }
 
 // ScoreResumes lists all stored resumes and scores them against the given JD.
-func (p *ApplyPipeline) ScoreResumes(ctx context.Context, jd model.JDData, cfg *config.Config) (ScoreResumeResult, error) {
+func (p *ApplyPipeline) ScoreResumes(ctx context.Context, jd *model.JDData, cfg *config.Config) (ScoreResumeResult, error) {
 	resumeFiles, err := p.resumes.ListResumes()
 	if err != nil {
 		return ScoreResumeResult{}, fmt.Errorf("list resumes: %w", err)
 	}
-	scores, bestLabel, bestScore, err := p.scoreResumes(ctx, resumeFiles, &jd, cfg)
+	scores, bestLabel, bestScore, err := p.scoreResumes(ctx, resumeFiles, jd, cfg)
 	if err != nil {
 		return ScoreResumeResult{}, err
 	}

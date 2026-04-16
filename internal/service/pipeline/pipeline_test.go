@@ -423,7 +423,7 @@ func TestScoreResumes_ReturnsScoresAndBest(t *testing.T) {
 		Required:  []string{"golang", "kubernetes"},
 		Preferred: []string{"docker"},
 	}
-	result, err := pl.ScoreResumes(context.Background(), jd, &config.Config{YearsOfExperience: 5})
+	result, err := pl.ScoreResumes(context.Background(), &jd, &config.Config{YearsOfExperience: 5})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
