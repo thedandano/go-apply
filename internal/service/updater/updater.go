@@ -91,7 +91,7 @@ func (s *Service) DownloadRelease(ctx context.Context, version, goos, goarch str
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		resp.Body.Close()
+		_ = resp.Body.Close() // #nosec G104 -- best-effort close on error path
 		return nil, fmt.Errorf("unexpected status downloading %s: %d", assetName, resp.StatusCode)
 	}
 

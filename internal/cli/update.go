@@ -116,8 +116,8 @@ func extractFromZip(r io.Reader) ([]byte, error) {
 		return nil, fmt.Errorf("create temp file for zip: %w", err)
 	}
 	defer func() {
-		tmp.Close()
-		os.Remove(tmp.Name())
+		_ = tmp.Close()           // #nosec G104 -- best-effort cleanup of temp file
+		_ = os.Remove(tmp.Name()) // #nosec G104 -- best-effort cleanup of temp file
 	}()
 
 	size, err := io.Copy(tmp, r)
@@ -137,8 +137,9 @@ func extractFromZip(r io.Reader) ([]byte, error) {
 			if err != nil {
 				return nil, fmt.Errorf("open zip entry %s: %w", f.Name, err)
 			}
-			defer rc.Close()
-			return io.ReadAll(rc)
+			data, err := io.ReadAll(rc)
+			_ = rc.Close() // #nosec G104 -- best-effort close after ReadAll
+			return data, err
 		}
 	}
 	return nil, fmt.Errorf("binary %q not found in zip", target)
@@ -169,19 +170,19 @@ func replaceBinary(newBytes []byte) error {
 	tmpName := tmp.Name()
 
 	if _, err := tmp.Write(newBytes); err != nil {
-		tmp.Close()
-		os.Remove(tmpName)
+		_ = tmp.Close()        // #nosec G104 -- best-effort close on write failure
+		_ = os.Remove(tmpName) // #nosec G104 -- best-effort cleanup on write failure
 		return fmt.Errorf("write temp binary: %w", err)
 	}
-	tmp.Close()
+	_ = tmp.Close() // #nosec G104 -- data flushed; ignore close error
 
 	if err := os.Chmod(tmpName, info.Mode()); err != nil {
-		os.Remove(tmpName)
+		_ = os.Remove(tmpName) // #nosec G104 -- best-effort cleanup on chmod failure
 		return fmt.Errorf("chmod temp binary: %w", err)
 	}
 
 	if err := os.Rename(tmpName, execPath); err != nil {
-		os.Remove(tmpName)
+		_ = os.Remove(tmpName) // #nosec G104 -- best-effort cleanup on rename failure
 		return fmt.Errorf("replace binary: %w", err)
 	}
 	return nil
