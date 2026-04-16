@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.7](https://github.com/thedandano/go-apply/compare/v0.1.6...v0.1.7) (2026-04-16)
+
+
+### Features
+
+* **mcp:** onboarding middleware for get_score tool ([#53](https://github.com/thedandano/go-apply/issues/53)) ([6e43671](https://github.com/thedandano/go-apply/commit/6e43671517447673e654f5216ef5b2ec6c566e41))
+
+
+### Bug Fixes
+
+* **logger:** file handler always captures debug logs, stderr stays warn+ ([#55](https://github.com/thedandano/go-apply/issues/55)) ([c964ae6](https://github.com/thedandano/go-apply/commit/c964ae62da7c42997523c6d713e4fac5753fbdaa))
+
 ## [0.1.6](https://github.com/thedandano/go-apply/compare/v0.1.5...v0.1.6) (2026-04-16)
 
 
