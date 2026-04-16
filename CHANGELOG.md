@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.6](https://github.com/thedandano/go-apply/compare/v0.1.5...v0.1.6) (2026-04-16)
+
+
+### Bug Fixes
+
+* **onboarding:** daily log files, auto-init config, validate embedder before onboard ([#51](https://github.com/thedandano/go-apply/issues/51)) ([5af0e9f](https://github.com/thedandano/go-apply/commit/5af0e9f30a992b8f340000e774206ded6746fc83))
+
 ## [0.1.5](https://github.com/thedandano/go-apply/compare/v0.1.4...v0.1.5) (2026-04-16)
 
 
