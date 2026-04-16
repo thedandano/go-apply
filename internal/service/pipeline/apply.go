@@ -33,17 +33,18 @@ type ApplyRequest struct {
 // ApplyPipeline orchestrates the full headless apply pipeline.
 // All external dependencies are injected; no I/O is performed inside the struct directly.
 type ApplyPipeline struct {
-	fetcher   port.JDFetcher
-	llm       port.LLMClient
-	scorer    port.Scorer
-	clGen     port.CoverLetterGenerator
-	resumes   port.ResumeRepository
-	loader    port.DocumentLoader
-	appRepo   port.ApplicationRepository
-	augment   port.Augmenter
-	presenter port.Presenter
-	defaults  *config.AppDefaults
-	tailor    port.Tailor
+	fetcher      port.JDFetcher
+	llm          port.LLMClient
+	scorer       port.Scorer
+	clGen        port.CoverLetterGenerator
+	resumes      port.ResumeRepository
+	loader       port.DocumentLoader
+	appRepo      port.ApplicationRepository
+	augment      port.Augmenter
+	presenter    port.Presenter
+	defaults     *config.AppDefaults
+	tailor       port.Tailor
+	orchestrator port.Orchestrator
 }
 
 // ApplyConfig holds all dependencies for an ApplyPipeline.
@@ -59,22 +60,26 @@ type ApplyConfig struct {
 	Presenter port.Presenter
 	Defaults  *config.AppDefaults
 	Tailor    port.Tailor
+	// Orchestrator is optional. When set, it is used for LLM decision points
+	// (keyword extraction) instead of the raw LLMClient. In MCP mode, leave nil.
+	Orchestrator port.Orchestrator
 }
 
 // NewApplyPipeline constructs an ApplyPipeline with all dependencies injected via ApplyConfig.
 func NewApplyPipeline(cfg *ApplyConfig) *ApplyPipeline {
 	return &ApplyPipeline{
-		fetcher:   cfg.Fetcher,
-		llm:       cfg.LLM,
-		scorer:    cfg.Scorer,
-		clGen:     cfg.CLGen,
-		resumes:   cfg.Resumes,
-		loader:    cfg.Loader,
-		appRepo:   cfg.AppRepo,
-		augment:   cfg.Augment,
-		presenter: cfg.Presenter,
-		defaults:  cfg.Defaults,
-		tailor:    cfg.Tailor,
+		fetcher:      cfg.Fetcher,
+		llm:          cfg.LLM,
+		scorer:       cfg.Scorer,
+		clGen:        cfg.CLGen,
+		resumes:      cfg.Resumes,
+		loader:       cfg.Loader,
+		appRepo:      cfg.AppRepo,
+		augment:      cfg.Augment,
+		presenter:    cfg.Presenter,
+		defaults:     cfg.Defaults,
+		tailor:       cfg.Tailor,
+		orchestrator: cfg.Orchestrator,
 	}
 }
 
@@ -323,17 +328,26 @@ func (p *ApplyPipeline) acquireJDText(ctx context.Context, req ApplyRequest) (st
 	return text, nil
 }
 
-// extractKeywords calls the LLM to extract structured JD data from raw text.
-// Returns the JDData, a degraded flag (true if extraction failed), and an error.
+// extractKeywords calls the orchestrator (or LLM directly if no orchestrator is set) to extract
+// structured JD data from raw text. Returns the JDData, a degraded flag (true if extraction
+// failed), and an error.
 func (p *ApplyPipeline) extractKeywords(ctx context.Context, jdText string) (model.JDData, bool, error) {
-	if p.llm == nil {
-		// No orchestrator LLM configured — MCP host handles keyword extraction.
+	if p.orchestrator == nil && p.llm == nil {
+		// No orchestrator or LLM configured — MCP host handles keyword extraction.
 		return model.JDData{}, true, errors.New("no LLM configured: MCP host to extract keywords")
 	}
 	kwStart := time.Now()
 	p.presenter.OnEvent(model.StepStartedEvent{StepID: "keywords", Label: "Extracting keywords"})
 
-	jd, err := extractKeywordsFromText(ctx, p.llm, jdText, p.defaults)
+	var jd model.JDData
+	var err error
+
+	if p.orchestrator != nil {
+		jd, err = p.orchestrator.ExtractKeywords(ctx, port.ExtractKeywordsInput{JDText: jdText})
+	} else {
+		jd, err = extractKeywordsFromText(ctx, p.llm, jdText, p.defaults)
+	}
+
 	if err != nil {
 		p.presenter.OnEvent(model.StepFailedEvent{StepID: "keywords", Label: "Keyword extraction failed", Err: err.Error()})
 		return model.JDData{}, true, err

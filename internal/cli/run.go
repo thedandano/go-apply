@@ -17,6 +17,7 @@ import (
 	"github.com/thedandano/go-apply/internal/service/coverletter"
 	"github.com/thedandano/go-apply/internal/service/fetcher"
 	"github.com/thedandano/go-apply/internal/service/llm"
+	"github.com/thedandano/go-apply/internal/service/orchestrator"
 	"github.com/thedandano/go-apply/internal/service/pipeline"
 	"github.com/thedandano/go-apply/internal/service/scorer"
 	"github.com/thedandano/go-apply/internal/service/tailor"
@@ -54,8 +55,8 @@ Outputs a JSON result to stdout when --headless is set.`,
 			if err != nil {
 				return fmt.Errorf("load config: %w", err)
 			}
-			if err := cfg.ValidateCLI(); err != nil {
-				return err
+			if cfg.Orchestrator.BaseURL == "" || cfg.Orchestrator.Model == "" {
+				return fmt.Errorf("no orchestrator configured — run:\n  go-apply config set llm.base_url <url>\n  go-apply config set llm.model <model>")
 			}
 
 			defaults, err := config.LoadDefaults()
@@ -73,6 +74,9 @@ Outputs a JSON result to stdout when --headless is set.`,
 			// Wire LLM clients.
 			llmClient := llm.New(cfg.Orchestrator.BaseURL, cfg.Orchestrator.Model, cfg.Orchestrator.APIKey, defaults, log)
 			embedderClient := llm.New(cfg.Embedder.BaseURL, cfg.Embedder.Model, cfg.Embedder.APIKey, defaults, log)
+
+			// Wire orchestrator for CLI/TUI mode.
+			orch := orchestrator.NewLLMOrchestrator(llmClient)
 
 			// Wire repositories.
 			dataDir := config.DataDir()
@@ -99,17 +103,18 @@ Outputs a JSON result to stdout when --headless is set.`,
 
 			// Build and run the pipeline.
 			pl := pipeline.NewApplyPipeline(&pipeline.ApplyConfig{
-				Fetcher:   fetcherSvc,
-				LLM:       llmClient,
-				Scorer:    scorerSvc,
-				CLGen:     clGen,
-				Resumes:   resumeRepo,
-				Loader:    docLoader,
-				AppRepo:   appRepo,
-				Augment:   augmentSvc,
-				Presenter: pres,
-				Defaults:  defaults,
-				Tailor:    tailorSvc,
+				Fetcher:      fetcherSvc,
+				LLM:          llmClient,
+				Scorer:       scorerSvc,
+				CLGen:        clGen,
+				Resumes:      resumeRepo,
+				Loader:       docLoader,
+				AppRepo:      appRepo,
+				Augment:      augmentSvc,
+				Presenter:    pres,
+				Defaults:     defaults,
+				Tailor:       tailorSvc,
+				Orchestrator: orch,
 			})
 
 			isText := textFlag != ""
