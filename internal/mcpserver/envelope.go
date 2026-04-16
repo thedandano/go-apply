@@ -21,27 +21,3 @@ type StageError struct {
 	Message   string `json:"message"`
 	Retriable bool   `json:"retriable"`
 }
-
-// okEnvelope builds a success envelope with the given session, next action, and data payload.
-func okEnvelope(sessionID, nextAction string, data any) *Envelope {
-	return &Envelope{
-		SessionID:  sessionID,
-		Status:     "ok",
-		NextAction: nextAction,
-		Data:       data,
-	}
-}
-
-// stageErrorEnvelope builds an error envelope for a named stage.
-func stageErrorEnvelope(sessionID, stage, code, message string, retriable bool) *Envelope {
-	return &Envelope{
-		SessionID: sessionID,
-		Status:    "error",
-		Error: &StageError{
-			Stage:     stage,
-			Code:      code,
-			Message:   message,
-			Retriable: retriable,
-		},
-	}
-}
