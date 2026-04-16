@@ -34,14 +34,19 @@ func DataDir() string {
 	return filepath.Join(os.Getenv("HOME"), ".local", "share", "go-apply")
 }
 
+// StateDir returns the XDG_STATE_HOME directory for go-apply.
+// XDG spec: state files (logs, history, caches) → ~/.local/state
+func StateDir() string {
+	if d := os.Getenv("XDG_STATE_HOME"); d != "" {
+		return filepath.Join(d, "go-apply")
+	}
+	return filepath.Join(os.Getenv("HOME"), ".local", "state", "go-apply")
+}
+
 // LogDir returns the XDG_STATE_HOME log directory.
-// XDG spec: state files (logs, history) → ~/.local/state
 // Full path: ~/.local/state/go-apply/logs/
 func LogDir() string {
-	if d := os.Getenv("XDG_STATE_HOME"); d != "" {
-		return filepath.Join(d, "go-apply", "logs")
-	}
-	return filepath.Join(os.Getenv("HOME"), ".local", "state", "go-apply", "logs")
+	return filepath.Join(StateDir(), "logs")
 }
 
 type LLMProviderConfig struct {
