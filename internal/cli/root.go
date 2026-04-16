@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+
 	"github.com/thedandano/go-apply/internal/model"
 	"github.com/thedandano/go-apply/internal/service/updater"
 )
