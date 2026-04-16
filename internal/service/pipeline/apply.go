@@ -133,7 +133,7 @@ func (p *ApplyPipeline) Run(ctx context.Context, req ApplyRequest) error {
 	// Refuse to score when the JD is empty — no keywords, title, or company
 	// means keyword extraction failed and there is nothing meaningful to score
 	// against. Return a clear error so the caller (user or MCP host) can supply
-	// the job description text directly via the --text flag or get_score(text:).
+	// the job description text directly via the --text flag or load_jd(jd_raw_text:).
 	emptyJD := len(jd.Required) == 0 && len(jd.Preferred) == 0 &&
 		strings.TrimSpace(jd.Title) == "" && strings.TrimSpace(jd.Company) == ""
 	if emptyJD {

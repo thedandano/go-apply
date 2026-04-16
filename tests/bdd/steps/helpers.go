@@ -200,6 +200,135 @@ func (s *bddState) callMCPTool(toolName string, args map[string]any) {
 	s.lastOutput = extractMCPResult(output)
 }
 
+// callMCPMultiTurn drives a two-step MCP tool sequence (tool1 → tool2) in a
+// single go-apply serve process. The session ID returned by tool1 is extracted
+// and passed to the argsForTool2 callback, which builds the arguments for tool2.
+// s.lastOutput is set to the text content of the tool2 response.
+func (s *bddState) callMCPMultiTurn(
+	tool1 string, args1 map[string]any,
+	tool2 string, argsForTool2 func(sessionID string) map[string]any,
+) {
+	bin, err := buildBinary()
+	if err != nil {
+		s.lastError = err.Error()
+		s.exitCode = 1
+		return
+	}
+	cmd := exec.Command(bin, "serve")
+	cmd.Env = append(os.Environ(),
+		"HOME="+s.tmpHome,
+		"XDG_CONFIG_HOME="+filepath.Join(s.tmpHome, ".config"),
+		"XDG_DATA_HOME="+filepath.Join(s.tmpHome, ".local", "share"),
+	)
+
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		s.lastError = err.Error()
+		s.exitCode = 1
+		return
+	}
+
+	// Pipe stdout through a scanner for incremental reading.
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		s.lastError = err.Error()
+		s.exitCode = 1
+		return
+	}
+
+	if err := cmd.Start(); err != nil {
+		s.lastError = err.Error()
+		s.exitCode = 1
+		return
+	}
+
+	type mcpResponse struct {
+		ID     json.RawMessage `json:"id"`
+		Result struct {
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"result"`
+	}
+
+	// responseCh delivers parsed responses keyed by their JSON-RPC id string.
+	responseCh := make(chan mcpResponse, 8)
+	go func() {
+		dec := json.NewDecoder(stdoutPipe)
+		for {
+			var msg mcpResponse
+			if err := dec.Decode(&msg); err != nil {
+				break
+			}
+			responseCh <- msg
+		}
+		close(responseCh)
+	}()
+
+	// MCP handshake.
+	_ = writeJSON(stdin, map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": "initialize",
+		"params": map[string]any{
+			"protocolVersion": "2024-11-05",
+			"capabilities":    map[string]any{},
+			"clientInfo":      map[string]any{"name": "bdd-test", "version": "1.0"},
+		},
+	})
+	_ = writeJSON(stdin, map[string]any{"jsonrpc": "2.0", "method": "notifications/initialized"})
+
+	// Call tool1.
+	_ = writeJSON(stdin, map[string]any{
+		"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+		"params": map[string]any{"name": tool1, "arguments": args1},
+	})
+
+	// Wait for tool1 response to extract session_id.
+	var sessionID string
+	for msg := range responseCh {
+		if string(msg.ID) != "2" {
+			continue
+		}
+		if len(msg.Result.Content) > 0 {
+			var env map[string]any
+			if err := json.Unmarshal([]byte(msg.Result.Content[0].Text), &env); err == nil {
+				sessionID, _ = env["session_id"].(string)
+			}
+		}
+		break
+	}
+
+	// Call tool2 with the extracted session_id.
+	_ = writeJSON(stdin, map[string]any{
+		"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+		"params": map[string]any{"name": tool2, "arguments": argsForTool2(sessionID)},
+	})
+	stdin.Close() //nolint:errcheck
+
+	// Collect tool2 response.
+	var finalText string
+	for msg := range responseCh {
+		if string(msg.ID) != "3" {
+			continue
+		}
+		if len(msg.Result.Content) > 0 {
+			finalText = msg.Result.Content[0].Text
+		}
+		break
+	}
+
+	if waitErr := cmd.Wait(); waitErr != nil {
+		if exitErr, ok := waitErr.(*exec.ExitError); ok {
+			s.exitCode = exitErr.ExitCode()
+		} else {
+			s.exitCode = 1
+		}
+	} else {
+		s.exitCode = 0
+	}
+
+	s.lastOutput = finalText
+}
+
 func writeJSON(w io.Writer, v any) error {
 	data, err := json.Marshal(v)
 	if err != nil {

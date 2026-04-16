@@ -217,30 +217,46 @@ func (s *bddState) userSuppliesTextWithChannel(channel string) error {
 	return nil
 }
 
-func (s *bddState) mcpGetScoreURL() error {
-	s.callMCPTool("get_score", map[string]any{
-		"jd_url": "https://example.com/job",
-	})
-	return nil
-}
-
-func (s *bddState) mcpGetScoreText() error {
-	s.callMCPTool("get_score", map[string]any{
+func (s *bddState) mcpLoadJDText() error {
+	s.callMCPTool("load_jd", map[string]any{
 		"jd_raw_text": "Senior Go engineer wanted.",
 	})
+	// Extract session_id for use in subsequent steps.
+	var env map[string]any
+	if err := json.Unmarshal([]byte(s.lastOutput), &env); err == nil {
+		s.sessionID, _ = env["session_id"].(string)
+	}
 	return nil
 }
 
-func (s *bddState) mcpGetScoreBothArgs() error {
-	s.callMCPTool("get_score", map[string]any{
+func (s *bddState) mcpLoadJDAndSubmitKeywords() error {
+	const jdText = "Senior Go engineer wanted. Requires Go and Kubernetes."
+	const jdJSON = `{"title":"Go Engineer","company":"Acme","required":["go","kubernetes"],"preferred":["docker"],"location":"Remote","seniority":"senior","required_years":3}`
+	s.callMCPMultiTurn("load_jd", map[string]any{"jd_raw_text": jdText},
+		"submit_keywords", func(sessionID string) map[string]any {
+			return map[string]any{"session_id": sessionID, "jd_json": jdJSON}
+		})
+	return nil
+}
+
+func (s *bddState) mcpLoadJDBothArgs() error {
+	s.callMCPTool("load_jd", map[string]any{
 		"jd_url":      "https://example.com/job",
 		"jd_raw_text": "raw jd text",
 	})
 	return nil
 }
 
-func (s *bddState) mcpGetScoreNoArgs() error {
-	s.callMCPTool("get_score", map[string]any{})
+func (s *bddState) mcpLoadJDNoArgs() error {
+	s.callMCPTool("load_jd", map[string]any{})
+	return nil
+}
+
+func (s *bddState) mcpSubmitKeywordsMissingSession() error {
+	s.callMCPTool("submit_keywords", map[string]any{
+		"session_id": "nonexistent-session",
+		"jd_json":    `{"title":"Go Engineer","required":["go"],"preferred":[]}`,
+	})
 	return nil
 }
 
@@ -779,6 +795,47 @@ func (s *bddState) assertJDLoadedFromCache() error {
 	combined := s.lastOutput + s.lastError
 	if combined == "" {
 		return fmt.Errorf("expected output when JD loaded from cache, got nothing")
+	}
+	return nil
+}
+
+// assertLoadJDResponse verifies that load_jd returned a session_id and jd_text.
+func (s *bddState) assertLoadJDResponse() error {
+	var env map[string]any
+	if err := json.Unmarshal([]byte(s.lastOutput), &env); err != nil {
+		return fmt.Errorf("expected JSON response from load_jd, got: %s", s.lastOutput)
+	}
+	if env["status"] != "ok" {
+		return fmt.Errorf("expected status ok, got %v — full: %s", env["status"], s.lastOutput)
+	}
+	if env["session_id"] == "" {
+		return fmt.Errorf("expected non-empty session_id in load_jd response")
+	}
+	data, _ := env["data"].(map[string]any)
+	if data == nil || data["jd_text"] == "" {
+		return fmt.Errorf("expected data.jd_text in load_jd response, got: %s", s.lastOutput)
+	}
+	return nil
+}
+
+// assertSubmitKeywordsResponse verifies that submit_keywords returned scores and best_resume.
+func (s *bddState) assertSubmitKeywordsResponse() error {
+	var env map[string]any
+	if err := json.Unmarshal([]byte(s.lastOutput), &env); err != nil {
+		return fmt.Errorf("expected JSON response from submit_keywords, got: %s", s.lastOutput)
+	}
+	if env["status"] != "ok" {
+		return fmt.Errorf("expected status ok, got %v — full: %s", env["status"], s.lastOutput)
+	}
+	data, _ := env["data"].(map[string]any)
+	if data == nil {
+		return fmt.Errorf("expected data in submit_keywords response, got: %s", s.lastOutput)
+	}
+	if _, ok := data["scores"]; !ok {
+		return fmt.Errorf("expected scores in data, got: %s", s.lastOutput)
+	}
+	if _, ok := data["best_resume"]; !ok {
+		return fmt.Errorf("expected best_resume in data, got: %s", s.lastOutput)
 	}
 	return nil
 }
