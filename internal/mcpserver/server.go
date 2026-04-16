@@ -33,6 +33,39 @@ func NewServer() *server.MCPServer {
 	)
 
 	srv.AddTool(
+		mcp.NewTool("load_jd",
+			mcp.WithDescription("Start a job application workflow: fetch the job description by URL or accept raw text. Returns jd_text for keyword extraction and a session_id to use in subsequent calls."),
+			mcp.WithString("jd_url", mcp.Description("URL of the job posting to fetch")),
+			mcp.WithString("jd_raw_text", mcp.Description("Raw job description text (alternative to jd_url)")),
+		),
+		requireOnboarded(func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return HandleLoadJD(ctx, &req), nil
+		}),
+	)
+
+	srv.AddTool(
+		mcp.NewTool("submit_keywords",
+			mcp.WithDescription("Submit extracted keywords to score resumes. Call after load_jd: extract keywords from jd_text yourself, then provide them here as jd_json. Returns scores and a next_action directive."),
+			mcp.WithString("session_id", mcp.Description("Session ID returned by load_jd"), mcp.Required()),
+			mcp.WithString("jd_json", mcp.Description("JSON-encoded JDData with title, company, required, preferred, location, seniority, required_years"), mcp.Required()),
+		),
+		requireOnboarded(func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return HandleSubmitKeywords(ctx, &req), nil
+		}),
+	)
+
+	srv.AddTool(
+		mcp.NewTool("finalize",
+			mcp.WithDescription("Persist the application record and close the session. Optionally include a cover letter. Call after submit_keywords (and optionally submit_tailor_t1/t2)."),
+			mcp.WithString("session_id", mcp.Description("Session ID from load_jd"), mcp.Required()),
+			mcp.WithString("cover_letter", mcp.Description("Cover letter text to store with the record (optional)")),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return HandleFinalize(ctx, &req), nil
+		},
+	)
+
+	srv.AddTool(
 		mcp.NewTool("onboard_user",
 			mcp.WithDescription("Store a resume, skills, and accomplishments into the profile database. All inputs are raw text extracted from the vector store."),
 			mcp.WithString("resume_content", mcp.Description("Resume text (required when resume_label is provided)")),

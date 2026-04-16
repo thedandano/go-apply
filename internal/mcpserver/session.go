@@ -42,6 +42,8 @@ func (s sessionState) String() string {
 type Session struct {
 	ID           string
 	State        sessionState
+	URL          string // original URL if load_jd was called with jd_url; empty for text input
+	IsText       bool
 	JDText       string
 	JD           model.JDData
 	ScoreResult  pipeline.ScoreResumeResult

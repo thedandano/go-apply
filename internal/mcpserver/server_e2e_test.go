@@ -162,11 +162,14 @@ func TestServerDispatch_ToolsRegistered(t *testing.T) {
 	}
 
 	want := map[string]bool{
-		"get_score":     false,
-		"onboard_user":  false,
-		"add_resume":    false,
-		"update_config": false,
-		"get_config":    false,
+		"load_jd":         false,
+		"submit_keywords": false,
+		"finalize":        false,
+		"get_score":       false,
+		"onboard_user":    false,
+		"add_resume":      false,
+		"update_config":   false,
+		"get_config":      false,
 	}
 	for _, tool := range result.Tools {
 		want[tool.Name] = true
