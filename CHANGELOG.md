@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.1.8](https://github.com/thedandano/go-apply/compare/v0.1.7...v0.1.8) (2026-04-16)
+
+
+### Bug Fixes
+
+* **agentconfig:** register claude plugin at ~/.claude/plugins/go-apply/ ([67585c4](https://github.com/thedandano/go-apply/commit/67585c40b8b9bcaf47238f5e3c146b10bf5a3fbc))
+* **agentconfig:** register claude plugin at ~/.claude/plugins/go-apply/ ([ff29f05](https://github.com/thedandano/go-apply/commit/ff29f05cfc3128b690b57df1dee821577f3867fc))
+* **agentconfig:** register claude plugin at ~/.claude/plugins/go-apply/ ([d4243eb](https://github.com/thedandano/go-apply/commit/d4243eb4b2d54f92eb52b048b2cc3da79092b3c1))
+* **bdd:** update get_score param names in BDD steps ([0288063](https://github.com/thedandano/go-apply/commit/0288063c09542468921d07ff3ca0b15757f06018))
+* **mcpserver:** address PR review — realistic JD, full onboard, score assertions ([b46feae](https://github.com/thedandano/go-apply/commit/b46feae7e38e6836de98a3827b6908ed1704a885))
+* **mcpserver:** clarify Claude orchestration responsibilities in get_score description ([fc8895d](https://github.com/thedandano/go-apply/commit/fc8895d86d2e18004afafdbd504e56b3c5f998d1))
+* **mcpserver:** descriptive var names, log branching, blocked-test assertions ([eba8dcc](https://github.com/thedandano/go-apply/commit/eba8dcce5dd3055967346c0efd4acb7cc37c6fc4))
+* **mcpserver:** rename tool params, generic log, keyword assertions ([713e904](https://github.com/thedandano/go-apply/commit/713e904795c7acaa1f1593d05948cfeb9c769369))
+
+
+### Code Refactoring
+
+* **agentconfig:** extract claudePluginsDir const and pluginDir helper ([fe3d3d3](https://github.com/thedandano/go-apply/commit/fe3d3d3cdedab8d34b9c2a319970cc04ba9a97ff))
+* **mcpserver:** extract MCP server into internal/mcpserver ([82c32d4](https://github.com/thedandano/go-apply/commit/82c32d4c9dfda728cfbfea0164ba71caf71ccc84))
+* **mcpserver:** extract MCP server logic into internal/mcpserver ([bdabc8b](https://github.com/thedandano/go-apply/commit/bdabc8b2df269cf85a6cd06c56ae444658e672d4))
+* **mcpserver:** rename test files, gate e2e behind integration tag ([03d11bb](https://github.com/thedandano/go-apply/commit/03d11bb48feab72a4b1d2e07d7f220fcfdde9ce5))
+* **mcpserver:** rename test files, gate e2e behind integration tag ([ec67b18](https://github.com/thedandano/go-apply/commit/ec67b18b77a12e97425fa0036a9459b9c07a3b01))
+* **model:** extract ParseChannel from cli.resolveChannel ([bdd4fed](https://github.com/thedandano/go-apply/commit/bdd4fedbc8741a9ee6904f41e59e354f593dea25))
+* **model:** extract ParseChannel from cli.resolveChannel ([#56](https://github.com/thedandano/go-apply/issues/56)) ([20d65ab](https://github.com/thedandano/go-apply/commit/20d65abd34559d43ec16772bf294446b8f7c322a))
+
 ## [0.1.7](https://github.com/thedandano/go-apply/compare/v0.1.6...v0.1.7) (2026-04-16)
 
 
