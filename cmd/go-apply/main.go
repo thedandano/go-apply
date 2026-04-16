@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"runtime/debug"
 
 	"github.com/thedandano/go-apply/internal/cli"
 	"github.com/thedandano/go-apply/internal/config"
@@ -11,6 +12,16 @@ import (
 )
 
 var version = "dev"
+
+func init() {
+	// When installed via `go install`, ldflags are not applied.
+	// Fall back to the module version embedded by the Go toolchain.
+	if version == "dev" {
+		if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
+			version = info.Main.Version
+		}
+	}
+}
 
 func main() {
 	os.Exit(run())
