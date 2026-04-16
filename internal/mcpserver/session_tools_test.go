@@ -391,7 +391,126 @@ func TestHandleSubmitTailorT1_HappyPath_ReturnsNewScore(t *testing.T) {
 	}
 }
 
+func TestHandleSubmitTailorT1_MissingSkillAdds_ReturnsError(t *testing.T) {
+	cfg := stubApplyConfigForSession()
+	req := callToolRequest("submit_tailor_t1", map[string]any{
+		"session_id": "any-id",
+		// skill_adds missing
+	})
+	result := mcpserver.HandleSubmitTailorT1WithConfig(context.Background(), &req, &cfg, &config.Config{})
+	text := extractText(t, result)
+	if !strings.Contains(text, "missing_skill_adds") {
+		t.Errorf("expected missing_skill_adds error, got: %s", text)
+	}
+}
+
+func TestHandleSubmitTailorT1_InvalidSkillAddsJSON_ReturnsError(t *testing.T) {
+	cfg := stubApplyConfigForSession()
+	req := callToolRequest("submit_tailor_t1", map[string]any{
+		"session_id": "any-id",
+		"skill_adds": `not-valid-json`,
+	})
+	result := mcpserver.HandleSubmitTailorT1WithConfig(context.Background(), &req, &cfg, &config.Config{})
+	text := extractText(t, result)
+	if !strings.Contains(text, "invalid_skill_adds") {
+		t.Errorf("expected invalid_skill_adds error, got: %s", text)
+	}
+}
+
+func TestHandleSubmitTailorT1_EmptySkillAdds_ReturnsError(t *testing.T) {
+	cfg := stubApplyConfigForSession()
+	req := callToolRequest("submit_tailor_t1", map[string]any{
+		"session_id": "any-id",
+		"skill_adds": `[]`,
+	})
+	result := mcpserver.HandleSubmitTailorT1WithConfig(context.Background(), &req, &cfg, &config.Config{})
+	text := extractText(t, result)
+	if !strings.Contains(text, "empty_skill_adds") {
+		t.Errorf("expected empty_skill_adds error, got: %s", text)
+	}
+}
+
 // ── HandleSubmitTailorT2 tests ────────────────────────────────────────────────
+
+func TestHandleSubmitTailorT2_SessionNotFound_ReturnsError(t *testing.T) {
+	cfg := stubApplyConfigForSession()
+	req := callToolRequest("submit_tailor_t2", map[string]any{
+		"session_id":      "no-such-session",
+		"bullet_rewrites": `[{"original":"old","replacement":"new"}]`,
+	})
+	result := mcpserver.HandleSubmitTailorT2WithConfig(context.Background(), &req, &cfg, &config.Config{})
+	text := extractText(t, result)
+	var env map[string]any
+	if err := json.Unmarshal([]byte(text), &env); err != nil {
+		t.Fatalf("not JSON: %v", err)
+	}
+	if env["status"] != "error" {
+		t.Errorf("status = %v, want error", env["status"])
+	}
+	errObj, _ := env["error"].(map[string]any)
+	if errObj["code"] != "session_not_found" {
+		t.Errorf("code = %v, want session_not_found", errObj["code"])
+	}
+}
+
+func TestHandleSubmitTailorT2_WrongState_ReturnsError(t *testing.T) {
+	cfg := stubApplyConfigForSession()
+	// load_jd only — state stays stateLoaded
+	loadReq := callToolRequest("load_jd", map[string]any{"jd_raw_text": "Go engineer role"})
+	loadText := extractText(t, mcpserver.HandleLoadJDWithConfig(context.Background(), &loadReq, &cfg))
+	var loadEnv map[string]any
+	_ = json.Unmarshal([]byte(loadText), &loadEnv)
+	sessionID, _ := loadEnv["session_id"].(string)
+
+	req := callToolRequest("submit_tailor_t2", map[string]any{
+		"session_id":      sessionID,
+		"bullet_rewrites": `[{"original":"old","replacement":"new"}]`,
+	})
+	result := mcpserver.HandleSubmitTailorT2WithConfig(context.Background(), &req, &cfg, &config.Config{})
+	text := extractText(t, result)
+	if !strings.Contains(text, "invalid_state") {
+		t.Errorf("expected invalid_state error, got: %s", text)
+	}
+}
+
+func TestHandleSubmitTailorT2_MissingBulletRewrites_ReturnsError(t *testing.T) {
+	cfg := stubApplyConfigForSession()
+	req := callToolRequest("submit_tailor_t2", map[string]any{
+		"session_id": "any-id",
+		// bullet_rewrites missing
+	})
+	result := mcpserver.HandleSubmitTailorT2WithConfig(context.Background(), &req, &cfg, &config.Config{})
+	text := extractText(t, result)
+	if !strings.Contains(text, "missing_bullet_rewrites") {
+		t.Errorf("expected missing_bullet_rewrites error, got: %s", text)
+	}
+}
+
+func TestHandleSubmitTailorT2_InvalidBulletRewritesJSON_ReturnsError(t *testing.T) {
+	cfg := stubApplyConfigForSession()
+	req := callToolRequest("submit_tailor_t2", map[string]any{
+		"session_id":      "any-id",
+		"bullet_rewrites": `not-valid-json`,
+	})
+	result := mcpserver.HandleSubmitTailorT2WithConfig(context.Background(), &req, &cfg, &config.Config{})
+	text := extractText(t, result)
+	if !strings.Contains(text, "invalid_bullet_rewrites") {
+		t.Errorf("expected invalid_bullet_rewrites error, got: %s", text)
+	}
+}
+
+func TestHandleSubmitTailorT2_EmptyBulletRewrites_ReturnsError(t *testing.T) {
+	cfg := stubApplyConfigForSession()
+	req := callToolRequest("submit_tailor_t2", map[string]any{
+		"session_id":      "any-id",
+		"bullet_rewrites": `[]`,
+	})
+	result := mcpserver.HandleSubmitTailorT2WithConfig(context.Background(), &req, &cfg, &config.Config{})
+	text := extractText(t, result)
+	if !strings.Contains(text, "empty_bullet_rewrites") {
+		t.Errorf("expected empty_bullet_rewrites error, got: %s", text)
+	}
+}
 
 func TestHandleSubmitTailorT2_HappyPath_ReturnsNewScore(t *testing.T) {
 	cfg := stubApplyConfigForSession()
