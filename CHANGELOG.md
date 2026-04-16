@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.4](https://github.com/thedandano/go-apply/compare/v0.1.3...v0.1.4) (2026-04-16)
+
+
+### Features
+
+* **cli:** add self-update channel ([#47](https://github.com/thedandano/go-apply/issues/47)) ([b79fced](https://github.com/thedandano/go-apply/commit/b79fced1e481a6022ef1714110ebb1960ef563c3))
+
 ## [0.1.3](https://github.com/thedandano/go-apply/compare/v0.1.2...v0.1.3) (2026-04-15)
 
 
