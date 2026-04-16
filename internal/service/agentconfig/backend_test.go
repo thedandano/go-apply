@@ -21,21 +21,23 @@ var testEntry = port.MCPServerEntry{
 // newTestOps builds a fileOps that uses real OS functions scoped to dir.
 // getenv always returns "" to keep tests isolated from the real environment.
 // homeDir is set to dir; goos defaults to "linux".
-func newTestOps(dir string) fileOps {
-	return fileOps{
-		readFile:  os.ReadFile,
-		writeFile: os.WriteFile,
-		stat:      os.Stat,
-		mkdirAll:  os.MkdirAll,
-		getenv:    func(string) string { return "" },
-		homeDir:   dir,
-		goos:      "linux",
+func newTestOps(dir string) *fileOps {
+	return &fileOps{
+		readFile:   os.ReadFile,
+		writeFile:  os.WriteFile,
+		stat:       os.Stat,
+		mkdirAll:   os.MkdirAll,
+		removeAll:  os.RemoveAll,
+		executable: func() (string, error) { return "/usr/local/bin/go-apply", nil },
+		getenv:     func(string) string { return "" },
+		homeDir:    dir,
+		goos:       "linux",
 	}
 }
 
 // withEnv returns a copy of ops with getenv replaced by a lookup map.
 // Keys not present in the map return "".
-func withEnv(ops fileOps, env map[string]string) fileOps {
+func withEnv(ops *fileOps, env map[string]string) *fileOps {
 	ops.getenv = func(key string) string { return env[key] }
 	return ops
 }
@@ -118,7 +120,7 @@ func navJSON(t *testing.T, root map[string]any, keyPath []string) map[string]any
 
 // ---- Claude backend ---------------------------------------------------------
 
-func TestClaudeBackend_Register_CreatesNewFile(t *testing.T) {
+func TestClaudeBackend_Register_CreatesPluginDir(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	b := newClaudeBackend(newTestOps(dir))
@@ -130,39 +132,37 @@ func TestClaudeBackend_Register_CreatesNewFile(t *testing.T) {
 	if res.Action != port.ActionCreated {
 		t.Errorf("Action = %v, want ActionCreated", res.Action)
 	}
-	configPath := filepath.Join(dir, ".claude", "settings.json")
-	if res.ConfigPath != configPath {
-		t.Errorf("ConfigPath = %q, want %q", res.ConfigPath, configPath)
+	pluginDir := filepath.Join(dir, ".claude", "plugins", "go-apply")
+	if res.ConfigPath != pluginDir {
+		t.Errorf("ConfigPath = %q, want %q", res.ConfigPath, pluginDir)
 	}
-	root := readJSON(t, configPath)
-	leaf := navJSON(t, root, []string{"mcpServers"})
-	if _, ok := leaf["go-apply"]; !ok {
-		t.Error("go-apply not found in mcpServers")
-	}
-}
 
-func TestClaudeBackend_Register_MergesExistingFile(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	ops := newTestOps(dir)
-	configPath := filepath.Join(dir, ".claude", "settings.json")
-	writeJSON(t, configPath, map[string]any{"other": true})
+	// Verify .mcp.json exists and contains expected content.
+	mcpJSONPath := filepath.Join(pluginDir, ".mcp.json")
+	mcpData := readJSON(t, mcpJSONPath)
+	server, ok := mcpData["go-apply"].(map[string]any)
+	if !ok {
+		t.Fatalf(".mcp.json missing go-apply key")
+	}
+	if server["command"] != "/usr/local/bin/go-apply" {
+		t.Errorf("command = %q, want /usr/local/bin/go-apply", server["command"])
+	}
 
-	b := newClaudeBackend(ops)
-	res, err := b.Register("go-apply", testEntry)
-	if err != nil {
-		t.Fatalf("Register: %v", err)
+	// Verify .claude-plugin/plugin.json exists and contains expected content.
+	pluginJSONPath := filepath.Join(pluginDir, ".claude-plugin", "plugin.json")
+	pluginData := readJSON(t, pluginJSONPath)
+	if pluginData["name"] != "go-apply" {
+		t.Errorf("plugin.json name = %q, want go-apply", pluginData["name"])
 	}
-	if res.Action != port.ActionAdded {
-		t.Errorf("Action = %v, want ActionAdded", res.Action)
+	if pluginData["description"] == "" {
+		t.Error("plugin.json description should not be empty")
 	}
-	root := readJSON(t, configPath)
-	if _, ok := root["other"]; !ok {
-		t.Error("other key should be preserved")
+	author, ok := pluginData["author"].(map[string]any)
+	if !ok {
+		t.Fatal("plugin.json author should be a map")
 	}
-	leaf := navJSON(t, root, []string{"mcpServers"})
-	if _, ok := leaf["go-apply"]; !ok {
-		t.Error("go-apply not found after merge")
+	if author["name"] == "" {
+		t.Error("plugin.json author.name should not be empty")
 	}
 }
 
@@ -170,11 +170,11 @@ func TestClaudeBackend_Register_AlreadyRegistered(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	ops := newTestOps(dir)
-	configPath := filepath.Join(dir, ".claude", "settings.json")
-	writeJSON(t, configPath, map[string]any{
-		"mcpServers": map[string]any{
-			"go-apply": map[string]any{"command": "go-apply", "args": []string{"serve"}},
-		},
+
+	// Pre-create the .mcp.json file.
+	mcpJSONPath := filepath.Join(dir, ".claude", "plugins", "go-apply", ".mcp.json")
+	writeJSON(t, mcpJSONPath, map[string]any{
+		"go-apply": map[string]any{"command": "go-apply", "args": []string{"serve"}},
 	})
 
 	b := newClaudeBackend(ops)
@@ -187,15 +187,16 @@ func TestClaudeBackend_Register_AlreadyRegistered(t *testing.T) {
 	}
 }
 
-func TestClaudeBackend_Unregister_RemovesEntry(t *testing.T) {
+func TestClaudeBackend_Unregister_RemovesPluginDir(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	ops := newTestOps(dir)
-	configPath := filepath.Join(dir, ".claude", "settings.json")
-	writeJSON(t, configPath, map[string]any{
-		"mcpServers": map[string]any{
-			"go-apply": map[string]any{"command": "go-apply", "args": []string{"serve"}},
-		},
+
+	// Pre-create plugin dir with files.
+	pluginDir := filepath.Join(dir, ".claude", "plugins", "go-apply")
+	mcpJSONPath := filepath.Join(pluginDir, ".mcp.json")
+	writeJSON(t, mcpJSONPath, map[string]any{
+		"go-apply": map[string]any{"command": "go-apply", "args": []string{"serve"}},
 	})
 
 	b := newClaudeBackend(ops)
@@ -206,31 +207,55 @@ func TestClaudeBackend_Unregister_RemovesEntry(t *testing.T) {
 	if res.Action != port.ActionRemoved {
 		t.Errorf("Action = %v, want ActionRemoved", res.Action)
 	}
-	root := readJSON(t, configPath)
-	leaf := navJSON(t, root, []string{"mcpServers"})
-	if _, ok := leaf["go-apply"]; ok {
-		t.Error("go-apply should be absent after Unregister")
+	if _, statErr := os.Stat(pluginDir); statErr == nil {
+		t.Error("plugin dir should be gone after Unregister")
 	}
 }
 
-func TestClaudeBackend_Unregister_EntryNotPresent(t *testing.T) {
+func TestClaudeBackend_Unregister_CleansStaleMcpServersEntry(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	ops := newTestOps(dir)
-	configPath := filepath.Join(dir, ".claude", "settings.json")
-	writeJSON(t, configPath, map[string]any{"mcpServers": map[string]any{}})
+
+	// Pre-create settings.json with mcpServers.go-apply entry.
+	settingsPath := filepath.Join(dir, ".claude", "settings.json")
+	writeJSON(t, settingsPath, map[string]any{
+		"mcpServers": map[string]any{
+			"go-apply": map[string]any{"command": "go-apply", "args": []string{"serve"}},
+		},
+	})
+
+	// Pre-create plugin dir.
+	pluginDir := filepath.Join(dir, ".claude", "plugins", "go-apply")
+	mcpJSONPath := filepath.Join(pluginDir, ".mcp.json")
+	writeJSON(t, mcpJSONPath, map[string]any{
+		"go-apply": map[string]any{"command": "go-apply", "args": []string{"serve"}},
+	})
 
 	b := newClaudeBackend(ops)
 	res, err := b.Unregister("go-apply")
 	if err != nil {
 		t.Fatalf("Unregister: %v", err)
 	}
-	if res.Action != port.ActionNotFound {
-		t.Errorf("Action = %v, want ActionNotFound", res.Action)
+	if res.Action != port.ActionRemoved {
+		t.Errorf("Action = %v, want ActionRemoved", res.Action)
+	}
+
+	// Plugin dir should be gone.
+	if _, statErr := os.Stat(pluginDir); statErr == nil {
+		t.Error("plugin dir should be gone after Unregister")
+	}
+
+	// settings.json should no longer have go-apply in mcpServers.
+	root := readJSON(t, settingsPath)
+	if servers, ok := root["mcpServers"].(map[string]any); ok {
+		if _, found := servers["go-apply"]; found {
+			t.Error("go-apply should be removed from settings.json mcpServers")
+		}
 	}
 }
 
-func TestClaudeBackend_Unregister_FileNotExist(t *testing.T) {
+func TestClaudeBackend_Unregister_NotRegistered(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	b := newClaudeBackend(newTestOps(dir))
@@ -244,65 +269,20 @@ func TestClaudeBackend_Unregister_FileNotExist(t *testing.T) {
 	}
 }
 
-// ---- Claude path resolution -------------------------------------------------
+// ---- Claude plugin path resolution ------------------------------------------
 
-func TestClaudeBackend_PathResolution_CLIPreferred(t *testing.T) {
+func TestClaudeBackend_PluginPath_UsesHomeDir(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	ops := newTestOps(dir)
-	ops.goos = "darwin"
+	b := newClaudeBackend(newTestOps(dir))
 
-	// Create both CLI and desktop paths.
-	cliPath := filepath.Join(dir, ".claude", "settings.json")
-	writeJSON(t, cliPath, map[string]any{})
-	desktopPath := filepath.Join(dir, "Library", "Application Support", "Claude", "claude_desktop_config.json")
-	writeJSON(t, desktopPath, map[string]any{})
-
-	b := newClaudeBackend(ops)
 	res, err := b.Register("go-apply", testEntry)
 	if err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	if res.ConfigPath != cliPath {
-		t.Errorf("ConfigPath = %q, want CLI path %q", res.ConfigPath, cliPath)
-	}
-}
-
-func TestClaudeBackend_PathResolution_FallsBackToDesktopOnDarwin(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	ops := newTestOps(dir)
-	ops.goos = "darwin"
-
-	// Only desktop path exists.
-	desktopPath := filepath.Join(dir, "Library", "Application Support", "Claude", "claude_desktop_config.json")
-	writeJSON(t, desktopPath, map[string]any{})
-
-	b := newClaudeBackend(ops)
-	res, err := b.Register("go-apply", testEntry)
-	if err != nil {
-		t.Fatalf("Register: %v", err)
-	}
-	if res.ConfigPath != desktopPath {
-		t.Errorf("ConfigPath = %q, want desktop path %q", res.ConfigPath, desktopPath)
-	}
-}
-
-func TestClaudeBackend_PathResolution_DefaultsToCliPath(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	ops := newTestOps(dir)
-	ops.goos = "linux"
-
-	// Neither path exists — should default to CLI path.
-	b := newClaudeBackend(ops)
-	res, err := b.Register("go-apply", testEntry)
-	if err != nil {
-		t.Fatalf("Register: %v", err)
-	}
-	wantPath := filepath.Join(dir, ".claude", "settings.json")
-	if res.ConfigPath != wantPath {
-		t.Errorf("ConfigPath = %q, want %q", res.ConfigPath, wantPath)
+	wantDir := filepath.Join(dir, ".claude", "plugins", "go-apply")
+	if res.ConfigPath != wantDir {
+		t.Errorf("ConfigPath = %q, want %q", res.ConfigPath, wantDir)
 	}
 }
 

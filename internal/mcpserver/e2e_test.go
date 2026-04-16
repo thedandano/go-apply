@@ -1,4 +1,4 @@
-package cli_test
+package mcpserver_test
 
 import (
 	"context"
@@ -10,9 +10,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/thedandano/go-apply/internal/cli"
 	"github.com/thedandano/go-apply/internal/config"
 	"github.com/thedandano/go-apply/internal/loader"
+	"github.com/thedandano/go-apply/internal/mcpserver"
 	"github.com/thedandano/go-apply/internal/model"
 	fsrepo "github.com/thedandano/go-apply/internal/repository/fs"
 	"github.com/thedandano/go-apply/internal/repository/sqlite"
@@ -123,7 +123,7 @@ func TestOnboardThenScore(t *testing.T) {
 		"channel": "COLD",
 	})
 
-	scoreResult := cli.HandleGetScore(context.Background(), &req, &deps)
+	scoreResult := mcpserver.HandleGetScore(context.Background(), &req, &deps)
 	rawText := extractText(t, scoreResult)
 
 	var pr model.PipelineResult

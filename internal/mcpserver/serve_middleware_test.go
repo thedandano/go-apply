@@ -1,4 +1,4 @@
-package cli_test
+package mcpserver_test
 
 import (
 	"context"
@@ -8,8 +8,8 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 
-	"github.com/thedandano/go-apply/internal/cli"
 	"github.com/thedandano/go-apply/internal/config"
+	"github.com/thedandano/go-apply/internal/mcpserver"
 	"github.com/thedandano/go-apply/internal/model"
 )
 
@@ -24,7 +24,7 @@ func (s *stubEmptyResumeRepo) ListResumes() ([]model.ResumeFile, error) {
 
 func TestCheckOnboarded_EmbedderNotConfigured_ReturnsError(t *testing.T) {
 	cfg := &config.Config{} // zero-value: embedder.base_url and embedder.model empty
-	err := cli.CheckOnboarded(cfg, &stubResumeRepo{})
+	err := mcpserver.CheckOnboarded(cfg, &stubResumeRepo{})
 	if err == nil {
 		t.Fatal("expected error when embedder is not configured, got nil")
 	}
@@ -37,7 +37,7 @@ func TestCheckOnboarded_EmbedderMissingModel_ReturnsError(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Embedder.BaseURL = "http://localhost:11434/v1"
 	// model left empty
-	err := cli.CheckOnboarded(cfg, &stubResumeRepo{})
+	err := mcpserver.CheckOnboarded(cfg, &stubResumeRepo{})
 	if err == nil {
 		t.Fatal("expected error when embedder model is not configured, got nil")
 	}
@@ -51,7 +51,7 @@ func TestCheckOnboarded_NoResumes_ReturnsError(t *testing.T) {
 	cfg.Embedder.BaseURL = "http://localhost:11434/v1"
 	cfg.Embedder.Model = "nomic-embed-text"
 
-	err := cli.CheckOnboarded(cfg, &stubEmptyResumeRepo{})
+	err := mcpserver.CheckOnboarded(cfg, &stubEmptyResumeRepo{})
 	if err == nil {
 		t.Fatal("expected error when no resumes found, got nil")
 	}
@@ -65,7 +65,7 @@ func TestCheckOnboarded_Onboarded_ReturnsNil(t *testing.T) {
 	cfg.Embedder.BaseURL = "http://localhost:11434/v1"
 	cfg.Embedder.Model = "nomic-embed-text"
 
-	err := cli.CheckOnboarded(cfg, &stubResumeRepo{}) // stubResumeRepo returns one resume
+	err := mcpserver.CheckOnboarded(cfg, &stubResumeRepo{}) // stubResumeRepo returns one resume
 	if err != nil {
 		t.Errorf("expected nil when onboarded, got: %v", err)
 	}
@@ -83,7 +83,7 @@ func TestRequireOnboarded_NotOnboarded_ReturnsErrorResult(t *testing.T) {
 		return mcp.NewToolResultText(`{"status":"ok"}`), nil
 	}
 
-	handler := cli.RequireOnboarded(cfg, &stubEmptyResumeRepo{}, inner)
+	handler := mcpserver.RequireOnboarded(cfg, &stubEmptyResumeRepo{}, inner)
 	result, err := handler(context.Background(), req)
 	if err != nil {
 		t.Fatalf("handler returned unexpected error: %v", err)
@@ -115,7 +115,7 @@ func TestRequireOnboarded_Onboarded_DelegatesToInnerHandler(t *testing.T) {
 		return mcp.NewToolResultText(`{"status":"ok"}`), nil
 	}
 
-	handler := cli.RequireOnboarded(cfg, &stubResumeRepo{}, inner)
+	handler := mcpserver.RequireOnboarded(cfg, &stubResumeRepo{}, inner)
 	result, err := handler(context.Background(), req)
 	if err != nil {
 		t.Fatalf("handler returned unexpected error: %v", err)
