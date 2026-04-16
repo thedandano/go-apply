@@ -185,8 +185,14 @@ func unregisterWith(ops *fileOps, path string, keyPath []string, serverName stri
 
 // ---- claudeBackend implementation ------------------------------------------
 
+const claudePluginsDir = ".claude/plugins"
+
+func (b *claudeBackend) pluginDir(serverName string) string {
+	return filepath.Join(b.ops.homeDir, claudePluginsDir, serverName)
+}
+
 func (b *claudeBackend) Register(serverName string, _ port.MCPServerEntry) (port.RegistrationResult, error) {
-	pluginDir := filepath.Join(b.ops.homeDir, ".claude", "plugins", serverName)
+	pluginDir := b.pluginDir(serverName)
 	mcpJSONPath := filepath.Join(pluginDir, ".mcp.json")
 	pluginJSONPath := filepath.Join(pluginDir, ".claude-plugin", "plugin.json")
 
@@ -227,7 +233,7 @@ func (b *claudeBackend) Register(serverName string, _ port.MCPServerEntry) (port
 }
 
 func (b *claudeBackend) Unregister(serverName string) (port.RegistrationResult, error) {
-	pluginDir := filepath.Join(b.ops.homeDir, ".claude", "plugins", serverName)
+	pluginDir := b.pluginDir(serverName)
 
 	pluginRemoved := false
 	if b.ops.exists(pluginDir) {
