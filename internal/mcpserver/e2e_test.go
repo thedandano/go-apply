@@ -1,3 +1,5 @@
+//go:build integration
+
 package mcpserver_test
 
 import (
