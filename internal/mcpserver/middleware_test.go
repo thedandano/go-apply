@@ -75,7 +75,7 @@ func TestCheckOnboarded_Onboarded_ReturnsNil(t *testing.T) {
 
 func TestRequireOnboarded_NotOnboarded_ReturnsErrorResult(t *testing.T) {
 	cfg := &config.Config{} // no embedder
-	req := callToolRequest("get_score", map[string]any{"url": "https://example.com/job"})
+	req := callToolRequest("get_score", map[string]any{"jd_url": "https://example.com/job"})
 
 	called := false
 	inner := func(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -107,7 +107,7 @@ func TestRequireOnboarded_Onboarded_DelegatesToInnerHandler(t *testing.T) {
 	cfg.Embedder.BaseURL = "http://localhost:11434/v1"
 	cfg.Embedder.Model = "nomic-embed-text"
 
-	req := callToolRequest("get_score", map[string]any{"url": "https://example.com/job"})
+	req := callToolRequest("get_score", map[string]any{"jd_url": "https://example.com/job"})
 
 	called := false
 	inner := func(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {

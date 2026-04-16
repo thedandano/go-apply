@@ -11,17 +11,21 @@ import (
 	"github.com/thedandano/go-apply/internal/config"
 	"github.com/thedandano/go-apply/internal/loader"
 	"github.com/thedandano/go-apply/internal/model"
+	"github.com/thedandano/go-apply/internal/port"
 	mcppres "github.com/thedandano/go-apply/internal/presenter/mcp"
 	"github.com/thedandano/go-apply/internal/repository/fs"
 	"github.com/thedandano/go-apply/internal/service/fetcher"
+	"github.com/thedandano/go-apply/internal/service/llm"
 	"github.com/thedandano/go-apply/internal/service/pipeline"
 	"github.com/thedandano/go-apply/internal/service/scorer"
 )
 
 // loadDeps loads configuration and wires all pipeline dependencies.
 // Config is loaded fresh per invocation so changes take effect immediately.
-// In MCP mode Claude is the orchestrator — LLM, CLGen, Augment, and Tailor are nil;
-// Claude handles keyword extraction, cover letter generation, augmentation, and tailoring.
+// By default Claude is the orchestrator in MCP mode — LLM, CLGen, Augment, and
+// Tailor are nil so Claude handles keyword extraction, cover letters, etc.
+// When the orchestrator section is configured (base_url + model), an LLM client
+// is created so the pipeline can extract keywords autonomously.
 func loadDeps() (*config.Config, pipeline.ApplyConfig, error) {
 	log := slog.Default()
 
@@ -43,9 +47,17 @@ func loadDeps() (*config.Config, pipeline.ApplyConfig, error) {
 	scorerSvc := scorer.New(defaults)
 	fetcherSvc := fetcher.NewFallback(defaults, log)
 
+	var llmClient port.LLMClient
+	if cfg.Orchestrator.BaseURL != "" && cfg.Orchestrator.Model != "" {
+		log.Info("orchestrator LLM configured — pipeline will extract keywords", "model", cfg.Orchestrator.Model)
+		llmClient = llm.New(cfg.Orchestrator.BaseURL, cfg.Orchestrator.Model, cfg.Orchestrator.APIKey, defaults, log)
+	} else {
+		log.Info("no orchestrator LLM — MCP host handles keyword extraction")
+	}
+
 	deps := pipeline.ApplyConfig{
 		Fetcher:  fetcherSvc,
-		LLM:      nil, // Claude handles keyword extraction
+		LLM:      llmClient,
 		Scorer:   scorerSvc,
 		CLGen:    nil, // Claude generates cover letters
 		Resumes:  resumeRepo,
@@ -70,15 +82,15 @@ func HandleGetScore(ctx context.Context, req *mcp.CallToolRequest, deps *pipelin
 // HandleGetScoreWithConfig is the full handler with optional *config.Config.
 // When cfg is nil (tests), a zero-value config is used for non-nil fields.
 func HandleGetScoreWithConfig(ctx context.Context, req *mcp.CallToolRequest, deps *pipeline.ApplyConfig, cfg *config.Config) *mcp.CallToolResult {
-	urlVal := req.GetString("url", "")
-	textVal := req.GetString("text", "")
+	jdURL := req.GetString("jd_url", "")
+	jdRawText := req.GetString("jd_raw_text", "")
 	channelVal := req.GetString("channel", "COLD")
 	accomplishmentsVal := req.GetString("accomplishments", "")
 
-	if urlVal != "" && textVal != "" {
+	if jdURL != "" && jdRawText != "" {
 		return errorResult("exactly one of url or text is required")
 	}
-	if urlVal == "" && textVal == "" {
+	if jdURL == "" && jdRawText == "" {
 		return errorResult("exactly one of url or text is required")
 	}
 
@@ -92,10 +104,10 @@ func HandleGetScoreWithConfig(ctx context.Context, req *mcp.CallToolRequest, dep
 
 	pl := pipeline.NewApplyPipeline(deps)
 
-	isText := textVal != ""
-	input := urlVal
+	isText := jdRawText != ""
+	input := jdURL
 	if isText {
-		input = textVal
+		input = jdRawText
 	}
 
 	runErr := pl.Run(ctx, pipeline.ApplyRequest{
