@@ -139,6 +139,13 @@ func callTool(t *testing.T, cl *client.Client, name string, args map[string]any)
 	return ""
 }
 
+// jdRawText is a realistic job description used across tests. In the MCP flow
+// this is the raw text that the MCP host (Claude) would provide to get_score.
+const jdRawText = "We are looking for a Senior Go Engineer to join our platform team at Acme Corp. " +
+	"You will design and build microservices on Kubernetes, mentor junior engineers, and drive best practices across the org. " +
+	"Requirements: 5+ years of Go, strong Kubernetes experience, familiarity with Docker and Terraform. " +
+	"Nice to have: experience with gRPC and observability tooling."
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 // TestServerDispatch_ToolsRegistered verifies that all five tools are
@@ -215,16 +222,24 @@ func TestServerDispatch_GetScore_BlockedUntilOnboarded(t *testing.T) {
 	cl := newMCPClient(t)
 
 	raw := callTool(t, cl, "get_score", map[string]any{
-		"text":    "We are looking for a Senior Go Engineer to join our platform team at Acme Corp. You will design and build microservices on Kubernetes, mentor junior engineers, and drive best practices across the org. Requirements: 5+ years of Go, strong Kubernetes experience, familiarity with Docker and Terraform. Nice to have: experience with gRPC and observability tooling.",
+		"text":    jdRawText,
 		"channel": "COLD",
 	})
 
-	var resp map[string]string
+	var resp map[string]any
 	if err := json.Unmarshal([]byte(raw), &resp); err != nil {
 		t.Fatalf("unmarshal: %v — raw: %s", err, raw)
 	}
-	if !strings.Contains(resp["error"], "no resumes found") {
-		t.Errorf("expected 'no resumes found' in error, got: %s", resp["error"])
+	errMsg, _ := resp["error"].(string)
+	if !strings.Contains(errMsg, "no resumes found") {
+		t.Errorf("expected 'no resumes found' in error, got: %s", errMsg)
+	}
+	// Middleware-level errors must not contain scoring fields.
+	if _, hasScore := resp["best_score"]; hasScore {
+		t.Error("middleware-blocked response should not contain best_score")
+	}
+	if _, hasStatus := resp["status"]; hasStatus {
+		t.Error("middleware-blocked response should not contain status (not a PipelineResult)")
 	}
 }
 
@@ -313,7 +328,7 @@ func TestServerDispatch_OnboardThenScore(t *testing.T) {
 
 	// Step 2: score against a realistic job description.
 	scoreRaw := callTool(t, cl, "get_score", map[string]any{
-		"text":    "We are looking for a Senior Go Engineer to join our platform team at Acme Corp. You will design and build microservices on Kubernetes, mentor junior engineers, and drive best practices across the org. Requirements: 5+ years of Go, strong Kubernetes experience, familiarity with Docker and Terraform. Nice to have: experience with gRPC and observability tooling.",
+		"text":    jdRawText,
 		"channel": "COLD",
 	})
 	var scoreResp map[string]any

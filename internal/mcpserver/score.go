@@ -49,7 +49,10 @@ func loadDeps() (*config.Config, pipeline.ApplyConfig, error) {
 
 	var llmClient port.LLMClient
 	if cfg.Orchestrator.BaseURL != "" && cfg.Orchestrator.Model != "" {
+		log.Info("orchestrator LLM configured — pipeline will extract keywords", "model", cfg.Orchestrator.Model)
 		llmClient = llm.New(cfg.Orchestrator.BaseURL, cfg.Orchestrator.Model, cfg.Orchestrator.APIKey, defaults, log)
+	} else {
+		log.Info("no orchestrator LLM — Claude handles keyword extraction in MCP mode")
 	}
 
 	deps := pipeline.ApplyConfig{
@@ -79,15 +82,15 @@ func HandleGetScore(ctx context.Context, req *mcp.CallToolRequest, deps *pipelin
 // HandleGetScoreWithConfig is the full handler with optional *config.Config.
 // When cfg is nil (tests), a zero-value config is used for non-nil fields.
 func HandleGetScoreWithConfig(ctx context.Context, req *mcp.CallToolRequest, deps *pipeline.ApplyConfig, cfg *config.Config) *mcp.CallToolResult {
-	urlVal := req.GetString("url", "")
-	textVal := req.GetString("text", "")
+	jdURL := req.GetString("url", "")
+	jdRawText := req.GetString("text", "")
 	channelVal := req.GetString("channel", "COLD")
 	accomplishmentsVal := req.GetString("accomplishments", "")
 
-	if urlVal != "" && textVal != "" {
+	if jdURL != "" && jdRawText != "" {
 		return errorResult("exactly one of url or text is required")
 	}
-	if urlVal == "" && textVal == "" {
+	if jdURL == "" && jdRawText == "" {
 		return errorResult("exactly one of url or text is required")
 	}
 
@@ -101,10 +104,10 @@ func HandleGetScoreWithConfig(ctx context.Context, req *mcp.CallToolRequest, dep
 
 	pl := pipeline.NewApplyPipeline(deps)
 
-	isText := textVal != ""
-	input := urlVal
+	isText := jdRawText != ""
+	input := jdURL
 	if isText {
-		input = textVal
+		input = jdRawText
 	}
 
 	runErr := pl.Run(ctx, pipeline.ApplyRequest{
