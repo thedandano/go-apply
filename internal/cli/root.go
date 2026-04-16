@@ -21,6 +21,7 @@ var skipUpdateCheckCommands = map[string]bool{
 	"serve":   true,
 	"update":  true,
 	"version": true,
+	"logs":    true,
 }
 
 // NewRootCommand returns the root cobra command for go-apply.
@@ -46,6 +47,7 @@ func NewRootCommand(version string) *cobra.Command {
 	cmd.AddCommand(NewVersionCommand(version))
 	cmd.AddCommand(NewSetupCommand())
 	cmd.AddCommand(NewUpdateCommand(version))
+	cmd.AddCommand(NewLogsCommand())
 	return cmd
 }
 

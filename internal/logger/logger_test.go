@@ -1,10 +1,10 @@
 package logger_test
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -12,7 +12,7 @@ import (
 	"github.com/thedandano/go-apply/internal/logger"
 )
 
-func TestNew_WritesJSONToDailyFile(t *testing.T) {
+func TestNew_WritesHumanReadableToDailyFile(t *testing.T) {
 	dir := t.TempDir()
 	log, cleanup, err := logger.New(dir)
 	if err != nil {
@@ -37,15 +37,40 @@ func TestNew_WritesJSONToDailyFile(t *testing.T) {
 	}
 
 	data, _ := os.ReadFile(filepath.Join(dir, name))
-	var record map[string]any
-	if err := json.Unmarshal(data, &record); err != nil {
-		t.Fatalf("log line is not valid JSON: %v\nContent: %s", err, data)
+	content := string(data)
+
+	if strings.HasPrefix(strings.TrimSpace(content), "{") {
+		t.Errorf("log line must not be JSON, got: %s", content)
 	}
-	if record["msg"] != "test message" {
-		t.Errorf("msg = %v, want 'test message'", record["msg"])
+	if !strings.Contains(content, "test message") {
+		t.Errorf("log line must contain 'test message', got: %s", content)
 	}
-	if record["key"] != "value" {
-		t.Errorf("key = %v, want 'value'", record["key"])
+	if !strings.Contains(content, "key=value") {
+		t.Errorf("log line must contain 'key=value', got: %s", content)
+	}
+}
+
+func TestNew_TimestampFormat(t *testing.T) {
+	dir := t.TempDir()
+	log, cleanup, _ := logger.New(dir)
+	defer cleanup()
+
+	log.Info("ts check")
+	cleanup()
+
+	entries, _ := os.ReadDir(dir)
+	if len(entries) == 0 {
+		t.Skip("no log file created")
+	}
+	data, _ := os.ReadFile(filepath.Join(dir, entries[0].Name()))
+	content := string(data)
+
+	tsPattern := regexp.MustCompile(`\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}`)
+	if !tsPattern.MatchString(content) {
+		t.Errorf("log must contain timestamp in format 'YYYY-MM-DD HH:MM:SS', got: %s", content)
+	}
+	if strings.Contains(content, "T") && regexp.MustCompile(`\d{4}-\d{2}-\d{2}T`).MatchString(content) {
+		t.Errorf("log must not contain RFC3339 'T' separator, got: %s", content)
 	}
 }
 
