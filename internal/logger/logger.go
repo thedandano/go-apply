@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	charmlog "github.com/charmbracelet/log"
 )
 
 const (
@@ -40,8 +42,16 @@ func New(logDir string) (*slog.Logger, func(), error) {
 	}
 
 	log := slog.New(&multiHandler{
-		file:   slog.NewJSONHandler(f, &slog.HandlerOptions{Level: slog.LevelDebug}),
-		stderr: slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}),
+		file: charmlog.NewWithOptions(f, charmlog.Options{
+			Level:           charmlog.DebugLevel,
+			ReportTimestamp: true,
+			TimeFormat:      "2006-01-02 15:04:05",
+		}),
+		stderr: charmlog.NewWithOptions(os.Stderr, charmlog.Options{
+			Level:           charmlog.WarnLevel,
+			ReportTimestamp: true,
+			TimeFormat:      "2006-01-02 15:04:05",
+		}),
 	})
 
 	var once sync.Once
@@ -49,7 +59,11 @@ func New(logDir string) (*slog.Logger, func(), error) {
 }
 
 func stderrOnly() *slog.Logger {
-	return slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	return slog.New(charmlog.NewWithOptions(os.Stderr, charmlog.Options{
+		Level:           charmlog.WarnLevel,
+		ReportTimestamp: true,
+		TimeFormat:      "2006-01-02 15:04:05",
+	}))
 }
 
 func pruneOldLogs(logDir string, keep int) {
