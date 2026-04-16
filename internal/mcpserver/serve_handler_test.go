@@ -1,4 +1,4 @@
-package cli_test
+package mcpserver_test
 
 import (
 	"context"
@@ -8,8 +8,8 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 
-	"github.com/thedandano/go-apply/internal/cli"
 	"github.com/thedandano/go-apply/internal/config"
+	"github.com/thedandano/go-apply/internal/mcpserver"
 	"github.com/thedandano/go-apply/internal/model"
 	"github.com/thedandano/go-apply/internal/port"
 	"github.com/thedandano/go-apply/internal/service/pipeline"
@@ -160,7 +160,7 @@ func TestGetScore_BothURLAndText_ReturnsError(t *testing.T) {
 		"text": "raw jd text",
 	})
 
-	result := cli.HandleGetScore(context.Background(), &req, &cfg)
+	result := mcpserver.HandleGetScore(context.Background(), &req, &cfg)
 
 	text := extractText(t, result)
 	var resp map[string]string
@@ -178,7 +178,7 @@ func TestGetScore_URLOnly_ReturnsResult(t *testing.T) {
 		"url": "https://example.com/job",
 	})
 
-	result := cli.HandleGetScore(context.Background(), &req, &cfg)
+	result := mcpserver.HandleGetScore(context.Background(), &req, &cfg)
 
 	text := extractText(t, result)
 	var pipelineResult model.PipelineResult
@@ -195,7 +195,7 @@ func TestHandleOnboardUser_XORValidation_MissingLabel(t *testing.T) {
 		"resume_content": "resume text",
 		// resume_label missing
 	})
-	result := cli.HandleOnboardUser(context.Background(), &req, svc)
+	result := mcpserver.HandleOnboardUser(context.Background(), &req, svc)
 	text := extractText(t, result)
 	var resp map[string]string
 	if err := json.Unmarshal([]byte(text), &resp); err != nil {
@@ -212,7 +212,7 @@ func TestHandleOnboardUser_XORValidation_MissingContent(t *testing.T) {
 		"resume_label": "backend",
 		// resume_content missing
 	})
-	result := cli.HandleOnboardUser(context.Background(), &req, svc)
+	result := mcpserver.HandleOnboardUser(context.Background(), &req, svc)
 	text := extractText(t, result)
 	var resp map[string]string
 	if err := json.Unmarshal([]byte(text), &resp); err != nil {
@@ -226,7 +226,7 @@ func TestHandleOnboardUser_XORValidation_MissingContent(t *testing.T) {
 func TestHandleOnboardUser_EmptyInput_ReturnsError(t *testing.T) {
 	svc := &stubOnboarder{}
 	req := callToolRequest("onboard_user", map[string]any{})
-	result := cli.HandleOnboardUser(context.Background(), &req, svc)
+	result := mcpserver.HandleOnboardUser(context.Background(), &req, svc)
 	text := extractText(t, result)
 	var resp map[string]string
 	if err := json.Unmarshal([]byte(text), &resp); err != nil {
@@ -245,7 +245,7 @@ func TestHandleOnboardUser_HappyPath_ReturnsStored(t *testing.T) {
 		"resume_content": "resume text",
 		"resume_label":   "backend",
 	})
-	result := cli.HandleOnboardUser(context.Background(), &req, svc)
+	result := mcpserver.HandleOnboardUser(context.Background(), &req, svc)
 	text := extractText(t, result)
 	var resp model.OnboardResult
 	if err := json.Unmarshal([]byte(text), &resp); err != nil {
@@ -261,7 +261,7 @@ func TestHandleOnboardUser_SkillsOnly_ReturnsError(t *testing.T) {
 	req := callToolRequest("onboard_user", map[string]any{
 		"skills": "Go, Python",
 	})
-	result := cli.HandleOnboardUser(context.Background(), &req, svc)
+	result := mcpserver.HandleOnboardUser(context.Background(), &req, svc)
 	text := extractText(t, result)
 	if !strings.Contains(text, "resume is required") {
 		t.Errorf("expected 'resume is required' error, got: %s", text)
@@ -275,7 +275,7 @@ func TestHandleAddResume_MissingContent_ReturnsError(t *testing.T) {
 	req := callToolRequest("add_resume", map[string]any{
 		"resume_label": "backend",
 	})
-	result := cli.HandleAddResume(context.Background(), &req, svc)
+	result := mcpserver.HandleAddResume(context.Background(), &req, svc)
 	text := extractText(t, result)
 	var resp map[string]string
 	if err := json.Unmarshal([]byte(text), &resp); err != nil {
@@ -294,7 +294,7 @@ func TestHandleAddResume_HappyPath(t *testing.T) {
 		"resume_content": "resume text",
 		"resume_label":   "backend",
 	})
-	result := cli.HandleAddResume(context.Background(), &req, svc)
+	result := mcpserver.HandleAddResume(context.Background(), &req, svc)
 	text := extractText(t, result)
 	var resp model.OnboardResult
 	if err := json.Unmarshal([]byte(text), &resp); err != nil {
@@ -309,7 +309,7 @@ func TestHandleUpdateConfig_MissingKey_ReturnsError(t *testing.T) {
 		"value": "claude-haiku-4-5",
 	})
 	cfg := &config.Config{}
-	result := cli.HandleUpdateConfig(context.Background(), &req, cfg)
+	result := mcpserver.HandleUpdateConfig(context.Background(), &req, cfg)
 	text := extractText(t, result)
 	var resp map[string]string
 	if err := json.Unmarshal([]byte(text), &resp); err != nil {
@@ -326,7 +326,7 @@ func TestHandleUpdateConfig_UnknownKey_ReturnsError(t *testing.T) {
 		"value": "value",
 	})
 	cfg := &config.Config{}
-	result := cli.HandleUpdateConfig(context.Background(), &req, cfg)
+	result := mcpserver.HandleUpdateConfig(context.Background(), &req, cfg)
 	text := extractText(t, result)
 	var resp map[string]string
 	if err := json.Unmarshal([]byte(text), &resp); err != nil {
@@ -343,7 +343,7 @@ func TestHandleUpdateConfig_APIKey_ResponseRedacted(t *testing.T) {
 		"value": "sk-super-secret",
 	})
 	cfg := &config.Config{}
-	result := cli.HandleUpdateConfig(context.Background(), &req, cfg)
+	result := mcpserver.HandleUpdateConfig(context.Background(), &req, cfg)
 	text := extractText(t, result)
 	var resp map[string]string
 	if err := json.Unmarshal([]byte(text), &resp); err != nil {
@@ -364,7 +364,7 @@ func TestHandleGetConfigWith_RedactsAPIKeys(t *testing.T) {
 	cfg.Orchestrator.APIKey = "sk-super-secret"
 	cfg.Embedder.APIKey = "another-key"
 
-	result := cli.HandleGetConfigWith(cfg)
+	result := mcpserver.HandleGetConfigWith(cfg)
 
 	text := extractText(t, result)
 	var fields map[string]string
@@ -381,7 +381,7 @@ func TestHandleGetConfigWith_EmptyAPIKey_NotRedacted(t *testing.T) {
 	cfg := &config.Config{}
 	// API keys left empty
 
-	result := cli.HandleGetConfigWith(cfg)
+	result := mcpserver.HandleGetConfigWith(cfg)
 
 	text := extractText(t, result)
 	var fields map[string]string
@@ -394,7 +394,7 @@ func TestHandleGetConfigWith_EmptyAPIKey_NotRedacted(t *testing.T) {
 }
 
 func TestHandleGetConfigWith_ExcludesOrchestratorKeys(t *testing.T) {
-	result := cli.HandleGetConfigWith(&config.Config{})
+	result := mcpserver.HandleGetConfigWith(&config.Config{})
 
 	text := extractText(t, result)
 	var fields map[string]string
@@ -413,7 +413,7 @@ func TestHandleUpdateConfig_RejectsOrchestratorKey(t *testing.T) {
 		"key":   "orchestrator.model",
 		"value": "gpt-4o",
 	})
-	result := cli.HandleUpdateConfig(context.Background(), &req, &config.Config{})
+	result := mcpserver.HandleUpdateConfig(context.Background(), &req, &config.Config{})
 
 	text := extractText(t, result)
 	var payload map[string]string
@@ -452,7 +452,7 @@ func TestHandleGetScore_NilLLM_ErrorsWithActionableMessage(t *testing.T) {
 		"channel": "COLD",
 	})
 
-	result := cli.HandleGetScore(context.Background(), &req, &deps)
+	result := mcpserver.HandleGetScore(context.Background(), &req, &deps)
 
 	text := extractText(t, result)
 	var payload model.PipelineResult

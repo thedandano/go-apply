@@ -1,4 +1,4 @@
-package cli_test
+package mcpserver_test
 
 import (
 	"context"
@@ -7,11 +7,11 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 
-	"github.com/thedandano/go-apply/internal/cli"
+	"github.com/thedandano/go-apply/internal/mcpserver"
 )
 
 func TestWorkflowPromptHandler_ReturnsUserMessage(t *testing.T) {
-	result, err := cli.HandleWorkflowPrompt(context.Background(), mcp.GetPromptRequest{})
+	result, err := mcpserver.HandleWorkflowPrompt(context.Background(), mcp.GetPromptRequest{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -24,7 +24,7 @@ func TestWorkflowPromptHandler_ReturnsUserMessage(t *testing.T) {
 }
 
 func TestWorkflowPromptHandler_ContainsKeyWorkflowConcepts(t *testing.T) {
-	result, _ := cli.HandleWorkflowPrompt(context.Background(), mcp.GetPromptRequest{})
+	result, _ := mcpserver.HandleWorkflowPrompt(context.Background(), mcp.GetPromptRequest{})
 	text := result.Messages[0].Content.(mcp.TextContent).Text
 
 	for _, keyword := range []string{"get_score", "onboard_user", "jd_text", "best_score", "embedder"} {
