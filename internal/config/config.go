@@ -125,7 +125,12 @@ func Load() (*Config, error) {
 	data, err := os.ReadFile(cfgFile) // #nosec G304 -- path is XDG_CONFIG_HOME/go-apply/config.yaml, not user input
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return nil, fmt.Errorf("config file not found at %s — run 'go-apply init' to create one: %w", cfgFile, err)
+			cfg := &Config{}
+			if saveErr := cfg.Save(); saveErr != nil {
+				return nil, fmt.Errorf("create default config at %s: %w", cfgFile, saveErr)
+			}
+			slog.Info("created default config", "path", cfgFile)
+			return cfg, nil
 		}
 		return nil, fmt.Errorf("read config %s: %w", cfgFile, err)
 	}

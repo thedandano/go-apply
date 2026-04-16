@@ -13,7 +13,7 @@ import (
 	"github.com/thedandano/go-apply/internal/logger"
 )
 
-func TestNew_WritesJSONToTimestampedFile(t *testing.T) {
+func TestNew_WritesJSONToDailyFile(t *testing.T) {
 	dir := t.TempDir()
 	log, cleanup, err := logger.New(dir, slog.LevelInfo)
 	if err != nil {
@@ -33,8 +33,8 @@ func TestNew_WritesJSONToTimestampedFile(t *testing.T) {
 		t.Errorf("unexpected log filename: %s", name)
 	}
 	ts := strings.TrimSuffix(strings.TrimPrefix(name, "go-apply-"), ".log")
-	if _, err := time.Parse("2006-01-02T150405Z", ts); err != nil {
-		t.Errorf("filename timestamp %q not parseable: %v", ts, err)
+	if _, err := time.Parse("2006-01-02", ts); err != nil {
+		t.Errorf("filename date %q not parseable: %v", ts, err)
 	}
 
 	data, _ := os.ReadFile(filepath.Join(dir, name))
@@ -53,7 +53,7 @@ func TestNew_WritesJSONToTimestampedFile(t *testing.T) {
 func TestNew_PrunesOldLogFiles(t *testing.T) {
 	dir := t.TempDir()
 	for i := range 55 {
-		name := fmt.Sprintf("go-apply-2025-01-%02dT120000Z.log", i+1)
+		name := fmt.Sprintf("go-apply-2025-%02d-01.log", i+1)
 		os.WriteFile(filepath.Join(dir, name), []byte("old"), 0640)
 	}
 	log, cleanup, _ := logger.New(dir, slog.LevelInfo)

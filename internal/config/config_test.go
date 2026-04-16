@@ -61,17 +61,34 @@ func TestEnvVarOverridesAPIKey(t *testing.T) {
 	}
 }
 
-// TestLoadErrorsWhenNoFile verifies that Load() returns an error when no config
-// file exists. A missing config is not a valid state — the caller must run
-// 'go-apply init' first.
-func TestLoadErrorsWhenNoFile(t *testing.T) {
+// TestLoadAutoCreatesConfigWhenMissing verifies that Load() creates a zero-value
+// config.yaml when none exists, so first-run works without a manual init step.
+func TestLoadAutoCreatesConfigWhenMissing(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
 	t.Setenv("GO_APPLY_API_KEY", "")
 
-	_, err := config.Load()
-	if err == nil {
-		t.Fatal("Load() should return an error when config file does not exist")
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load() should not error on missing config, got: %v", err)
+	}
+	if cfg == nil {
+		t.Fatal("Load() returned nil config")
+	}
+
+	// Config file should now exist on disk.
+	cfgPath := filepath.Join(dir, "go-apply", "config.yaml")
+	if _, statErr := os.Stat(cfgPath); os.IsNotExist(statErr) {
+		t.Errorf("config file not created at %s", cfgPath)
+	}
+
+	// Second Load() should read the persisted file without error.
+	cfg2, err := config.Load()
+	if err != nil {
+		t.Fatalf("second Load() error: %v", err)
+	}
+	if cfg2 == nil {
+		t.Fatal("second Load() returned nil config")
 	}
 }
 
