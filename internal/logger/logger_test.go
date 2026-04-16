@@ -104,13 +104,3 @@ func TestNew_FileReceivesDebugLogs(t *testing.T) {
 		t.Error("INFO log must appear in log file")
 	}
 }
-
-func splitLines(s string) []string {
-	var out []string
-	for _, l := range strings.Split(s, "\n") {
-		if strings.TrimSpace(l) != "" {
-			out = append(out, l)
-		}
-	}
-	return out
-}
