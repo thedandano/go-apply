@@ -1,0 +1,131 @@
+package cli_test
+
+import (
+	"context"
+	"encoding/json"
+	"strings"
+	"testing"
+
+	"github.com/mark3labs/mcp-go/mcp"
+
+	"github.com/thedandano/go-apply/internal/cli"
+	"github.com/thedandano/go-apply/internal/config"
+	"github.com/thedandano/go-apply/internal/model"
+)
+
+// stubEmptyResumeRepo returns no resumes, simulating an unonboarded user.
+type stubEmptyResumeRepo struct{}
+
+func (s *stubEmptyResumeRepo) ListResumes() ([]model.ResumeFile, error) {
+	return nil, nil
+}
+
+// ── CheckOnboarded unit tests ─────────────────────────────────────────────────
+
+func TestCheckOnboarded_EmbedderNotConfigured_ReturnsError(t *testing.T) {
+	cfg := &config.Config{} // zero-value: embedder.base_url and embedder.model empty
+	err := cli.CheckOnboarded(cfg, &stubResumeRepo{})
+	if err == nil {
+		t.Fatal("expected error when embedder is not configured, got nil")
+	}
+	if !strings.Contains(err.Error(), "embedder not configured") {
+		t.Errorf("error = %q, want to contain 'embedder not configured'", err.Error())
+	}
+}
+
+func TestCheckOnboarded_EmbedderMissingModel_ReturnsError(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Embedder.BaseURL = "http://localhost:11434/v1"
+	// model left empty
+	err := cli.CheckOnboarded(cfg, &stubResumeRepo{})
+	if err == nil {
+		t.Fatal("expected error when embedder model is not configured, got nil")
+	}
+	if !strings.Contains(err.Error(), "embedder not configured") {
+		t.Errorf("error = %q, want to contain 'embedder not configured'", err.Error())
+	}
+}
+
+func TestCheckOnboarded_NoResumes_ReturnsError(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Embedder.BaseURL = "http://localhost:11434/v1"
+	cfg.Embedder.Model = "nomic-embed-text"
+
+	err := cli.CheckOnboarded(cfg, &stubEmptyResumeRepo{})
+	if err == nil {
+		t.Fatal("expected error when no resumes found, got nil")
+	}
+	if !strings.Contains(err.Error(), "no resumes found") {
+		t.Errorf("error = %q, want to contain 'no resumes found'", err.Error())
+	}
+}
+
+func TestCheckOnboarded_Onboarded_ReturnsNil(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Embedder.BaseURL = "http://localhost:11434/v1"
+	cfg.Embedder.Model = "nomic-embed-text"
+
+	err := cli.CheckOnboarded(cfg, &stubResumeRepo{}) // stubResumeRepo returns one resume
+	if err != nil {
+		t.Errorf("expected nil when onboarded, got: %v", err)
+	}
+}
+
+// ── RequireOnboarded integration tests ───────────────────────────────────────
+
+func TestRequireOnboarded_NotOnboarded_ReturnsErrorResult(t *testing.T) {
+	cfg := &config.Config{} // no embedder
+	req := callToolRequest("get_score", map[string]any{"url": "https://example.com/job"})
+
+	called := false
+	inner := func(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		called = true
+		return mcp.NewToolResultText(`{"status":"ok"}`), nil
+	}
+
+	handler := cli.RequireOnboarded(cfg, &stubEmptyResumeRepo{}, inner)
+	result, err := handler(context.Background(), req)
+	if err != nil {
+		t.Fatalf("handler returned unexpected error: %v", err)
+	}
+	if called {
+		t.Error("inner handler must not be called when not onboarded")
+	}
+
+	text := extractText(t, result)
+	var resp map[string]string
+	if err := json.Unmarshal([]byte(text), &resp); err != nil {
+		t.Fatalf("response is not JSON: %v", err)
+	}
+	if resp["error"] == "" {
+		t.Errorf("expected error key in response, got: %v", resp)
+	}
+}
+
+func TestRequireOnboarded_Onboarded_DelegatesToInnerHandler(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Embedder.BaseURL = "http://localhost:11434/v1"
+	cfg.Embedder.Model = "nomic-embed-text"
+
+	req := callToolRequest("get_score", map[string]any{"url": "https://example.com/job"})
+
+	called := false
+	inner := func(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		called = true
+		return mcp.NewToolResultText(`{"status":"ok"}`), nil
+	}
+
+	handler := cli.RequireOnboarded(cfg, &stubResumeRepo{}, inner)
+	result, err := handler(context.Background(), req)
+	if err != nil {
+		t.Fatalf("handler returned unexpected error: %v", err)
+	}
+	if !called {
+		t.Error("inner handler must be called when onboarded")
+	}
+
+	text := extractText(t, result)
+	if !strings.Contains(text, `"status":"ok"`) {
+		t.Errorf("expected inner handler result, got: %s", text)
+	}
+}
