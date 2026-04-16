@@ -125,6 +125,10 @@ func newOnboardSvc() (port.Onboarder, func(), error) {
 		return nil, nil, fmt.Errorf("load defaults: %w", err)
 	}
 
+	if strings.TrimSpace(cfg.Embedder.BaseURL) == "" || strings.TrimSpace(cfg.Embedder.Model) == "" {
+		return nil, nil, fmt.Errorf("embedder not configured — use update_config to set embedder.base_url, embedder.model, and optionally embedder.api_key before onboarding")
+	}
+
 	log := slog.Default()
 	embedderClient := llm.New(cfg.Embedder.BaseURL, cfg.Embedder.Model, cfg.Embedder.APIKey, defaults, log)
 	profileRepo, err := newSQLiteProfile(cfg)
