@@ -383,3 +383,54 @@ func TestApplyPipeline_TailorStep_TailorError(t *testing.T) {
 		t.Error("result.Warnings is empty — expected a warning to be recorded on tailor error")
 	}
 }
+
+func TestAcquireJD_TextInput_PassesThrough(t *testing.T) {
+	pres := &capturingPresenter{}
+	cfg := minimalApplyConfig(pres)
+	pl := pipeline.NewApplyPipeline(cfg)
+
+	text, err := pl.AcquireJD(context.Background(), "raw jd text", true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if text != "raw jd text" {
+		t.Errorf("AcquireJD = %q, want %q", text, "raw jd text")
+	}
+}
+
+func TestAcquireJD_URLInput_FetchesText(t *testing.T) {
+	pres := &capturingPresenter{}
+	cfg := minimalApplyConfig(pres)
+	pl := pipeline.NewApplyPipeline(cfg)
+
+	text, err := pl.AcquireJD(context.Background(), "https://example.com/job", false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if text == "" {
+		t.Error("AcquireJD returned empty text for URL input")
+	}
+}
+
+func TestScoreResumes_ReturnsScoresAndBest(t *testing.T) {
+	pres := &capturingPresenter{}
+	cfg := minimalApplyConfig(pres)
+	pl := pipeline.NewApplyPipeline(cfg)
+
+	jd := model.JDData{
+		Title:     "Go Engineer",
+		Company:   "Acme",
+		Required:  []string{"golang", "kubernetes"},
+		Preferred: []string{"docker"},
+	}
+	result, err := pl.ScoreResumes(context.Background(), jd, &config.Config{YearsOfExperience: 5})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.Scores) == 0 {
+		t.Error("ScoreResumes returned no scores")
+	}
+	if result.BestLabel == "" {
+		t.Error("ScoreResumes returned empty BestLabel")
+	}
+}

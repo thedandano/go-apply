@@ -245,6 +245,36 @@ func (p *ApplyPipeline) Run(ctx context.Context, req ApplyRequest) error {
 	return p.presenter.ShowResult(result)
 }
 
+// ScoreResumeResult holds the output of ScoreResumes.
+type ScoreResumeResult struct {
+	Scores    map[string]model.ScoreResult
+	BestLabel string
+	BestScore float64
+}
+
+// AcquireJD returns the raw JD text for the given URL or raw text input.
+// It checks the local cache before fetching, emitting step events via the presenter.
+func (p *ApplyPipeline) AcquireJD(ctx context.Context, urlOrText string, isText bool) (string, error) {
+	return p.acquireJDText(ctx, ApplyRequest{URLOrText: urlOrText, IsText: isText})
+}
+
+// ScoreResumes lists all stored resumes and scores them against the given JD.
+func (p *ApplyPipeline) ScoreResumes(ctx context.Context, jd model.JDData, cfg *config.Config) (ScoreResumeResult, error) {
+	resumeFiles, err := p.resumes.ListResumes()
+	if err != nil {
+		return ScoreResumeResult{}, fmt.Errorf("list resumes: %w", err)
+	}
+	scores, bestLabel, bestScore, err := p.scoreResumes(ctx, resumeFiles, &jd, cfg)
+	if err != nil {
+		return ScoreResumeResult{}, err
+	}
+	return ScoreResumeResult{
+		Scores:    scores,
+		BestLabel: bestLabel,
+		BestScore: bestScore,
+	}, nil
+}
+
 // acquireJDText returns the raw JD text, either from the cache (for URLs) or
 // by using the input directly (for text mode) or fetching (for URLs).
 func (p *ApplyPipeline) acquireJDText(ctx context.Context, req ApplyRequest) (string, error) {
