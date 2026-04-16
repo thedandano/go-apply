@@ -13,6 +13,7 @@ import (
 	"github.com/thedandano/go-apply/internal/model"
 	mcppres "github.com/thedandano/go-apply/internal/presenter/mcp"
 	"github.com/thedandano/go-apply/internal/service/pipeline"
+	"github.com/thedandano/go-apply/internal/service/tailor"
 )
 
 // sessions is the process-lifetime session store shared by all multi-turn handlers.
@@ -223,4 +224,210 @@ func NextActionFromScore(score float64) string {
 	default:
 		return "cover_letter"
 	}
+}
+
+// NextActionAfterT1 returns next_action after T1 tailoring — floored to tailor_t2 or cover_letter.
+func NextActionAfterT1(score float64) string {
+	if score >= 0.70 {
+		return "cover_letter"
+	}
+	return "tailor_t2"
+}
+
+// loadBestResumeText loads resume text for bestLabel from the repo.
+func loadBestResumeText(deps *pipeline.ApplyConfig, bestLabel string) (string, error) {
+	resumeFiles, err := deps.Resumes.ListResumes()
+	if err != nil {
+		return "", fmt.Errorf("list resumes: %w", err)
+	}
+	for _, r := range resumeFiles {
+		if r.Label == bestLabel {
+			text, loadErr := deps.Loader.Load(r.Path)
+			if loadErr != nil {
+				return "", fmt.Errorf("load resume %q: %w", bestLabel, loadErr)
+			}
+			return text, nil
+		}
+	}
+	return "", fmt.Errorf("resume %q not found", bestLabel)
+}
+
+// HandleSubmitTailorT1 is the exported handler for the "submit_tailor_t1" MCP tool.
+func HandleSubmitTailorT1(ctx context.Context, req *mcp.CallToolRequest) *mcp.CallToolResult {
+	return HandleSubmitTailorT1WithConfig(ctx, req, nil, nil)
+}
+
+// HandleSubmitTailorT1WithConfig is the full handler with optional injected deps (for tests).
+func HandleSubmitTailorT1WithConfig(ctx context.Context, req *mcp.CallToolRequest, deps *pipeline.ApplyConfig, cfg *config.Config) *mcp.CallToolResult {
+	sessionID := req.GetString("session_id", "")
+	if sessionID == "" {
+		return envelopeResult(stageErrorEnvelope("", "submit_tailor_t1", "missing_session", "session_id is required", false))
+	}
+	skillAddsStr := req.GetString("skill_adds", "")
+	if skillAddsStr == "" {
+		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t1", "missing_skill_adds", "skill_adds is required", false))
+	}
+	var skillAdds []string
+	if err := json.Unmarshal([]byte(skillAddsStr), &skillAdds); err != nil {
+		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t1", "invalid_skill_adds",
+			fmt.Sprintf("skill_adds parse failed: %v", err), false))
+	}
+	if len(skillAdds) == 0 {
+		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t1", "empty_skill_adds",
+			"skill_adds must contain at least one skill", false))
+	}
+
+	sess := sessions.Get(sessionID)
+	if sess == nil {
+		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t1", "session_not_found",
+			"session not found — call load_jd first", false))
+	}
+	if sess.State != stateScored && sess.State != stateT1Applied {
+		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t1", "invalid_state",
+			fmt.Sprintf("expected state %q or %q, got %q", stateScored, stateT1Applied, sess.State), false))
+	}
+
+	if deps == nil {
+		liveCfg, liveDeps, err := loadDeps()
+		if err != nil {
+			return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t1", "config_error", err.Error(), true))
+		}
+		deps = &liveDeps
+		if cfg == nil {
+			cfg = liveCfg
+		}
+	}
+	if cfg == nil {
+		cfg = &config.Config{}
+	}
+
+	baseText := sess.TailoredText
+	if baseText == "" {
+		text, err := loadBestResumeText(deps, sess.ScoreResult.BestLabel)
+		if err != nil {
+			slog.ErrorContext(ctx, "submit_tailor_t1: load resume failed", "session_id", sessionID, "error", err)
+			return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t1", "load_resume_failed", err.Error(), false))
+		}
+		baseText = text
+	}
+
+	pres := mcppres.New()
+	deps.Presenter = pres
+	pl := pipeline.NewApplyPipeline(deps)
+
+	tailored, addedKeywords := tailor.AddKeywordsToSkillsSection(baseText, skillAdds)
+	sess.TailoredText = tailored
+	sess.State = stateT1Applied
+
+	newScore, err := pl.RescoreResume(ctx, tailored, sess.ScoreResult.BestLabel, &sess.JD, cfg)
+	if err != nil {
+		slog.ErrorContext(ctx, "submit_tailor_t1: rescore failed", "session_id", sessionID, "error", err)
+		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t1", "rescore_failed", err.Error(), false))
+	}
+
+	newScoreTotal := newScore.Breakdown.Total()
+	if sess.ScoreResult.Scores == nil {
+		sess.ScoreResult.Scores = make(map[string]model.ScoreResult)
+	}
+	sess.ScoreResult.Scores[sess.ScoreResult.BestLabel] = newScore
+	sess.ScoreResult.BestScore = newScoreTotal
+
+	type t1Data struct {
+		NewScore      float64  `json:"new_score"`
+		AddedKeywords []string `json:"added_keywords"`
+	}
+	return envelopeResult(okEnvelope(sessionID, NextActionAfterT1(newScoreTotal), t1Data{
+		NewScore:      newScoreTotal,
+		AddedKeywords: addedKeywords,
+	}))
+}
+
+// HandleSubmitTailorT2 is the exported handler for the "submit_tailor_t2" MCP tool.
+func HandleSubmitTailorT2(ctx context.Context, req *mcp.CallToolRequest) *mcp.CallToolResult {
+	return HandleSubmitTailorT2WithConfig(ctx, req, nil, nil)
+}
+
+// HandleSubmitTailorT2WithConfig is the full handler with optional injected deps (for tests).
+func HandleSubmitTailorT2WithConfig(ctx context.Context, req *mcp.CallToolRequest, deps *pipeline.ApplyConfig, cfg *config.Config) *mcp.CallToolResult {
+	sessionID := req.GetString("session_id", "")
+	if sessionID == "" {
+		return envelopeResult(stageErrorEnvelope("", "submit_tailor_t2", "missing_session", "session_id is required", false))
+	}
+	bulletRewritesStr := req.GetString("bullet_rewrites", "")
+	if bulletRewritesStr == "" {
+		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t2", "missing_bullet_rewrites", "bullet_rewrites is required", false))
+	}
+	var rewrites []tailor.BulletRewrite
+	if err := json.Unmarshal([]byte(bulletRewritesStr), &rewrites); err != nil {
+		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t2", "invalid_bullet_rewrites",
+			fmt.Sprintf("bullet_rewrites parse failed: %v", err), false))
+	}
+	if len(rewrites) == 0 {
+		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t2", "empty_bullet_rewrites",
+			"bullet_rewrites must contain at least one entry", false))
+	}
+
+	sess := sessions.Get(sessionID)
+	if sess == nil {
+		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t2", "session_not_found",
+			"session not found — call load_jd first", false))
+	}
+	if sess.State != stateScored && sess.State != stateT1Applied {
+		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t2", "invalid_state",
+			fmt.Sprintf("expected state %q or %q, got %q", stateScored, stateT1Applied, sess.State), false))
+	}
+
+	if deps == nil {
+		liveCfg, liveDeps, err := loadDeps()
+		if err != nil {
+			return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t2", "config_error", err.Error(), true))
+		}
+		deps = &liveDeps
+		if cfg == nil {
+			cfg = liveCfg
+		}
+	}
+	if cfg == nil {
+		cfg = &config.Config{}
+	}
+
+	baseText := sess.TailoredText
+	if baseText == "" {
+		text, err := loadBestResumeText(deps, sess.ScoreResult.BestLabel)
+		if err != nil {
+			slog.ErrorContext(ctx, "submit_tailor_t2: load resume failed", "session_id", sessionID, "error", err)
+			return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t2", "load_resume_failed", err.Error(), false))
+		}
+		baseText = text
+	}
+
+	pres := mcppres.New()
+	deps.Presenter = pres
+	pl := pipeline.NewApplyPipeline(deps)
+
+	tailored, substitutionsMade := tailor.ApplyBulletRewrites(baseText, rewrites)
+	sess.TailoredText = tailored
+	sess.State = stateT2Applied
+
+	newScore, err := pl.RescoreResume(ctx, tailored, sess.ScoreResult.BestLabel, &sess.JD, cfg)
+	if err != nil {
+		slog.ErrorContext(ctx, "submit_tailor_t2: rescore failed", "session_id", sessionID, "error", err)
+		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t2", "rescore_failed", err.Error(), false))
+	}
+
+	newScoreTotal := newScore.Breakdown.Total()
+	if sess.ScoreResult.Scores == nil {
+		sess.ScoreResult.Scores = make(map[string]model.ScoreResult)
+	}
+	sess.ScoreResult.Scores[sess.ScoreResult.BestLabel] = newScore
+	sess.ScoreResult.BestScore = newScoreTotal
+
+	type t2Data struct {
+		NewScore          float64 `json:"new_score"`
+		SubstitutionsMade int     `json:"substitutions_made"`
+	}
+	return envelopeResult(okEnvelope(sessionID, "cover_letter", t2Data{
+		NewScore:          newScoreTotal,
+		SubstitutionsMade: substitutionsMade,
+	}))
 }

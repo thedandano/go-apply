@@ -239,6 +239,37 @@ func (s *bddState) mcpLoadJDAndSubmitKeywords() error {
 	return nil
 }
 
+func (s *bddState) mcpLoadJDSubmitKeywordsAndT1() error {
+	const jdText = "Senior Go engineer wanted. Requires Go and Kubernetes."
+	const jdJSON = `{"title":"Go Engineer","company":"Acme","required":["go","kubernetes"],"preferred":["docker"],"location":"Remote","seniority":"senior","required_years":3}`
+	const skillAdds = `["Terraform","gRPC"]`
+	s.callMCPThreeSteps(
+		"load_jd", map[string]any{"jd_raw_text": jdText},
+		"submit_keywords", func(sid string) map[string]any {
+			return map[string]any{"session_id": sid, "jd_json": jdJSON}
+		},
+		"submit_tailor_t1", func(sid string) map[string]any {
+			return map[string]any{"session_id": sid, "skill_adds": skillAdds}
+		},
+	)
+	return nil
+}
+
+func (s *bddState) assertT1TailoringResponse() error {
+	var env map[string]any
+	if err := json.Unmarshal([]byte(s.lastOutput), &env); err != nil {
+		return fmt.Errorf("expected JSON, got: %s", s.lastOutput)
+	}
+	if env["status"] != "ok" {
+		return fmt.Errorf("expected status ok, got %v — full: %s", env["status"], s.lastOutput)
+	}
+	data, _ := env["data"].(map[string]any)
+	if data == nil || data["new_score"] == nil {
+		return fmt.Errorf("expected new_score in data, got: %s", s.lastOutput)
+	}
+	return nil
+}
+
 func (s *bddState) mcpLoadJDBothArgs() error {
 	s.callMCPTool("load_jd", map[string]any{
 		"jd_url":      "https://example.com/job",

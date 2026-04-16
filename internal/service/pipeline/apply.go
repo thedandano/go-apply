@@ -275,6 +275,19 @@ func (p *ApplyPipeline) ScoreResumes(ctx context.Context, jd *model.JDData, cfg 
 	}, nil
 }
 
+// RescoreResume scores a single resume text against a JD, used after mechanical tailoring.
+func (p *ApplyPipeline) RescoreResume(_ context.Context, resumeText, resumeLabel string, jd *model.JDData, cfg *config.Config) (model.ScoreResult, error) {
+	seniorityMatch := resolveSeniorityMatch(cfg.DefaultSeniority, jd)
+	return p.scorer.Score(&model.ScorerInput{
+		ResumeText:     resumeText,
+		ResumeLabel:    resumeLabel,
+		JD:             *jd,
+		CandidateYears: cfg.YearsOfExperience,
+		RequiredYears:  jd.RequiredYears,
+		SeniorityMatch: seniorityMatch,
+	})
+}
+
 // acquireJDText returns the raw JD text, either from the cache (for URLs) or
 // by using the input directly (for text mode) or fetching (for URLs).
 func (p *ApplyPipeline) acquireJDText(ctx context.Context, req ApplyRequest) (string, error) {
