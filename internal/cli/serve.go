@@ -37,13 +37,13 @@ func NewServeCommand() *cobra.Command {
 					mcp.WithString("channel", mcp.Description("Application channel: COLD, REFERRAL, or RECRUITER"), mcp.DefaultString("COLD")),
 					mcp.WithString("accomplishments", mcp.Description("Path to accomplishments doc for tier-2 bullet rewriting (optional)")),
 				),
-				func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+				requireOnboarded(func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 					cfg, deps, err := loadDeps()
 					if err != nil {
 						return errorResult(fmt.Sprintf("load config: %v", err)), nil
 					}
 					return HandleGetScoreWithConfig(ctx, &req, &deps, cfg), nil
-				},
+				}),
 			)
 
 			srv.AddTool(
