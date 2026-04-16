@@ -143,6 +143,7 @@ func InitializeScenario(ctx *godog.ScenarioContext) {
 	ctx.When(`^the best resume score is < (\d+)$`, s.assertScoreBelowThreshold)
 	ctx.When(`^Claude invokes load_jd with raw job description text$`, s.mcpLoadJDText)
 	ctx.When(`^Claude invokes load_jd and submit_keywords for scoring$`, s.mcpLoadJDAndSubmitKeywords)
+	ctx.When(`^Claude invokes load_jd, submit_keywords, and submit_tailor_t1$`, s.mcpLoadJDSubmitKeywordsAndT1)
 	ctx.When(`^Claude invokes load_jd with both url and text arguments$`, s.mcpLoadJDBothArgs)
 	ctx.When(`^Claude invokes load_jd with neither url nor text$`, s.mcpLoadJDNoArgs)
 	ctx.When(`^Claude invokes submit_keywords with a nonexistent session$`, s.mcpSubmitKeywordsMissingSession)
@@ -205,4 +206,5 @@ func InitializeScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the result indicates the job description was loaded from cache$`, s.assertJDLoadedFromCache)
 	ctx.Then(`^go-apply returns a session_id and jd_text for keyword extraction$`, s.assertLoadJDResponse)
 	ctx.Then(`^go-apply returns a JSON result with scores and best_resume$`, s.assertSubmitKeywordsResponse)
+	ctx.Then(`^go-apply returns a new score after T1 tailoring$`, s.assertT1TailoringResponse)
 }

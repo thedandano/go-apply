@@ -141,6 +141,11 @@ Feature: Job Application Workflow
     When Claude invokes load_jd with neither url nor text
     Then go-apply returns an error: "exactly one of jd_url or jd_raw_text is required"
 
+  @mcp
+  Scenario: T1 tailoring injects skills and rescores
+    When Claude invokes load_jd, submit_keywords, and submit_tailor_t1
+    Then go-apply returns a new score after T1 tailoring
+
   # ─────────────────────────────────────────────────────────────────────────────
   # CLI-specific invocation
   # ─────────────────────────────────────────────────────────────────────────────

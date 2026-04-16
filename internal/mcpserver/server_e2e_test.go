@@ -135,13 +135,15 @@ func TestServerDispatch_ToolsRegistered(t *testing.T) {
 	}
 
 	want := map[string]bool{
-		"load_jd":         false,
-		"submit_keywords": false,
-		"finalize":        false,
-		"onboard_user":    false,
-		"add_resume":      false,
-		"update_config":   false,
-		"get_config":      false,
+		"load_jd":          false,
+		"submit_keywords":  false,
+		"submit_tailor_t1": false,
+		"submit_tailor_t2": false,
+		"finalize":         false,
+		"onboard_user":     false,
+		"add_resume":       false,
+		"update_config":    false,
+		"get_config":       false,
 	}
 	for _, tool := range result.Tools {
 		want[tool.Name] = true
