@@ -341,8 +341,9 @@ func (p *ApplyPipeline) ScoreResumes(ctx context.Context, jd *model.JDData, cfg 
 	}, nil
 }
 
-// RescoreResume scores a single resume text against a JD, used after mechanical tailoring.
-func (p *ApplyPipeline) RescoreResume(_ context.Context, resumeText, resumeLabel string, jd *model.JDData, cfg *config.Config) (model.ScoreResult, error) {
+// ScoreResume scores a single resume text against a JD. It is a pure function:
+// no I/O, no side effects — only the scorer is called.
+func (p *ApplyPipeline) ScoreResume(_ context.Context, resumeText, resumeLabel string, jd *model.JDData, cfg *config.Config) (model.ScoreResult, error) {
 	seniorityMatch := resolveSeniorityMatch(cfg.DefaultSeniority, jd)
 	return p.scorer.Score(&model.ScorerInput{
 		ResumeText:     resumeText,
@@ -519,19 +520,9 @@ func (p *ApplyPipeline) scoreResumes(
 			continue
 		}
 
-		seniorityMatch := resolveSeniorityMatch(cfg.DefaultSeniority, jd)
-
 		// ReferenceData is intentionally omitted — scoring uses raw resume text only.
 		// Profile bank retrieval happens at tailoring time, not scoring time.
-		sr, err := p.scorer.Score(&model.ScorerInput{
-			ResumeText:     text,
-			ResumeLabel:    r.Label,
-			ResumePath:     r.Path,
-			JD:             *jd,
-			CandidateYears: cfg.YearsOfExperience,
-			RequiredYears:  jd.RequiredYears,
-			SeniorityMatch: seniorityMatch,
-		})
+		sr, err := p.ScoreResume(ctx, text, r.Label, jd, cfg)
 		if err != nil {
 			slog.WarnContext(ctx, "scoring failed — skipping resume", "label", r.Label, "error", err)
 			skipped = append(skipped, model.RiskWarning{
