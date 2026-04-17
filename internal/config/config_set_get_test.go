@@ -101,15 +101,23 @@ func TestSetField_FloatField_InvalidValue(t *testing.T) {
 
 func TestAllKeys_CoversAllFields(t *testing.T) {
 	keys := AllKeys()
-	if len(keys) != 12 {
-		t.Errorf("AllKeys() returned %d keys, want 12", len(keys))
+	if len(keys) != 14 {
+		t.Errorf("AllKeys() returned %d keys, want 14", len(keys))
 	}
 
 	// Each key must be settable and gettable on a zero-value Config.
 	c := &Config{}
+	setValues := map[string]string{
+		"log_level": "info",
+		"verbose":   "false",
+	}
 	for _, k := range keys {
-		if err := c.SetField(k, "0"); err != nil {
-			t.Errorf("SetField(%q, '0') failed: %v", k, err)
+		v := "0"
+		if sv, ok := setValues[k]; ok {
+			v = sv
+		}
+		if err := c.SetField(k, v); err != nil {
+			t.Errorf("SetField(%q, %q) failed: %v", k, v, err)
 		}
 		if _, err := c.GetField(k); err != nil {
 			t.Errorf("GetField(%q) failed: %v", k, err)

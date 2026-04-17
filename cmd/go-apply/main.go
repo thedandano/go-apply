@@ -28,24 +28,22 @@ func main() {
 }
 
 func run() int {
-	logDir := config.LogDir()
-
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "config load: %v\n", err)
-		// Continue with defaults; CLI will validate later if needed
 		cfg = &config.Config{}
 	}
 
 	level := cfg.ResolveLogLevel()
-	log, cleanup, err := logger.New(logger.Options{
-		LogDir:      logDir,
+	logger.SetVerbose(cfg.Verbose)
+
+	log, cleanup, logErr := logger.New(logger.Options{
+		LogDir:      config.LogDir(),
 		FileLevel:   level,
-		StderrLevel: slog.LevelWarn,
+		StderrLevel: level,
 	})
-	if err != nil {
-		// New() only returns nil errors per API contract; this is a safeguard.
-		fmt.Fprintf(os.Stderr, "logger init: %v\n", err)
+	if logErr != nil {
+		fmt.Fprintf(os.Stderr, "logger init: %v\n", logErr)
 	}
 	defer cleanup()
 

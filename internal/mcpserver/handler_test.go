@@ -287,6 +287,7 @@ func TestHandleUpdateConfig_UnknownKey_ReturnsError(t *testing.T) {
 }
 
 func TestHandleUpdateConfig_APIKey_ResponseRedacted(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	req := callToolRequest("update_config", map[string]any{
 		"key":   "embedder.api_key",
 		"value": "sk-super-secret",

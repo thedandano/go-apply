@@ -364,9 +364,9 @@ func TestNextActionAfterT1(t *testing.T) {
 		want  string
 	}{
 		{0.0, "tailor_t2"},
-		{0.69, "tailor_t2"},
-		{0.70, "cover_letter"},
-		{1.0, "cover_letter"},
+		{69.9, "tailor_t2"},
+		{70.0, "cover_letter"},
+		{100.0, "cover_letter"},
 	}
 	for _, c := range cases {
 		got := mcpserver.NextActionAfterT1(c.score)
@@ -621,14 +621,15 @@ func TestNextActionFromScore(t *testing.T) {
 		want  string
 	}{
 		{0.0, "advise_skip"},
-		{0.30, "advise_skip"},
-		{0.39, "advise_skip"},
-		{0.40, "tailor_t1"},
-		{0.55, "tailor_t1"},
-		{0.69, "tailor_t1"},
-		{0.70, "cover_letter"},
-		{0.90, "cover_letter"},
-		{1.0, "cover_letter"},
+		{30.0, "advise_skip"},
+		{39.9, "advise_skip"},
+		{40.0, "tailor_t1"},
+		{49.8, "tailor_t1"}, // the reported misfire: 49.8/100 must be tailor_t1
+		{55.0, "tailor_t1"},
+		{69.9, "tailor_t1"},
+		{70.0, "cover_letter"},
+		{90.0, "cover_letter"},
+		{100.0, "cover_letter"},
 	}
 	for _, c := range cases {
 		got := mcpserver.NextActionFromScore(c.score)
