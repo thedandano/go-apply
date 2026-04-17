@@ -227,7 +227,7 @@ func TestServerDispatch_GetConfig_ReturnsMCPKeys(t *testing.T) {
 
 	raw := callTool(t, cl, "get_config", nil)
 
-	var fields map[string]string
+	var fields map[string]any
 	if err := json.Unmarshal([]byte(raw), &fields); err != nil {
 		t.Fatalf("unmarshal: %v — raw: %s", err, raw)
 	}
@@ -262,7 +262,7 @@ func TestServerDispatch_UpdateConfig_PersistsField(t *testing.T) {
 	}
 
 	configRaw := callTool(t, cl, "get_config", nil)
-	var fields map[string]string
+	var fields map[string]any
 	if err := json.Unmarshal([]byte(configRaw), &fields); err != nil {
 		t.Fatalf("unmarshal get_config: %v — raw: %s", err, configRaw)
 	}
