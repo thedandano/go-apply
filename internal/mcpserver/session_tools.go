@@ -69,6 +69,7 @@ func HandleLoadJDWithConfig(ctx context.Context, req *mcp.CallToolRequest, deps 
 	sess := sessions.Create(jdText)
 	sess.URL = jdURL
 	sess.IsText = isText
+	logger.Banner(ctx, slog.Default(), "Session", sess.ID)
 
 	type loadJDData struct {
 		JDText string `json:"jd_text"`
@@ -144,6 +145,7 @@ func HandleSubmitKeywordsWithConfig(ctx context.Context, req *mcp.CallToolReques
 	deps.Presenter = pres
 	pl := pipeline.NewApplyPipeline(deps)
 
+	logger.Banner(ctx, slog.Default(), "Score", "Initial")
 	scored, err := pl.ScoreResumes(ctx, &jd, cfg)
 	if err != nil {
 		slog.ErrorContext(ctx, "submit_keywords: score failed", "session_id", sessionID, "error", err)
@@ -399,10 +401,12 @@ func HandleSubmitTailorT1WithConfig(ctx context.Context, req *mcp.CallToolReques
 	deps.Presenter = pres
 	pl := pipeline.NewApplyPipeline(deps)
 
+	logger.Banner(ctx, slog.Default(), "Tailor", "T1")
 	tailored, addedKeywords := tailor.AddKeywordsToSkillsSection(baseText, skillAdds)
 	sess.TailoredText = tailored
 	sess.State = stateT1Applied
 
+	logger.Banner(ctx, slog.Default(), "Score", "After T1")
 	newScore, err := pl.RescoreResume(ctx, tailored, sess.ScoreResult.BestLabel, &sess.JD, cfg)
 	if err != nil {
 		slog.ErrorContext(ctx, "submit_tailor_t1: rescore failed", "session_id", sessionID, "error", err)
@@ -506,10 +510,12 @@ func HandleSubmitTailorT2WithConfig(ctx context.Context, req *mcp.CallToolReques
 	deps.Presenter = pres
 	pl := pipeline.NewApplyPipeline(deps)
 
+	logger.Banner(ctx, slog.Default(), "Tailor", "T2")
 	tailored, substitutionsMade := tailor.ApplyBulletRewrites(baseText, rewrites)
 	sess.TailoredText = tailored
 	sess.State = stateT2Applied
 
+	logger.Banner(ctx, slog.Default(), "Score", "After T2")
 	newScore, err := pl.RescoreResume(ctx, tailored, sess.ScoreResult.BestLabel, &sess.JD, cfg)
 	if err != nil {
 		slog.ErrorContext(ctx, "submit_tailor_t2: rescore failed", "session_id", sessionID, "error", err)
