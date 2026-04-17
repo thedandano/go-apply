@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -12,6 +14,7 @@ import (
 	"github.com/thedandano/go-apply/internal/config"
 	"github.com/thedandano/go-apply/internal/model"
 	"github.com/thedandano/go-apply/internal/port"
+	"github.com/thedandano/go-apply/internal/repository/fs"
 	"github.com/thedandano/go-apply/internal/service/llm"
 	"github.com/thedandano/go-apply/internal/service/onboarding"
 )
@@ -100,6 +103,18 @@ func HandleUpdateConfig(_ context.Context, req *mcp.CallToolRequest, cfg *config
 // Only MCP-relevant keys are included; orchestrator keys are excluded because
 // in MCP mode Claude is the orchestrator.
 func HandleGetConfigWith(cfg *config.Config) *mcp.CallToolResult {
+	return HandleGetConfigWithProfileAndFiles(cfg, config.DataDir())
+}
+
+// HandleGetConfigWithProfileAndFiles renders the config plus profile status as redacted JSON.
+// This is the full implementation; HandleGetConfigWith is a convenience wrapper.
+// Only MCP-relevant keys are included; orchestrator keys are excluded because
+// in MCP mode Claude is the orchestrator.
+// Exported for testing.
+func HandleGetConfigWithProfileAndFiles(cfg *config.Config, dataDir string) *mcp.CallToolResult {
+	response := make(map[string]interface{}, len(config.MCPKeys())+1)
+
+	// Add config fields
 	fields := make(map[string]string, len(config.MCPKeys()))
 	for _, key := range config.MCPKeys() {
 		value, _ := cfg.GetField(key)
@@ -108,8 +123,59 @@ func HandleGetConfigWith(cfg *config.Config) *mcp.CallToolResult {
 		}
 		fields[key] = value
 	}
-	data, _ := json.Marshal(fields)
+
+	// Merge config fields into response
+	for k, v := range fields {
+		response[k] = v
+	}
+
+	// Derive profile status
+	profileObj := buildProfileStatus(dataDir)
+	response["profile"] = profileObj
+
+	data, _ := json.Marshal(response)
 	return mcp.NewToolResultText(string(data))
+}
+
+// buildProfileStatus derives onboarding status from the data directory.
+// Returns a map with:
+//   - onboarded (bool): true if at least one resume exists
+//   - resumes ([]string): list of resume labels found
+//   - has_skills (bool): true if skills.md exists and is non-empty
+//   - has_accomplishments (bool): true if accomplishments.md exists and is non-empty
+func buildProfileStatus(dataDir string) map[string]interface{} {
+	profileObj := map[string]interface{}{
+		"onboarded":           false,
+		"resumes":             []string{},
+		"has_skills":          false,
+		"has_accomplishments": false,
+	}
+
+	// List resumes
+	resumeRepo := fs.NewResumeRepository(dataDir)
+	resumes, err := resumeRepo.ListResumes()
+	if err == nil && len(resumes) > 0 {
+		profileObj["onboarded"] = true
+		resumeLabels := make([]string, len(resumes))
+		for i, r := range resumes {
+			resumeLabels[i] = r.Label
+		}
+		profileObj["resumes"] = resumeLabels
+	}
+
+	// Check for skills.md
+	skillsPath := filepath.Join(dataDir, "inputs", "skills.md")
+	if info, err := os.Stat(skillsPath); err == nil && info.Size() > 0 {
+		profileObj["has_skills"] = true
+	}
+
+	// Check for accomplishments.md
+	accomplishmentsPath := filepath.Join(dataDir, "inputs", "accomplishments.md")
+	if info, err := os.Stat(accomplishmentsPath); err == nil && info.Size() > 0 {
+		profileObj["has_accomplishments"] = true
+	}
+
+	return profileObj
 }
 
 // newOnboardSvc opens a fresh SQLite profile repository and constructs an
