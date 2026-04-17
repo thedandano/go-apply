@@ -107,65 +107,38 @@ go-apply logs --lines 200
 tail -f ~/.local/state/go-apply/logs/go-apply-$(date +%Y-%m-%d).log | grep ERROR
 ```
 
-### Flags
+### Configuration
 
-These persistent flags apply to every subcommand and must be placed before the subcommand name:
+Log level and verbose mode are set in `~/.config/go-apply/config.yaml`:
 
-| Flag | Shorthand | Description |
-|------|-----------|-------------|
-| `--log-level <level>` | | Set log level: `debug`, `info`, `warn`, `error` |
-| `--debug` | `-v` | Enable debug logging (shorthand for `--log-level=debug`) |
-| `--trace` | | Enable trace logging: debug level + full payload logging |
-
-```bash
-# Debug a single run
-go-apply --debug run --url https://example.com/jobs/123
-
-# Same via shorthand
-go-apply -v run --url https://example.com/jobs/123
-
-# Trace mode (debug + full request/response payloads)
-go-apply --trace run --url https://example.com/jobs/123
-
-# Set level explicitly
-go-apply --log-level=warn run --url https://example.com/jobs/123
+```yaml
+log_level: debug   # debug | info | warn | error (default: info)
+verbose: true      # true = full request/response payloads in logs; false = truncated at 2 KB
 ```
 
-### Environment variables
-
-| Variable | Description |
-|----------|-------------|
-| `GO_APPLY_LOG_LEVEL` | Log level: `debug`, `info`, `warn`, `error` |
-| `GO_APPLY_LOG_VERBOSE` | Any non-empty value enables verbose/trace mode |
+Set them without editing the file directly:
 
 ```bash
-GO_APPLY_LOG_LEVEL=debug go-apply run --url https://example.com/jobs/123
-GO_APPLY_LOG_VERBOSE=1 go-apply run --url https://example.com/jobs/123
+go-apply config set log_level debug
+go-apply config set verbose true
 ```
-
-### Precedence
-
-`--trace` / `--debug` > `--log-level` flag > `GO_APPLY_LOG_LEVEL` env var > config file (`log_level`) > default (`INFO`)
 
 ### MCP server debug logging
 
-To enable debug logs when running as an MCP server, add the `env` block to Claude Code's `settings.json`:
+To enable debug logs when running as an MCP server, set `log_level` in the config file, or pass it via the `env` block in Claude Code's `settings.json` (config file is read on startup):
 
 ```json
 {
   "mcpServers": {
     "go-apply": {
       "command": "go-apply",
-      "args": ["serve"],
-      "env": { "GO_APPLY_LOG_LEVEL": "debug" }
+      "args": ["serve"]
     }
   }
 }
 ```
 
-### Config file fallback
-
-The `log_level` field in `~/.config/go-apply/config.yaml` sets a persistent default without needing a flag or env var each time. Flags and env vars always take precedence.
+Run `go-apply config set log_level debug` once and every invocation — CLI and MCP — picks it up.
 
 ## Commands
 
@@ -260,11 +233,7 @@ The command is idempotent — running it again without `--override` reports "alr
 
 These apply to every subcommand and must come before the subcommand name.
 
-| Flag | Shorthand | Default | Description |
-|------|-----------|---------|-------------|
-| `--log-level <level>` | | `info` | Log level: `debug`, `info`, `warn`, `error` |
-| `--debug` | `-v` | `false` | Enable debug logging (equivalent to `--log-level=debug`) |
-| `--trace` | | `false` | Enable trace logging: debug level + full payload logging |
+There are no persistent global flags. Log level and verbose mode are configured via `go-apply config set` (see [Logging](#logging)).
 
 ### `go-apply run`
 
