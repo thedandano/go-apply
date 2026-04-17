@@ -139,7 +139,7 @@ func Load() (*Config, error) {
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("parse config %s: %w", cfgFile, err)
 	}
-	slog.Info("config loaded", "path", cfgFile, "log_level", cfg.LogLevel, "model", cfg.Orchestrator.Model)
+	slog.Debug("config loaded", "path", cfgFile, "log_level", cfg.LogLevel, "model", cfg.Orchestrator.Model)
 
 	if key := os.Getenv("GO_APPLY_API_KEY"); key != "" {
 		slog.Debug("orchestrator API key overridden by GO_APPLY_API_KEY env var")
