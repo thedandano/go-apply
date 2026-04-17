@@ -196,6 +196,7 @@ func TestNew_StderrRespectsLevel(t *testing.T) {
 
 	// Redirect stderr BEFORE calling logger.New() so the logger captures it
 	os.Stderr = tmpFile
+	t.Cleanup(func() { os.Stderr = origStderr })
 
 	dir := t.TempDir()
 	log, cleanup, _ := logger.New(logger.Options{
@@ -211,8 +212,6 @@ func TestNew_StderrRespectsLevel(t *testing.T) {
 
 	cleanup()
 
-	// Restore stderr AFTER cleanup
-	os.Stderr = origStderr
 	tmpFile.Close()
 
 	// Read captured stderr
@@ -234,11 +233,11 @@ func TestNew_StderrRespectsLevel(t *testing.T) {
 	// Also verify both messages appear in the file log
 	entries, _ := os.ReadDir(dir)
 	if len(entries) == 0 {
-		t.Skip("no log file created")
+		t.Fatalf("no log file created")
 	}
 	fileData, _ := os.ReadFile(filepath.Join(dir, entries[0].Name()))
 	if len(fileData) == 0 {
-		t.Skip("no log output — file may be empty before flush")
+		t.Fatalf("no log output — file may be empty before flush")
 	}
 
 	fileContent := string(fileData)

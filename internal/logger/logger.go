@@ -34,7 +34,9 @@ type Options struct {
 // Fallback: if LogDir is unwritable → stderr-only logger at WARN+, no error returned
 func New(opts Options) (*slog.Logger, func(), error) {
 	if err := os.MkdirAll(opts.LogDir, 0750); err != nil {
-		return stderrOnly(), func() {}, nil
+		log := stderrOnly(opts.StderrLevel)
+		log.Warn("log dir unwritable, falling back to stderr only", "dir", opts.LogDir, "error", err)
+		return log, func() {}, nil
 	}
 
 	// Keep maxLogFiles-1 existing files so the new file below brings the total to maxLogFiles.
@@ -45,7 +47,9 @@ func New(opts Options) (*slog.Logger, func(), error) {
 
 	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600) // #nosec G304 -- logPath built from os.UserHomeDir() + fixed suffix, not user input
 	if err != nil {
-		return stderrOnly(), func() {}, nil
+		log := stderrOnly(opts.StderrLevel)
+		log.Warn("failed to open log file, falling back to stderr only", "path", logPath, "error", err)
+		return log, func() {}, nil
 	}
 
 	log := slog.New(&multiHandler{
@@ -65,9 +69,9 @@ func New(opts Options) (*slog.Logger, func(), error) {
 	return log, func() { once.Do(func() { _ = f.Close() }) }, nil //nolint:gosec // G104: close error in cleanup is non-fatal
 }
 
-func stderrOnly() *slog.Logger {
+func stderrOnly(level slog.Level) *slog.Logger {
 	return slog.New(charmlog.NewWithOptions(os.Stderr, charmlog.Options{
-		Level:           charmlog.WarnLevel,
+		Level:           charmlogLevelFromSlog(level),
 		ReportTimestamp: true,
 		TimeFormat:      "2006-01-02 15:04:05",
 	}))
