@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/thedandano/go-apply/internal/config"
+	"github.com/thedandano/go-apply/internal/debugdump"
+	"github.com/thedandano/go-apply/internal/logger"
 	"github.com/thedandano/go-apply/internal/model"
 	"github.com/thedandano/go-apply/internal/port"
 )
@@ -214,6 +216,12 @@ func rewriteBullets(input *BulletRewriteInput) (string, []model.BulletChange, er
 		// Replace at the known line index — avoids substring collision bugs.
 		lines[b.Index] = rewrittenLine
 		rewroteCount++
+
+		if logger.Verbose() {
+			if diff := debugdump.DiffText("tailor.t2.bullet", originalLine, rewrittenLine); diff != "" {
+				input.Log.DebugContext(input.Ctx, "tailor tier-2 bullet diff", logger.PayloadAttr("diff", diff, true))
+			}
+		}
 	}
 
 	result := strings.Join(lines, "\n")

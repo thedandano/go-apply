@@ -5,6 +5,7 @@ import (
 	"log/slog"
 
 	"github.com/thedandano/go-apply/internal/config"
+	"github.com/thedandano/go-apply/internal/debugdump"
 	"github.com/thedandano/go-apply/internal/logger"
 	"github.com/thedandano/go-apply/internal/model"
 	"github.com/thedandano/go-apply/internal/port"
@@ -43,6 +44,12 @@ func (s *Service) TailorResume(ctx context.Context, input *model.TailorInput) (m
 	s.log.DebugContext(ctx, "tailor tier-1 start", "input_bytes", len(input.ResumeText), "keywords", len(allKeywords))
 	tier1Text, addedKeywords := AddKeywordsToSkillsSection(input.ResumeText, allKeywords)
 	s.log.DebugContext(ctx, "tailor tier-1 end", "output_bytes", len(tier1Text), "added_keywords", len(addedKeywords))
+
+	if logger.Verbose() {
+		if diff := debugdump.DiffSection("tailor.t1.skills", "Skills", input.ResumeText, tier1Text); diff != "" {
+			s.log.DebugContext(ctx, "tailor tier-1 diff", logger.PayloadAttr("diff", diff, true))
+		}
+	}
 
 	result := model.TailorResult{
 		ResumeLabel:   input.Resume.Label,

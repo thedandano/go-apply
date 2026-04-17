@@ -473,6 +473,9 @@ Respond only with valid JSON matching the schema above.`, jdText)
 	}, nil
 }
 
+// Scoring must never hit the profile bank — neither vector nor keyword-fallback
+// retrieval. Retrieval belongs to the tailoring flow.
+
 // scoreResumes scores each resume against the JD, returning the full scores map,
 // the label of the best resume, and its score.
 func (p *ApplyPipeline) scoreResumes(
@@ -495,35 +498,18 @@ func (p *ApplyPipeline) scoreResumes(
 			continue
 		}
 
-		// Augment resume text with profile context before scoring (skipped when Augment is nil).
-		augmented := text
-		var refData *model.ReferenceData
-		if p.augment != nil {
-			var augErr error
-			augmented, refData, augErr = p.augment.AugmentResumeText(ctx, model.AugmentInput{
-				ResumeText: text,
-				RefData:    nil,
-				JDKeywords: append(jd.Required, jd.Preferred...),
-			})
-			if augErr != nil {
-				logger.Decision(ctx, slog.Default(), "resume.augment", "fallback", "augmentation failed", slog.String("label", r.Label))
-				slog.WarnContext(ctx, "augmentation failed — using original text", "label", r.Label, "error", augErr)
-				augmented = text
-				refData = nil
-			}
-		}
-
 		seniorityMatch := resolveSeniorityMatch(cfg.DefaultSeniority, jd)
 
+		// ReferenceData is intentionally omitted — scoring uses raw resume text only.
+		// Profile bank retrieval happens at tailoring time, not scoring time.
 		sr, err := p.scorer.Score(&model.ScorerInput{
-			ResumeText:     augmented,
+			ResumeText:     text,
 			ResumeLabel:    r.Label,
 			ResumePath:     r.Path,
 			JD:             *jd,
 			CandidateYears: cfg.YearsOfExperience,
 			RequiredYears:  jd.RequiredYears,
 			SeniorityMatch: seniorityMatch,
-			ReferenceData:  refData,
 		})
 		if err != nil {
 			slog.WarnContext(ctx, "scoring failed — skipping resume", "label", r.Label, "error", err)
@@ -642,12 +628,24 @@ func (p *ApplyPipeline) runTailorStep(
 
 	scoreBefore := result.Scores[result.BestResume]
 
+	// Retrieve relevant profile chunks for missing keywords before tailoring.
+	var suggestions model.TailorSuggestions
+	if p.augment != nil {
+		allKeywords := append(jd.Required, jd.Preferred...) //nolint:gocritic // fresh slice intentional
+		var sErr error
+		suggestions, sErr = p.augment.SuggestForKeywords(ctx, allKeywords)
+		if sErr != nil {
+			slog.WarnContext(ctx, "runTailorStep: SuggestForKeywords failed — tailoring without suggestions", "error", sErr)
+		}
+	}
+
 	tailorResult, err := p.tailor.TailorResume(ctx, &model.TailorInput{
 		Resume:              bestFile,
 		ResumeText:          resumeText,
 		JD:                  *jd,
 		ScoreBefore:         scoreBefore,
 		AccomplishmentsText: req.AccomplishmentsText,
+		Suggestions:         suggestions,
 		Options: model.TailorOptions{
 			MaxTier2BulletRewrites: p.defaults.Tailor.MaxTier2BulletRewrites,
 		},

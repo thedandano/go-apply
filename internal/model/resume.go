@@ -49,5 +49,6 @@ type TailorInput struct {
 	ScoreBefore         ScoreResult
 	AccomplishmentsText string
 	SkillsRefText       string
+	Suggestions         TailorSuggestions // profile chunk matches for T1/T2 relevance
 	Options             TailorOptions
 }

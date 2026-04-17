@@ -105,6 +105,16 @@ func NewServer() *server.MCPServer {
 	)
 
 	srv.AddTool(
+		mcp.NewTool("suggest_tailoring",
+			mcp.WithDescription("Optional diagnostic: inspect what the profile bank found for missing JD keywords. Call after submit_keywords to see retrieval matches before tailoring. T1 and T2 retrieve internally — this result is for transparency only."),
+			mcp.WithString("session_id", mcp.Description("Session ID from load_jd"), mcp.Required()),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return HandleSuggestTailoring(ctx, &req), nil
+		},
+	)
+
+	srv.AddTool(
 		mcp.NewTool("submit_tailor_t1",
 			mcp.WithDescription("Apply T1 tailoring: inject skill keywords into the resume's Skills section and rescore. Call after submit_keywords when next_action is 'tailor_t1'. Provide skill_adds as a JSON array of strings."),
 			mcp.WithString("session_id", mcp.Description("Session ID from load_jd"), mcp.Required()),

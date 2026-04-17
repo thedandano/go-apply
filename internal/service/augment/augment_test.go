@@ -577,3 +577,138 @@ func TestNew_PanicsOnNilEmbedder(t *testing.T) {
 		testLogger(),
 	)
 }
+
+// --- SuggestForKeywords tests ---
+
+func TestSuggestForKeywords_ReturnsNilForEmptyKeywords(t *testing.T) {
+	t.Parallel()
+
+	svc := augment.New(
+		&stubProfileRepository{},
+		newStubCache(),
+		&stubEmbeddingClient{vector: fakeVector()},
+		nil, // no LLM needed
+		testDefaults(),
+		testLogger(),
+	)
+
+	suggestions, err := svc.SuggestForKeywords(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if suggestions != nil {
+		t.Errorf("expected nil suggestions for empty keywords, got: %v", suggestions)
+	}
+}
+
+func TestSuggestForKeywords_VectorPath_ReturnsSuggestions(t *testing.T) {
+	t.Parallel()
+
+	svc := augment.New(
+		&stubProfileRepository{results: []model.ProfileEmbedding{aboveThresholdEmbedding()}},
+		newStubCache(),
+		&stubEmbeddingClient{vector: fakeVector()},
+		nil, // no LLM needed
+		testDefaults(),
+		testLogger(),
+	)
+
+	suggestions, err := svc.SuggestForKeywords(context.Background(), []string{"distributed"})
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if len(suggestions) == 0 {
+		t.Fatal("expected suggestions, got none")
+	}
+	chunks, ok := suggestions["distributed"]
+	if !ok || len(chunks) == 0 {
+		t.Error("expected suggestions for keyword 'distributed'")
+	}
+	if chunks[0].Similarity == 0 {
+		t.Error("expected non-zero similarity for vector match")
+	}
+	if chunks[0].Text == "" {
+		t.Error("expected non-empty chunk text")
+	}
+}
+
+func TestSuggestForKeywords_BelowThreshold_NoSuggestions(t *testing.T) {
+	t.Parallel()
+
+	below := model.ProfileEmbedding{
+		ID: 1, SourceDoc: "resume:other", Term: "irrelevant", Weight: 0.1,
+	}
+	docs := []model.ProfileDocument{} // no keyword-fallback docs either
+	svc := augment.New(
+		&stubProfileRepository{results: []model.ProfileEmbedding{below}, docs: docs},
+		newStubCache(),
+		&stubEmbeddingClient{vector: fakeVector()},
+		nil,
+		testDefaults(),
+		testLogger(),
+	)
+
+	suggestions, err := svc.SuggestForKeywords(context.Background(), []string{"golang"})
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	// suggestions map may be non-nil but the keyword entry should be empty
+	if len(suggestions["golang"]) != 0 {
+		t.Errorf("expected no suggestions for keyword below threshold, got: %v", suggestions["golang"])
+	}
+}
+
+func TestSuggestForKeywords_KeywordFallback_WhenNoVectorMatches(t *testing.T) {
+	t.Parallel()
+
+	// embedder always fails — forces keyword fallback
+	embedder := &stubEmbeddingClient{err: errors.New("embedding unavailable")}
+	docs := []model.ProfileDocument{
+		{ID: 1, Source: "resume:backend", Text: "Led golang microservices deployment"},
+	}
+	svc := augment.New(
+		&stubProfileRepository{docs: docs},
+		newStubCache(),
+		embedder,
+		nil,
+		testDefaults(),
+		testLogger(),
+	)
+
+	suggestions, err := svc.SuggestForKeywords(context.Background(), []string{"golang"})
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	chunks := suggestions["golang"]
+	if len(chunks) == 0 {
+		t.Fatal("expected keyword-fallback suggestions for 'golang'")
+	}
+	if chunks[0].Similarity != 0 {
+		t.Error("expected zero similarity for keyword-fallback path")
+	}
+	if chunks[0].Text == "" {
+		t.Error("expected non-empty chunk text from keyword fallback")
+	}
+}
+
+func TestSuggestForKeywords_NoLLMCalled(t *testing.T) {
+	t.Parallel()
+
+	llm := &stubLLMClient{response: "should not be called"}
+	svc := augment.New(
+		&stubProfileRepository{results: []model.ProfileEmbedding{aboveThresholdEmbedding()}},
+		newStubCache(),
+		&stubEmbeddingClient{vector: fakeVector()},
+		llm,
+		testDefaults(),
+		testLogger(),
+	)
+
+	_, err := svc.SuggestForKeywords(context.Background(), []string{"distributed"})
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if llm.calls != 0 {
+		t.Errorf("SuggestForKeywords must never call LLM, got %d calls", llm.calls)
+	}
+}
