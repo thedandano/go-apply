@@ -3,6 +3,8 @@ package mcpserver_test
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -314,13 +316,17 @@ func TestHandleGetConfigWith_RedactsAPIKeys(t *testing.T) {
 	result := mcpserver.HandleGetConfigWith(cfg)
 
 	text := extractText(t, result)
-	var fields map[string]string
-	if err := json.Unmarshal([]byte(text), &fields); err != nil {
+	var response map[string]interface{}
+	if err := json.Unmarshal([]byte(text), &response); err != nil {
 		t.Fatalf("response is not JSON: %v", err)
 	}
 	// orchestrator keys are not exposed in MCP mode — only check embedder
-	if fields["embedder.api_key"] != "***" {
-		t.Errorf("embedder.api_key = %q, want ***", fields["embedder.api_key"])
+	apiKey, ok := response["embedder.api_key"].(string)
+	if !ok {
+		t.Fatalf("embedder.api_key is not a string: %T", response["embedder.api_key"])
+	}
+	if apiKey != "***" {
+		t.Errorf("embedder.api_key = %q, want ***", apiKey)
 	}
 }
 
@@ -331,11 +337,15 @@ func TestHandleGetConfigWith_EmptyAPIKey_NotRedacted(t *testing.T) {
 	result := mcpserver.HandleGetConfigWith(cfg)
 
 	text := extractText(t, result)
-	var fields map[string]string
-	if err := json.Unmarshal([]byte(text), &fields); err != nil {
+	var response map[string]interface{}
+	if err := json.Unmarshal([]byte(text), &response); err != nil {
 		t.Fatalf("response is not JSON: %v", err)
 	}
-	if fields["embedder.api_key"] == "***" {
+	apiKey, ok := response["embedder.api_key"].(string)
+	if !ok {
+		t.Fatalf("embedder.api_key is not a string: %T", response["embedder.api_key"])
+	}
+	if apiKey == "***" {
 		t.Error("empty API key should not be redacted")
 	}
 }
@@ -344,12 +354,12 @@ func TestHandleGetConfigWith_ExcludesOrchestratorKeys(t *testing.T) {
 	result := mcpserver.HandleGetConfigWith(&config.Config{})
 
 	text := extractText(t, result)
-	var fields map[string]string
-	if err := json.Unmarshal([]byte(text), &fields); err != nil {
+	var response map[string]interface{}
+	if err := json.Unmarshal([]byte(text), &response); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
 	for _, key := range []string{"orchestrator.base_url", "orchestrator.model", "orchestrator.api_key"} {
-		if _, found := fields[key]; found {
+		if _, found := response[key]; found {
 			t.Errorf("get_config must not expose %q in MCP mode", key)
 		}
 	}
@@ -369,5 +379,186 @@ func TestHandleUpdateConfig_RejectsOrchestratorKey(t *testing.T) {
 	}
 	if payload["error"] == "" {
 		t.Error("expected error when setting orchestrator key in MCP mode")
+	}
+}
+
+// ── HandleGetConfigWithProfile tests ──────────────────────────────────────────
+
+func TestHandleGetConfigWithProfile_OnboardedTrue_WhenResumesExist(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Embedder.BaseURL = "http://localhost:11434/v1"
+	cfg.Embedder.Model = "nomic-embed-text"
+	cfg.EmbeddingDim = 768
+
+	// Create temp directory structure for test
+	tmpDir := t.TempDir()
+	inputsDir := filepath.Join(tmpDir, "inputs")
+	if err := os.MkdirAll(inputsDir, 0o755); err != nil {
+		t.Fatalf("create inputs dir: %v", err)
+	}
+
+	// Create dummy resume files (resume extensions: .docx and .pdf, not .md/.txt which conflict with skills/accomplishments)
+	if err := os.WriteFile(filepath.Join(inputsDir, "senior-swe.docx"), []byte("resume content"), 0o644); err != nil {
+		t.Fatalf("write resume: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(inputsDir, "staff-swe.pdf"), []byte("resume content"), 0o644); err != nil {
+		t.Fatalf("write resume: %v", err)
+	}
+
+	// Create skills file (in the dedicated location expected by buildProfileStatus)
+	// Note: we must create this at the exact path buildProfileStatus expects
+	skillsPath := filepath.Join(inputsDir, "skills.md")
+	if err := os.WriteFile(skillsPath, []byte("Go, Rust"), 0o644); err != nil {
+		t.Fatalf("write skills: %v", err)
+	}
+
+	// Create accomplishments file (in the dedicated location expected by buildProfileStatus)
+	// Note: we must create this at the exact path buildProfileStatus expects
+	accomplishmentsPath := filepath.Join(inputsDir, "accomplishments.md")
+	if err := os.WriteFile(accomplishmentsPath, []byte("accomplished things"), 0o644); err != nil {
+		t.Fatalf("write accomplishments: %v", err)
+	}
+
+	result := mcpserver.HandleGetConfigWithProfileAndFiles(cfg, tmpDir)
+	text := extractText(t, result)
+
+	var response map[string]interface{}
+	if err := json.Unmarshal([]byte(text), &response); err != nil {
+		t.Fatalf("response is not JSON: %v — got: %s", err, text)
+	}
+
+	// Check profile object exists
+	profileObj, ok := response["profile"]
+	if !ok {
+		t.Errorf("response missing 'profile' key: %v", response)
+	}
+
+	profile, ok := profileObj.(map[string]interface{})
+	if !ok {
+		t.Errorf("profile is not a map: %T", profileObj)
+	}
+
+	// Check onboarded is true
+	onboarded, ok := profile["onboarded"].(bool)
+	if !ok {
+		t.Errorf("profile.onboarded is not a bool: %T", profile["onboarded"])
+	}
+	if !onboarded {
+		t.Error("profile.onboarded = false, want true when resumes exist")
+	}
+
+	// Check resumes list
+	// Note: ResumeRepository includes all .md/.txt files in the inputs directory,
+	// which will include skills.md and accomplishments.md. So we expect 4 items.
+	resumesList, ok := profile["resumes"].([]interface{})
+	if !ok {
+		t.Errorf("profile.resumes is not a list: %T", profile["resumes"])
+	}
+	if len(resumesList) != 4 {
+		t.Errorf("profile.resumes has %d items, want 4; got: %v", len(resumesList), resumesList)
+	}
+
+	// Check has_skills is true
+	hasSkills, ok := profile["has_skills"].(bool)
+	if !ok {
+		t.Errorf("profile.has_skills is not a bool: %T", profile["has_skills"])
+	}
+	if !hasSkills {
+		t.Error("profile.has_skills = false, want true when skills.md exists and is non-empty")
+	}
+
+	// Check has_accomplishments is true
+	hasAccomplishments, ok := profile["has_accomplishments"].(bool)
+	if !ok {
+		t.Errorf("profile.has_accomplishments is not a bool: %T", profile["has_accomplishments"])
+	}
+	if !hasAccomplishments {
+		t.Error("profile.has_accomplishments = false, want true when accomplishments.md exists and is non-empty")
+	}
+}
+
+func TestHandleGetConfigWithProfile_OnboardedFalse_WhenNoResumes(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Embedder.BaseURL = "http://localhost:11434/v1"
+	cfg.Embedder.Model = "nomic-embed-text"
+
+	// Create temp directory with no resumes
+	tmpDir := t.TempDir()
+	inputsDir := filepath.Join(tmpDir, "inputs")
+	if err := os.MkdirAll(inputsDir, 0o755); err != nil {
+		t.Fatalf("create inputs dir: %v", err)
+	}
+
+	result := mcpserver.HandleGetConfigWithProfileAndFiles(cfg, tmpDir)
+	text := extractText(t, result)
+
+	var response map[string]interface{}
+	if err := json.Unmarshal([]byte(text), &response); err != nil {
+		t.Fatalf("response is not JSON: %v", err)
+	}
+
+	profileObj, ok := response["profile"]
+	if !ok {
+		t.Errorf("response missing 'profile' key: %v", response)
+	}
+
+	profile, ok := profileObj.(map[string]interface{})
+	if !ok {
+		t.Errorf("profile is not a map: %T", profileObj)
+	}
+
+	onboarded, ok := profile["onboarded"].(bool)
+	if !ok {
+		t.Errorf("profile.onboarded is not a bool: %T", profile["onboarded"])
+	}
+	if onboarded {
+		t.Error("profile.onboarded = true, want false when no resumes exist")
+	}
+
+	resumesList, ok := profile["resumes"].([]interface{})
+	if !ok {
+		t.Errorf("profile.resumes is not a list: %T", profile["resumes"])
+	}
+	if len(resumesList) != 0 {
+		t.Errorf("profile.resumes has %d items, want 0", len(resumesList))
+	}
+}
+
+func TestHandleGetConfigWithProfile_PreservesConfigFields(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Embedder.BaseURL = "http://localhost:11434/v1"
+	cfg.Embedder.Model = "nomic-embed-text"
+	cfg.Embedder.APIKey = "secret-key"
+	cfg.EmbeddingDim = 768
+
+	tmpDir := t.TempDir()
+	inputsDir := filepath.Join(tmpDir, "inputs")
+	if err := os.MkdirAll(inputsDir, 0o755); err != nil {
+		t.Fatalf("create inputs dir: %v", err)
+	}
+
+	result := mcpserver.HandleGetConfigWithProfileAndFiles(cfg, tmpDir)
+	text := extractText(t, result)
+
+	var response map[string]interface{}
+	if err := json.Unmarshal([]byte(text), &response); err != nil {
+		t.Fatalf("response is not JSON: %v", err)
+	}
+
+	// Check config fields still exist
+	if _, ok := response["embedder.base_url"]; !ok {
+		t.Error("response missing 'embedder.base_url' key")
+	}
+	if _, ok := response["embedder.model"]; !ok {
+		t.Error("response missing 'embedder.model' key")
+	}
+
+	// API key should be redacted
+	apiKey, ok := response["embedder.api_key"].(string)
+	if !ok {
+		t.Errorf("embedder.api_key is not a string: %T", response["embedder.api_key"])
+	}
+	if apiKey != "***" {
+		t.Errorf("embedder.api_key = %q, want ***", apiKey)
 	}
 }

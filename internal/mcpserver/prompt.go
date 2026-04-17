@@ -28,7 +28,8 @@ You handle reasoning: extract keywords from JD text, interpret scores, write cov
 ### Step 1 — Verify profile
 Call get_config. Confirm embedder.base_url, embedder.model, and embedding_dim are set.
 Do NOT ask the user for orchestrator config — it is irrelevant in MCP mode.
-If the user has not onboarded yet, call onboard_user first.
+Check profile.onboarded: if true, the user is already onboarded — do NOT call onboard_user unless the user explicitly asks to add or update their resume, skills, or accomplishments.
+Only call onboard_user when profile.onboarded is false.
 
 ### Step 2 — load_jd
 Provide jd_url OR jd_raw_text (not both).
