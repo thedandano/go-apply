@@ -156,12 +156,31 @@ func HandleSubmitKeywordsWithConfig(ctx context.Context, req *mcp.CallToolReques
 
 	nextAction := NextActionFromScore(scored.BestScore)
 
+	type extractedKeywordsData struct {
+		Title         string               `json:"title"`
+		Company       string               `json:"company"`
+		Required      []string             `json:"required"`
+		Preferred     []string             `json:"preferred,omitempty"`
+		Location      string               `json:"location,omitempty"`
+		Seniority     model.SeniorityLevel `json:"seniority,omitempty"`
+		RequiredYears float64              `json:"required_years,omitempty"`
+	}
 	type submitKeywordsData struct {
-		Scores     map[string]model.ScoreResult `json:"scores"`
-		BestResume string                       `json:"best_resume"`
-		BestScore  float64                      `json:"best_score"`
+		ExtractedKeywords extractedKeywordsData        `json:"extracted_keywords"`
+		Scores            map[string]model.ScoreResult `json:"scores"`
+		BestResume        string                       `json:"best_resume"`
+		BestScore         float64                      `json:"best_score"`
 	}
 	resultData := submitKeywordsData{
+		ExtractedKeywords: extractedKeywordsData{
+			Title:         jd.Title,
+			Company:       jd.Company,
+			Required:      jd.Required,
+			Preferred:     jd.Preferred,
+			Location:      jd.Location,
+			Seniority:     jd.Seniority,
+			RequiredYears: jd.RequiredYears,
+		},
 		Scores:     scored.Scores,
 		BestResume: scored.BestLabel,
 		BestScore:  scored.BestScore,
