@@ -33,3 +33,31 @@ func TestWorkflowPromptHandler_ContainsKeyWorkflowConcepts(t *testing.T) {
 		}
 	}
 }
+
+func TestWorkflowPromptHandler_ContainsTailorTools(t *testing.T) {
+	result, _ := mcpserver.HandleWorkflowPrompt(context.Background(), mcp.GetPromptRequest{})
+	text := result.Messages[0].Content.(mcp.TextContent).Text
+
+	for _, want := range []string{"submit_tailor_t1", "submit_tailor_t2"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("workflow prompt missing tailor tool %q", want)
+		}
+	}
+}
+
+func TestWorkflowPromptHandler_ScoreThresholdsAre0To100(t *testing.T) {
+	result, _ := mcpserver.HandleWorkflowPrompt(context.Background(), mcp.GetPromptRequest{})
+	text := result.Messages[0].Content.(mcp.TextContent).Text
+
+	for _, want := range []string{"70", "/100"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("workflow prompt missing score scale indicator %q", want)
+		}
+	}
+	// Must not use 0–1 fractional thresholds.
+	for _, bad := range []string{"≥ 0.70", "≥ 0.40", "< 0.40", "0.40–0.69"} {
+		if strings.Contains(text, bad) {
+			t.Errorf("workflow prompt contains fractional threshold %q — should use 0–100 scale", bad)
+		}
+	}
+}
