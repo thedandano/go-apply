@@ -656,3 +656,92 @@ func TestNewRegistrar_UnknownAgent(t *testing.T) {
 		t.Errorf("error message %q should contain 'valid agents are claude, openclaw, hermes'", err.Error())
 	}
 }
+
+// ---- RegisterForce tests ----------------------------------------------------
+
+func TestClaudeBackend_RegisterForce_OverwritesExisting(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	ops := newTestOps(dir)
+
+	// Pre-create .mcp.json with stale command path.
+	pluginDir := filepath.Join(dir, ".claude", "plugins", "go-apply")
+	mcpJSONPath := filepath.Join(pluginDir, ".mcp.json")
+	writeJSON(t, mcpJSONPath, map[string]any{
+		"go-apply": map[string]any{"command": "/old/path/go-apply", "args": []string{"serve"}},
+	})
+
+	b := newClaudeBackend(ops)
+	res, err := b.RegisterForce("go-apply", testEntry)
+	if err != nil {
+		t.Fatalf("RegisterForce: %v", err)
+	}
+	if res.Action != port.ActionCreated {
+		t.Errorf("Action = %v, want ActionCreated", res.Action)
+	}
+
+	// Verify .mcp.json was overwritten with the new binary path.
+	mcpData := readJSON(t, mcpJSONPath)
+	server, ok := mcpData["go-apply"].(map[string]any)
+	if !ok {
+		t.Fatalf(".mcp.json missing go-apply key after RegisterForce")
+	}
+	if server["command"] != "/usr/local/bin/go-apply" {
+		t.Errorf("command = %q, want /usr/local/bin/go-apply", server["command"])
+	}
+}
+
+func TestOpenclawBackend_RegisterForce_OverwritesExisting(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	ops := newTestOps(dir)
+	configPath := filepath.Join(dir, ".openclaw", "openclaw.json")
+	writeJSON(t, configPath, map[string]any{
+		"mcp": map[string]any{
+			"servers": map[string]any{
+				"go-apply": map[string]any{"command": "go-apply", "args": []string{"serve"}},
+			},
+		},
+	})
+
+	b := newOpenclawBackend(ops)
+	res, err := b.RegisterForce("go-apply", testEntry)
+	if err != nil {
+		t.Fatalf("RegisterForce: %v", err)
+	}
+	// Force write should succeed (not return AlreadyRegistered).
+	if res.Action == port.ActionAlreadyRegistered {
+		t.Errorf("RegisterForce returned ActionAlreadyRegistered, expected write action")
+	}
+	root := readJSON(t, configPath)
+	leaf := navJSON(t, root, []string{"mcp", "servers"})
+	if _, ok := leaf["go-apply"]; !ok {
+		t.Error("go-apply not found in mcp.servers after RegisterForce")
+	}
+}
+
+func TestHermesBackend_RegisterForce_OverwritesExisting(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	ops := newTestOps(dir)
+	configPath := filepath.Join(dir, ".hermes", "config.yaml")
+	writeYAML(t, configPath, map[string]any{
+		"mcp_servers": map[string]any{
+			"go-apply": map[string]any{"command": "go-apply", "args": []string{"serve"}},
+		},
+	})
+
+	b := newHermesBackend(ops)
+	res, err := b.RegisterForce("go-apply", testEntry)
+	if err != nil {
+		t.Fatalf("RegisterForce: %v", err)
+	}
+	if res.Action == port.ActionAlreadyRegistered {
+		t.Errorf("RegisterForce returned ActionAlreadyRegistered, expected write action")
+	}
+	root := readYAML(t, configPath)
+	leaf := navJSON(t, root, []string{"mcp_servers"})
+	if _, ok := leaf["go-apply"]; !ok {
+		t.Error("go-apply not found in mcp_servers after RegisterForce")
+	}
+}

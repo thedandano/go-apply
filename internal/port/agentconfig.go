@@ -26,5 +26,7 @@ type RegistrationResult struct {
 // AgentConfigRegistrar registers or unregisters an MCP server in an agent's config file.
 type AgentConfigRegistrar interface {
 	Register(serverName string, entry MCPServerEntry) (RegistrationResult, error)
+	// RegisterForce overwrites any existing registration unconditionally.
+	RegisterForce(serverName string, entry MCPServerEntry) (RegistrationResult, error)
 	Unregister(serverName string) (RegistrationResult, error)
 }
