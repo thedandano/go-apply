@@ -22,10 +22,10 @@ const (
 // New creates a *slog.Logger writing JSON lines to a daily log file in logDir.
 //
 // File naming: go-apply-2006-01-02.log (one per day; multiple invocations append)
-// Dual output: file at DEBUG+ (full diagnostics) + stderr at WARN+ (keeps TUI clean)
+// Dual output: file at level (respects cfg.LogLevel) + stderr at WARN+ (keeps TUI clean)
 // Retention: keeps the last maxLogFiles files, prunes older ones on startup
 // Fallback: if logDir is unwritable → stderr-only logger at WARN+, no error returned
-func New(logDir string) (*slog.Logger, func(), error) {
+func New(logDir string, level slog.Level) (*slog.Logger, func(), error) {
 	if err := os.MkdirAll(logDir, 0750); err != nil {
 		return stderrOnly(), func() {}, nil
 	}
@@ -43,7 +43,7 @@ func New(logDir string) (*slog.Logger, func(), error) {
 
 	log := slog.New(&multiHandler{
 		file: charmlog.NewWithOptions(f, charmlog.Options{
-			Level:           charmlog.DebugLevel,
+			Level:           charmlogLevelFromSlog(level),
 			ReportTimestamp: true,
 			TimeFormat:      "2006-01-02 15:04:05",
 		}),
@@ -64,6 +64,22 @@ func stderrOnly() *slog.Logger {
 		ReportTimestamp: true,
 		TimeFormat:      "2006-01-02 15:04:05",
 	}))
+}
+
+// charmlogLevelFromSlog converts slog.Level to charmlog.Level.
+func charmlogLevelFromSlog(level slog.Level) charmlog.Level {
+	switch level {
+	case slog.LevelDebug:
+		return charmlog.DebugLevel
+	case slog.LevelInfo:
+		return charmlog.InfoLevel
+	case slog.LevelWarn:
+		return charmlog.WarnLevel
+	case slog.LevelError:
+		return charmlog.ErrorLevel
+	default:
+		return charmlog.InfoLevel
+	}
 }
 
 func pruneOldLogs(logDir string, keep int) {
