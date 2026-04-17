@@ -5,6 +5,7 @@ import (
 	"log/slog"
 
 	"github.com/thedandano/go-apply/internal/config"
+	"github.com/thedandano/go-apply/internal/debugdump"
 	"github.com/thedandano/go-apply/internal/logger"
 	"github.com/thedandano/go-apply/internal/model"
 	"github.com/thedandano/go-apply/internal/port"
@@ -44,6 +45,12 @@ func (s *Service) TailorResume(ctx context.Context, input *model.TailorInput) (m
 	tier1Text, addedKeywords := AddKeywordsToSkillsSection(input.ResumeText, allKeywords)
 	s.log.DebugContext(ctx, "tailor tier-1 end", "output_bytes", len(tier1Text), "added_keywords", len(addedKeywords))
 
+	if logger.Verbose() {
+		if diff := debugdump.DiffSection("tailor.t1.skills", "Skills", input.ResumeText, tier1Text); diff != "" {
+			s.log.DebugContext(ctx, "tailor tier-1 diff", logger.PayloadAttr("diff", diff, true))
+		}
+	}
+
 	result := model.TailorResult{
 		ResumeLabel:   input.Resume.Label,
 		TierApplied:   model.TierKeyword,
@@ -74,18 +81,24 @@ func (s *Service) TailorResume(ctx context.Context, input *model.TailorInput) (m
 	}
 
 	// rewriteBullets handles per-bullet LLM errors internally (log + skip).
-	// It always returns nil error; degradation to tier-1 is implicit when no
-	// changes are produced (e.g. all bullets fail or none match keywords).
-	tier2Text, changes, _ := rewriteBullets(tier2Input)
+	// attempted distinguishes "no keyword-matching bullets found" from "all LLM calls failed".
+	tier2Text, changes, attempted, _ := rewriteBullets(tier2Input)
+
+	result.BulletsAttempted = attempted
 
 	// If tier-2 produced changes, upgrade the result.
-	if len(changes) > 0 {
+	switch {
+	case len(changes) > 0:
 		logger.Decision(ctx, s.log, "tailor.tier", "t2", "bullets rewritten", slog.Int("changes", len(changes)))
 		result.TierApplied = model.TierBullet
 		result.RewrittenBullets = changes
 		result.TailoredText = tier2Text
-	} else {
-		logger.Decision(ctx, s.log, "tailor.tier", "t1", "no bullets rewritten")
+	case attempted > 0:
+		// Every LLM call failed — degrade to tier-1 but signal the failure explicitly.
+		logger.Decision(ctx, s.log, "tailor.tier", "t1", "all bullet LLM rewrites failed",
+			slog.Int("attempted", attempted))
+	default:
+		logger.Decision(ctx, s.log, "tailor.tier", "t1", "no keyword-matching bullets found")
 	}
 
 	return result, nil

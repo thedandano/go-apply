@@ -62,6 +62,13 @@ func (s *Service) AugmentResumeText(ctx context.Context, input model.AugmentInpu
 		"input_words", len(strings.Fields(input.ResumeText)),
 		"keyword_count", len(input.JDKeywords),
 	)
+	if s.llm == nil {
+		// In MCP mode no LLM is wired here — the MCP host (Claude Code) is the
+		// orchestrator that performs text incorporation. Retrieval still runs for
+		// cache warming; only the in-process incorporation step is skipped.
+		logger.Decision(ctx, s.log, "augment.incorporate", "skip", "no LLM — MCP host incorporates")
+		return input.ResumeText, input.RefData, nil
+	}
 
 	if len(input.JDKeywords) == 0 {
 		logger.Decision(ctx, s.log, "augment.output", "original", "no keywords")
@@ -248,6 +255,71 @@ Retrieved profile chunks:
 Job description keywords: %s
 
 Respond only with the complete augmented resume.`
+
+// SuggestForKeywords retrieves profile chunks relevant to keywords via vector
+// similarity (falling back to keyword matching if vector fails or returns nothing).
+// Returns matches grouped by keyword with similarity scores. No LLM is called.
+func (s *Service) SuggestForKeywords(ctx context.Context, keywords []string) (model.TailorSuggestions, error) {
+	if len(keywords) == 0 {
+		return nil, nil
+	}
+	suggestions := make(model.TailorSuggestions, len(keywords))
+
+	// Try vector first for each keyword.
+	vectors := s.embedWithCache(ctx, keywords)
+	threshold := s.defaults.VectorSearch.SimilarityThreshold
+
+	for keyword, vector := range vectors {
+		candidates, err := s.profile.FindSimilar(ctx, vector, s.defaults.VectorSearch.TopK)
+		if err != nil {
+			s.log.WarnContext(ctx, "SuggestForKeywords: FindSimilar failed for keyword — skipping", "keyword", keyword, "error", err)
+			continue
+		}
+		for _, c := range candidates {
+			if c.Weight < threshold {
+				continue
+			}
+			suggestions[keyword] = append(suggestions[keyword], model.TailorSuggestion{
+				Keyword:    keyword,
+				SourceDoc:  c.SourceDoc,
+				Text:       c.Term,
+				Similarity: float32(c.Weight),
+			})
+		}
+	}
+
+	// For keywords that got no vector matches, fall back to keyword matching.
+	var missingKeywords []string
+	for _, kw := range keywords {
+		if len(suggestions[kw]) == 0 {
+			missingKeywords = append(missingKeywords, kw)
+		}
+	}
+	if len(missingKeywords) > 0 {
+		fallbackChunks, err := s.retrieveByKeyword(ctx, missingKeywords)
+		if err != nil {
+			s.log.WarnContext(ctx, "SuggestForKeywords: keyword fallback failed", "error", err)
+		} else {
+			for _, chunk := range fallbackChunks {
+				for _, kw := range missingKeywords {
+					if strings.Contains(strings.ToLower(chunk.Text), strings.ToLower(kw)) {
+						suggestions[kw] = append(suggestions[kw], model.TailorSuggestion{
+							Keyword:    kw,
+							SourceDoc:  chunk.Source,
+							Text:       chunk.Text,
+							Similarity: 0, // keyword-fallback has no similarity score
+						})
+					}
+				}
+			}
+		}
+	}
+
+	if len(suggestions) == 0 {
+		return nil, nil
+	}
+	return suggestions, nil
+}
 
 // incorporateChunks calls the LLM to weave the retrieved chunks into the resume.
 // When s.llm is nil (MCP mode — host is the orchestrator), retrieval still ran

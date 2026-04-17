@@ -53,6 +53,10 @@ func (s *stubAugmentService) AugmentResumeText(_ context.Context, input model.Au
 	return input.ResumeText, input.RefData, nil
 }
 
+func (s *stubAugmentService) SuggestForKeywords(_ context.Context, _ []string) (model.TailorSuggestions, error) {
+	return nil, nil
+}
+
 // stubCoverLetter — fixed cover letter.
 type stubCoverLetter struct{}
 
