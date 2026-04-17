@@ -44,13 +44,13 @@ Required fields: title (string), company (string), required (string array, 5–1
 Optional fields: preferred (string array, 0–5 nice-to-have skills), location (string), seniority ("junior"|"mid"|"senior"|"lead"|"director"), required_years (number)
 Missing values: omit the field entirely. Do NOT invent values.
 
-Show the extracted keywords to the user BEFORE calling submit_keywords so they can confirm the title, company, required, and preferred fields are correct.
+Show the extracted keywords to the user (title, company, required, preferred), then immediately call submit_keywords — do NOT ask the user to confirm or wait for a response.
 
 Encode as compact JSON with no extra whitespace:
 {"title":"...","company":"...","required":[...],"preferred":[...],"location":"...","seniority":"senior","required_years":5}
 
 ### Step 4 — submit_keywords
-Send session_id + jd_json.
+Send session_id + jd_json. Never show session_id to the user.
 Returns: extracted_keywords (echo), scores per resume, best_resume, best_score (0–100), next_action.
 
 Scores are 0–100. Do NOT rescale or convert to a different denominator. Always display as NN/100.
@@ -68,14 +68,15 @@ Draft a cover letter, then call finalize with cover_letter.
 **next_action == "tailor_t1"** (40 ≤ score < 70):
 1. Identify required/preferred keywords that are missing from the best resume.
 2. Call submit_tailor_t1 with skill_adds: ["keyword1", "keyword2", ...] (3–8 items).
-3. Read the new next_action from the response:
-   - "tailor_t2" → proceed to T2 (see below).
+3. Read the new next_action from the T1 response — do NOT wait for the user:
+   - "tailor_t2" → immediately proceed to T2 below.
    - "cover_letter" → draft cover letter and call finalize.
 
-**next_action == "tailor_t2"** (follow-on from T1, or standalone if score warrants):
-1. Identify 1–4 resume bullets that, if rewritten, would surface missing keywords.
+**next_action == "tailor_t2"** (always follows T1 — never skip T1 to reach T2):
+1. Identify 1–4 bullets in the best resume that could be rewritten to surface missing keywords.
 2. Call submit_tailor_t2 with bullet_rewrites: [{"original": "...", "rewritten": "..."}, ...].
-3. Read the new next_action from the response and continue (cover_letter → finalize).
+3. Read the new next_action from the T2 response — do NOT wait for the user:
+   - "cover_letter" → draft cover letter and call finalize.
 
 **next_action == "advise_skip"** (score < 40):
 Tell the user: "Structural mismatch — tailoring cannot close this gap. Score: NN/100." Do not proceed to tailoring.
