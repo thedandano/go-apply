@@ -136,6 +136,11 @@ func (s *Service) retrieveByVector(ctx context.Context, keywords []string) ([]re
 			s.log.WarnContext(ctx, "augment: find similar failed for keyword — skipping", "keyword", keyword, "error", err)
 			continue
 		}
+		s.log.DebugContext(ctx, "augment: vector search complete",
+			slog.String("keyword", keyword),
+			slog.Int("candidates", len(candidates)),
+			slog.Float64("threshold", threshold),
+		)
 
 		var matchedTerms []string
 		for _, c := range candidates {
@@ -160,6 +165,10 @@ func (s *Service) retrieveByVector(ctx context.Context, keywords []string) ([]re
 				slog.String("keyword", keyword),
 				slog.Float64("threshold", threshold),
 				slog.Int("candidates_below", len(candidates)),
+			)
+		} else {
+			s.log.DebugContext(ctx, "keyword vector empty result",
+				slog.String("keyword", keyword),
 			)
 		}
 	}
@@ -275,16 +284,34 @@ func (s *Service) SuggestForKeywords(ctx context.Context, keywords []string) (mo
 			s.log.WarnContext(ctx, "SuggestForKeywords: FindSimilar failed for keyword — skipping", "keyword", keyword, "error", err)
 			continue
 		}
+		s.log.DebugContext(ctx, "SuggestForKeywords: vector search complete",
+			slog.String("keyword", keyword),
+			slog.Int("candidates", len(candidates)),
+			slog.Float64("threshold", threshold),
+		)
+		var matched int
 		for _, c := range candidates {
 			if c.Weight < threshold {
 				continue
 			}
+			matched++
 			suggestions[keyword] = append(suggestions[keyword], model.TailorSuggestion{
 				Keyword:    keyword,
 				SourceDoc:  c.SourceDoc,
 				Text:       c.Term,
 				Similarity: float32(c.Weight),
 			})
+		}
+		if len(candidates) > 0 && matched == 0 {
+			s.log.DebugContext(ctx, "SuggestForKeywords: all candidates below threshold — will use keyword fallback",
+				slog.String("keyword", keyword),
+				slog.Int("candidates_below", len(candidates)),
+				slog.Float64("threshold", threshold),
+			)
+		} else if len(candidates) == 0 {
+			s.log.DebugContext(ctx, "SuggestForKeywords: vector returned no candidates — will use keyword fallback",
+				slog.String("keyword", keyword),
+			)
 		}
 	}
 
