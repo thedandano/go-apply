@@ -184,38 +184,68 @@ func TestNew_FileRespectLogLevel(t *testing.T) {
 }
 
 func TestNew_StderrRespectsLevel(t *testing.T) {
+	// Save original stderr
+	origStderr := os.Stderr
+
+	// Create a temp file for captured stderr
+	tmpFile, err := os.CreateTemp("", "stderr-*")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	// Redirect stderr BEFORE calling logger.New() so the logger captures it
+	os.Stderr = tmpFile
+
 	dir := t.TempDir()
 	log, cleanup, _ := logger.New(logger.Options{
 		LogDir:      dir,
 		FileLevel:   slog.LevelDebug,
-		StderrLevel: slog.LevelDebug,
+		StderrLevel: slog.LevelWarn,
 	})
-	defer cleanup()
 
+	// Log a DEBUG message (should NOT appear on stderr since StderrLevel is WARN)
 	log.Debug("debug message to stderr")
+	// Log a WARN message (SHOULD appear on stderr)
 	log.Warn("warn message to stderr")
+
 	cleanup()
 
-	// Verify logger is functional and no panics occurred
-	if log == nil {
-		t.Fatal("expected non-nil logger")
+	// Restore stderr AFTER cleanup
+	os.Stderr = origStderr
+	tmpFile.Close()
+
+	// Read captured stderr
+	data, err := os.ReadFile(tmpFile.Name())
+	if err != nil {
+		t.Fatalf("failed to read captured stderr: %v", err)
+	}
+	stderrContent := string(data)
+
+	// Verify DEBUG message is absent from stderr
+	if strings.Contains(stderrContent, "debug message to stderr") {
+		t.Error("DEBUG message must NOT appear on stderr when StderrLevel is WARN")
+	}
+	// Verify WARN message is present on stderr
+	if !strings.Contains(stderrContent, "warn message to stderr") {
+		t.Errorf("WARN message must appear on stderr when StderrLevel is WARN, got: %s", stderrContent)
 	}
 
+	// Also verify both messages appear in the file log
 	entries, _ := os.ReadDir(dir)
 	if len(entries) == 0 {
 		t.Skip("no log file created")
 	}
-	data, _ := os.ReadFile(filepath.Join(dir, entries[0].Name()))
-	if len(data) == 0 {
+	fileData, _ := os.ReadFile(filepath.Join(dir, entries[0].Name()))
+	if len(fileData) == 0 {
 		t.Skip("no log output — file may be empty before flush")
 	}
 
-	content := string(data)
-	// When StderrLevel = Debug, both debug and warn should appear in file
-	if !strings.Contains(content, "debug message to stderr") {
-		t.Error("DEBUG message must appear in file when StderrLevel is DEBUG")
+	fileContent := string(fileData)
+	if !strings.Contains(fileContent, "debug message to stderr") {
+		t.Error("DEBUG message must appear in file when FileLevel is DEBUG")
 	}
-	if !strings.Contains(content, "warn message to stderr") {
-		t.Error("WARN message must appear in file when StderrLevel is DEBUG")
+	if !strings.Contains(fileContent, "warn message to stderr") {
+		t.Error("WARN message must appear in file when FileLevel is DEBUG")
 	}
 }
