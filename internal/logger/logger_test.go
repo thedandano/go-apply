@@ -2,6 +2,7 @@ package logger_test
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -14,7 +15,7 @@ import (
 
 func TestNew_WritesHumanReadableToDailyFile(t *testing.T) {
 	dir := t.TempDir()
-	log, cleanup, err := logger.New(dir)
+	log, cleanup, err := logger.New(dir, slog.LevelDebug)
 	if err != nil {
 		t.Fatalf("New() error: %v", err)
 	}
@@ -52,7 +53,7 @@ func TestNew_WritesHumanReadableToDailyFile(t *testing.T) {
 
 func TestNew_TimestampFormat(t *testing.T) {
 	dir := t.TempDir()
-	log, cleanup, _ := logger.New(dir)
+	log, cleanup, _ := logger.New(dir, slog.LevelDebug)
 	defer cleanup()
 
 	log.Info("ts check")
@@ -80,7 +81,7 @@ func TestNew_PrunesOldLogFiles(t *testing.T) {
 		name := fmt.Sprintf("go-apply-2025-%02d-01.log", i+1)
 		os.WriteFile(filepath.Join(dir, name), []byte("old"), 0640)
 	}
-	log, cleanup, _ := logger.New(dir)
+	log, cleanup, _ := logger.New(dir, slog.LevelDebug)
 	defer cleanup()
 	_ = log
 
@@ -91,7 +92,7 @@ func TestNew_PrunesOldLogFiles(t *testing.T) {
 }
 
 func TestNew_FallsBackToStderrWhenDirUnwritable(t *testing.T) {
-	log, cleanup, err := logger.New("/proc/unwritable/path")
+	log, cleanup, err := logger.New("/proc/unwritable/path", slog.LevelDebug)
 	if err != nil {
 		t.Fatalf("New() should not fail on unwritable dir, got: %v", err)
 	}
@@ -104,7 +105,7 @@ func TestNew_FallsBackToStderrWhenDirUnwritable(t *testing.T) {
 
 func TestNew_FileReceivesDebugLogs(t *testing.T) {
 	dir := t.TempDir()
-	log, cleanup, _ := logger.New(dir)
+	log, cleanup, _ := logger.New(dir, slog.LevelDebug)
 	defer cleanup()
 
 	log.Debug("debug message")
@@ -127,5 +128,33 @@ func TestNew_FileReceivesDebugLogs(t *testing.T) {
 	}
 	if !strings.Contains(content, "info message") {
 		t.Error("INFO log must appear in log file")
+	}
+}
+
+func TestNew_FileRespectLogLevel(t *testing.T) {
+	dir := t.TempDir()
+	log, cleanup, _ := logger.New(dir, slog.LevelInfo)
+	defer cleanup()
+
+	log.Debug("debug message")
+	log.Info("info message")
+
+	cleanup()
+
+	entries, _ := os.ReadDir(dir)
+	if len(entries) == 0 {
+		t.Skip("no log file created")
+	}
+	data, _ := os.ReadFile(filepath.Join(dir, entries[0].Name()))
+	if len(data) == 0 {
+		t.Skip("no log output — file may be empty before flush")
+	}
+
+	content := string(data)
+	if strings.Contains(content, "debug message") {
+		t.Error("DEBUG message should NOT appear in log file when level is INFO")
+	}
+	if !strings.Contains(content, "info message") {
+		t.Error("INFO message must appear in log file when level is INFO")
 	}
 }

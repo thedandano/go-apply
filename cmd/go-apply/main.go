@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"runtime/debug"
 
@@ -29,12 +30,22 @@ func main() {
 func run() int {
 	logDir := config.LogDir()
 
-	log, cleanup, err := logger.New(logDir)
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "config load: %v\n", err)
+		// Continue with defaults; CLI will validate later if needed
+		cfg = &config.Config{}
+	}
+
+	level := cfg.ResolveLogLevel()
+	log, cleanup, err := logger.New(logDir, level)
 	if err != nil {
 		// New() only returns nil errors per API contract; this is a safeguard.
 		fmt.Fprintf(os.Stderr, "logger init: %v\n", err)
 	}
 	defer cleanup()
+
+	slog.SetDefault(log)
 
 	root := cli.NewRootCommand(version)
 	if err := root.Execute(); err != nil {
