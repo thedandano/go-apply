@@ -17,6 +17,8 @@ import (
 const (
 	maxLogFiles   = 50
 	logFilePrefix = "go-apply-"
+	logDirPerm    = 0o750
+	logFilePerm   = 0o600
 )
 
 // Options configures the logger.
@@ -33,7 +35,7 @@ type Options struct {
 // Retention: keeps the last maxLogFiles files, prunes older ones on startup
 // Fallback: if LogDir is unwritable → stderr-only logger at WARN+, no error returned
 func New(opts Options) (*slog.Logger, func(), error) {
-	if err := os.MkdirAll(opts.LogDir, 0750); err != nil {
+	if err := os.MkdirAll(opts.LogDir, logDirPerm); err != nil {
 		log := stderrOnly(opts.StderrLevel)
 		log.Warn("log dir unwritable, falling back to stderr only", "dir", opts.LogDir, "error", err)
 		return log, func() {}, nil
@@ -45,7 +47,7 @@ func New(opts Options) (*slog.Logger, func(), error) {
 	timestamp := time.Now().UTC().Format("2006-01-02")
 	logPath := filepath.Join(opts.LogDir, logFilePrefix+timestamp+".log")
 
-	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600) // #nosec G304 -- logPath built from os.UserHomeDir() + fixed suffix, not user input
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, logFilePerm) // #nosec G304 -- logPath built from os.UserHomeDir() + fixed suffix, not user input
 	if err != nil {
 		log := stderrOnly(opts.StderrLevel)
 		log.Warn("failed to open log file, falling back to stderr only", "path", logPath, "error", err)
