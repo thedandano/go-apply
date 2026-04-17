@@ -19,9 +19,7 @@ if [ "${1:-}" = "--uninstall" ]; then
   # Deregister MCP server from all known agents before removing binary.
   # Failures are silenced — if an agent isn't configured, that's fine.
   if [ -f "$BINARY" ]; then
-    for agent in claude openclaw hermes; do
-      "$BINARY" setup mcp --agent "$agent" --remove 2>/dev/null || true
-    done
+    "$BINARY" setup mcp --agent all --remove 2>/dev/null || true
   fi
 
   if [ -f "$BINARY" ]; then

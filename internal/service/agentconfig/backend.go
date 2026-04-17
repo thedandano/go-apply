@@ -130,7 +130,9 @@ type mergeFunc func([]byte, []string, string, port.MCPServerEntry) ([]byte, bool
 type removeFunc func([]byte, []string, string) ([]byte, bool, error)
 
 // registerWith performs the shared register flow for any backend.
-func registerWith(ops *fileOps, path string, keyPath []string, serverName string, entry port.MCPServerEntry, merge mergeFunc) (port.RegistrationResult, error) {
+// When force is true, the "already registered" short-circuit is skipped and the
+// entry is written unconditionally.
+func registerWith(ops *fileOps, path string, keyPath []string, serverName string, entry port.MCPServerEntry, merge mergeFunc, force bool) (port.RegistrationResult, error) {
 	existing, err := ops.readFile(path)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return port.RegistrationResult{}, fmt.Errorf("read %s: %w", path, err)
@@ -141,7 +143,7 @@ func registerWith(ops *fileOps, path string, keyPath []string, serverName string
 	if err != nil {
 		return port.RegistrationResult{}, err
 	}
-	if already {
+	if already && !force {
 		return port.RegistrationResult{ConfigPath: path, Action: port.ActionAlreadyRegistered}, nil
 	}
 
@@ -191,14 +193,9 @@ func (b *claudeBackend) pluginDir(serverName string) string {
 	return filepath.Join(b.ops.homeDir, claudePluginsDir, serverName)
 }
 
-func (b *claudeBackend) Register(serverName string, _ port.MCPServerEntry) (port.RegistrationResult, error) {
+// writeClaudePlugin writes the plugin.json and .mcp.json files for the given server.
+func (b *claudeBackend) writeClaudePlugin(serverName, pluginJSONPath, mcpJSONPath string) (string, error) {
 	pluginDir := b.pluginDir(serverName)
-	mcpJSONPath := filepath.Join(pluginDir, ".mcp.json")
-	pluginJSONPath := filepath.Join(pluginDir, ".claude-plugin", "plugin.json")
-
-	if b.ops.exists(mcpJSONPath) {
-		return port.RegistrationResult{ConfigPath: pluginDir, Action: port.ActionAlreadyRegistered}, nil
-	}
 
 	binPath, err := b.ops.executable()
 	if err != nil {
@@ -207,7 +204,7 @@ func (b *claudeBackend) Register(serverName string, _ port.MCPServerEntry) (port
 
 	// Create .claude-plugin/ directory.
 	if err := b.ops.mkdirAll(filepath.Dir(pluginJSONPath), 0o700); err != nil {
-		return port.RegistrationResult{}, fmt.Errorf("mkdir plugin dir: %w", err)
+		return "", fmt.Errorf("mkdir plugin dir: %w", err)
 	}
 
 	pluginContent, _ := json.MarshalIndent(map[string]any{
@@ -216,7 +213,7 @@ func (b *claudeBackend) Register(serverName string, _ port.MCPServerEntry) (port
 		"author":      map[string]any{"name": "Dan Sedano"},
 	}, "", "  ")
 	if err := b.ops.writeFile(pluginJSONPath, pluginContent, 0o600); err != nil {
-		return port.RegistrationResult{}, fmt.Errorf("write plugin.json: %w", err)
+		return "", fmt.Errorf("write plugin.json: %w", err)
 	}
 
 	mcpContent, _ := json.MarshalIndent(map[string]any{
@@ -226,10 +223,39 @@ func (b *claudeBackend) Register(serverName string, _ port.MCPServerEntry) (port
 		},
 	}, "", "  ")
 	if err := b.ops.writeFile(mcpJSONPath, mcpContent, 0o600); err != nil {
-		return port.RegistrationResult{}, fmt.Errorf("write .mcp.json: %w", err)
+		return "", fmt.Errorf("write .mcp.json: %w", err)
 	}
 
-	return port.RegistrationResult{ConfigPath: pluginDir, Action: port.ActionCreated}, nil
+	return pluginDir, nil
+}
+
+func (b *claudeBackend) Register(serverName string, _ port.MCPServerEntry) (port.RegistrationResult, error) {
+	pluginDir := b.pluginDir(serverName)
+	mcpJSONPath := filepath.Join(pluginDir, ".mcp.json")
+	pluginJSONPath := filepath.Join(pluginDir, ".claude-plugin", "plugin.json")
+
+	if b.ops.exists(mcpJSONPath) {
+		return port.RegistrationResult{ConfigPath: pluginDir, Action: port.ActionAlreadyRegistered}, nil
+	}
+
+	dir, err := b.writeClaudePlugin(serverName, pluginJSONPath, mcpJSONPath)
+	if err != nil {
+		return port.RegistrationResult{}, err
+	}
+	return port.RegistrationResult{ConfigPath: dir, Action: port.ActionCreated}, nil
+}
+
+// RegisterForce overwrites an existing Claude plugin registration unconditionally.
+func (b *claudeBackend) RegisterForce(serverName string, _ port.MCPServerEntry) (port.RegistrationResult, error) {
+	pluginDir := b.pluginDir(serverName)
+	mcpJSONPath := filepath.Join(pluginDir, ".mcp.json")
+	pluginJSONPath := filepath.Join(pluginDir, ".claude-plugin", "plugin.json")
+
+	dir, err := b.writeClaudePlugin(serverName, pluginJSONPath, mcpJSONPath)
+	if err != nil {
+		return port.RegistrationResult{}, err
+	}
+	return port.RegistrationResult{ConfigPath: dir, Action: port.ActionCreated}, nil
 }
 
 func (b *claudeBackend) Unregister(serverName string) (port.RegistrationResult, error) {
@@ -259,7 +285,12 @@ func (b *claudeBackend) Unregister(serverName string) (port.RegistrationResult, 
 // ---- openclawBackend implementation ----------------------------------------
 
 func (b *openclawBackend) Register(serverName string, entry port.MCPServerEntry) (port.RegistrationResult, error) {
-	return registerWith(b.ops, b.configPath(), []string{"mcp", "servers"}, serverName, entry, MergeJSON)
+	return registerWith(b.ops, b.configPath(), []string{"mcp", "servers"}, serverName, entry, MergeJSON, false)
+}
+
+// RegisterForce overwrites an existing openclaw registration unconditionally.
+func (b *openclawBackend) RegisterForce(serverName string, entry port.MCPServerEntry) (port.RegistrationResult, error) {
+	return registerWith(b.ops, b.configPath(), []string{"mcp", "servers"}, serverName, entry, MergeJSON, true)
 }
 
 func (b *openclawBackend) Unregister(serverName string) (port.RegistrationResult, error) {
@@ -269,7 +300,12 @@ func (b *openclawBackend) Unregister(serverName string) (port.RegistrationResult
 // ---- hermesBackend implementation ------------------------------------------
 
 func (b *hermesBackend) Register(serverName string, entry port.MCPServerEntry) (port.RegistrationResult, error) {
-	return registerWith(b.ops, b.configPath(), []string{"mcp_servers"}, serverName, entry, MergeYAML)
+	return registerWith(b.ops, b.configPath(), []string{"mcp_servers"}, serverName, entry, MergeYAML, false)
+}
+
+// RegisterForce overwrites an existing hermes registration unconditionally.
+func (b *hermesBackend) RegisterForce(serverName string, entry port.MCPServerEntry) (port.RegistrationResult, error) {
+	return registerWith(b.ops, b.configPath(), []string{"mcp_servers"}, serverName, entry, MergeYAML, true)
 }
 
 func (b *hermesBackend) Unregister(serverName string) (port.RegistrationResult, error) {

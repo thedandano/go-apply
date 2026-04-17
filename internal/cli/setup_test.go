@@ -190,3 +190,102 @@ func TestSetupMCP_Remove_ConfigMissing(t *testing.T) {
 		t.Errorf("expected \"not found\" in output, got: %q", stdout)
 	}
 }
+
+// TestSetupMCP_Override_CallsRegisterForce verifies that --override (or --force)
+// overwrites an existing entry instead of returning "already registered".
+func TestSetupMCP_Override_CallsRegisterForce(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HERMES_HOME", tmpDir)
+
+	// First registration.
+	if _, _, err := executeSetupMCP(t, "setup", "mcp", "--agent", "hermes"); err != nil {
+		t.Fatalf("first registration failed: %v", err)
+	}
+
+	// Second registration with --override should succeed without "already registered".
+	stdout, _, err := executeSetupMCP(t, "setup", "mcp", "--agent", "hermes", "--override")
+	if err != nil {
+		t.Fatalf("--override registration returned error: %v", err)
+	}
+	if strings.Contains(stdout, "already registered") {
+		t.Errorf("--override should not produce 'already registered', got: %q", stdout)
+	}
+}
+
+// TestSetupMCP_Force_AliasForOverride verifies that --force is an alias for --override.
+func TestSetupMCP_Force_AliasForOverride(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HERMES_HOME", tmpDir)
+
+	// First registration.
+	if _, _, err := executeSetupMCP(t, "setup", "mcp", "--agent", "hermes"); err != nil {
+		t.Fatalf("first registration failed: %v", err)
+	}
+
+	// Second registration with --force.
+	stdout, _, err := executeSetupMCP(t, "setup", "mcp", "--agent", "hermes", "--force")
+	if err != nil {
+		t.Fatalf("--force registration returned error: %v", err)
+	}
+	if strings.Contains(stdout, "already registered") {
+		t.Errorf("--force should not produce 'already registered', got: %q", stdout)
+	}
+}
+
+// TestSetupMCP_NonTTY_AlreadyRegistered verifies that without --override in a
+// non-TTY context (all tests run non-TTY), "already registered" is printed but
+// no error is returned (exit 0).
+func TestSetupMCP_NonTTY_AlreadyRegistered(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HERMES_HOME", tmpDir)
+
+	if _, _, err := executeSetupMCP(t, "setup", "mcp", "--agent", "hermes"); err != nil {
+		t.Fatalf("first registration failed: %v", err)
+	}
+
+	stdout, _, err := executeSetupMCP(t, "setup", "mcp", "--agent", "hermes")
+	if err != nil {
+		t.Fatalf("expected exit 0 for already-registered in non-TTY, got: %v", err)
+	}
+	if !strings.Contains(stdout, "already registered") {
+		t.Errorf("expected 'already registered' in stdout, got: %q", stdout)
+	}
+}
+
+// TestSetupMCP_AgentAll_RegistersAllAgents verifies that --agent all iterates
+// over all three agents and produces a status line per agent.
+func TestSetupMCP_AgentAll_RegistersAllAgents(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HERMES_HOME", tmpDir)
+	t.Setenv("OPENCLAW_CONFIG_PATH", filepath.Join(tmpDir, "openclaw.json"))
+
+	stdout, _, _ := executeSetupMCP(t, "setup", "mcp", "--agent", "all")
+	if !strings.Contains(stdout, "hermes:") {
+		t.Errorf("expected hermes status line in --agent all output, got: %q", stdout)
+	}
+	if !strings.Contains(stdout, "openclaw:") {
+		t.Errorf("expected openclaw status line in --agent all output, got: %q", stdout)
+	}
+	if !strings.Contains(stdout, "claude:") {
+		t.Errorf("expected claude status line in --agent all output, got: %q", stdout)
+	}
+}
+
+// TestSetupMCP_AgentAll_Remove verifies that --remove --agent all iterates over
+// all three agents and produces a status line per agent.
+func TestSetupMCP_AgentAll_Remove(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HERMES_HOME", tmpDir)
+	t.Setenv("OPENCLAW_CONFIG_PATH", filepath.Join(tmpDir, "openclaw.json"))
+
+	stdout, _, _ := executeSetupMCP(t, "setup", "mcp", "--agent", "all", "--remove")
+	if !strings.Contains(stdout, "hermes:") {
+		t.Errorf("expected hermes status line in --remove --agent all output, got: %q", stdout)
+	}
+	if !strings.Contains(stdout, "openclaw:") {
+		t.Errorf("expected openclaw status line in --remove --agent all output, got: %q", stdout)
+	}
+	if !strings.Contains(stdout, "claude:") {
+		t.Errorf("expected claude status line in --remove --agent all output, got: %q", stdout)
+	}
+}
