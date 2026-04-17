@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestTruncate(t *testing.T) {
@@ -65,6 +66,15 @@ func TestTruncate(t *testing.T) {
 		got := Truncate("", 10)
 		if got != "" {
 			t.Errorf("expected empty string, got %q", got)
+		}
+	})
+
+	t.Run("multi-byte UTF-8 truncation produces valid UTF-8", func(t *testing.T) {
+		t.Parallel()
+		// "é" is a 2-byte rune; 2000 of them = 4000 bytes, well over limit=10
+		got := Truncate(strings.Repeat("é", 2000), 10)
+		if !utf8.ValidString(got) {
+			t.Errorf("expected valid UTF-8 after truncation, got invalid string: %q", got)
 		}
 	})
 }
@@ -214,6 +224,23 @@ func TestPayloadAttr(t *testing.T) {
 		attr := PayloadAttr("request_body", "hello", false)
 		if attr.Key != "request_body" {
 			t.Errorf("expected key 'request_body', got %q", attr.Key)
+		}
+	})
+
+	t.Run("secret straddling truncation boundary is redacted", func(t *testing.T) {
+		t.Parallel()
+		// Build a string long enough to trigger truncation, with sk- key placed
+		// so it straddles the natural truncation cut point (payloadLimit/2).
+		half := payloadLimit / 2
+		// Place the secret so its start is just before the head cut and its end is just after.
+		prefix := strings.Repeat("x", half-5)
+		secret := "sk-abcdefghij1234567890"
+		suffix := strings.Repeat("y", payloadLimit) // ensures total len > payloadLimit
+		s := prefix + secret + suffix
+		attr := PayloadAttr("k", s, false)
+		result := attr.Value.String()
+		if strings.Contains(result, "sk-") {
+			t.Errorf("expected sk- secret to be redacted even when straddling truncation boundary, got: %q", result[:min(200, len(result))])
 		}
 	})
 }
