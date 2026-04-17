@@ -89,22 +89,27 @@ location: "San Francisco, CA"
 
 > All tunable scoring constants (weights, thresholds, limits) live in `internal/config/defaults.json`.
 
-## Logs
-
-Each invocation writes a timestamped JSON log to `~/.local/state/go-apply/logs/`.
-Format: `go-apply-2026-04-10T150405Z.log` — one file per run, last 50 retained.
-
-```bash
-# Watch latest run live
-tail -f $(ls -t ~/.local/state/go-apply/logs/*.log | head -1) | jq .
-
-# Filter errors only
-cat ~/.local/state/go-apply/logs/go-apply-*.log | jq 'select(.level=="ERROR")'
-```
-
 ## Logging
 
+Log files are written to `~/.local/state/go-apply/logs/go-apply-YYYY-MM-DD.log` — one file per calendar day (multiple invocations append); last 50 files retained.
+
+```bash
+# View recent logs
+go-apply logs
+
+# Watch live (tail -f equivalent)
+go-apply logs --follow
+
+# Show last 200 lines
+go-apply logs --lines 200
+
+# Tail the raw log file with grep
+tail -f ~/.local/state/go-apply/logs/go-apply-$(date +%Y-%m-%d).log | grep ERROR
+```
+
 ### Flags
+
+These persistent flags apply to every subcommand and must be placed before the subcommand name:
 
 | Flag | Shorthand | Description |
 |------|-----------|-------------|
@@ -140,11 +145,7 @@ GO_APPLY_LOG_VERBOSE=1 go-apply run --url https://example.com/jobs/123
 
 ### Precedence
 
-Flag > environment variable > config file (`log_level`) > default (`INFO`)
-
-### Log file location
-
-`~/.local/state/go-apply/logs/go-apply-YYYY-MM-DD.log` — one file per day; last 50 retained.
+`--trace` / `--debug` > `--log-level` flag > `GO_APPLY_LOG_LEVEL` env var > config file (`log_level`) > default (`INFO`)
 
 ### MCP server debug logging
 
@@ -204,9 +205,10 @@ Pipeline events (step-started/completed/failed) are written as JSON lines to std
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--url` | — | URL of the job posting |
-| `--text` | — | Raw JD text (mutually exclusive with --url) |
-| `--headless` | `true` | JSON output mode (default; TUI in future Epic 6) |
+| `--text` | — | Raw JD text (mutually exclusive with `--url`) |
+| `--headless` | `true` | JSON output mode (default; TUI coming in future) |
 | `--channel` | `COLD` | Application channel: `COLD`, `REFERRAL`, `RECRUITER` |
+| `--accomplishments` | — | Path to accomplishments doc for tier-2 bullet rewriting (optional) |
 
 ## MCP Server (Claude Code)
 
@@ -219,7 +221,7 @@ Add to Claude Code `settings.json`:
 }
 ```
 
-Available tools: `get_score`, `onboard_user`, `add_resume`, `update_config`, `get_config`
+Available tools: `onboard_user`, `add_resume`, `get_config`, `update_config`, `load_jd`, `submit_keywords`, `submit_tailor_t1`, `submit_tailor_t2`, `finalize`
 
 ### MCP setup command
 
@@ -234,14 +236,105 @@ go-apply setup mcp --agent openclaw
 
 # Register with Hermes
 go-apply setup mcp --agent hermes
+
+# Register with all known agents at once
+go-apply setup mcp --agent all
 ```
 
 To unregister:
 ```bash
 go-apply setup mcp --agent claude --remove
+go-apply setup mcp --agent all --remove
 ```
 
-The command is idempotent — running it again reports "already registered" and makes no changes.
+To overwrite an existing registration:
+```bash
+go-apply setup mcp --agent claude --override   # or --force (alias)
+```
+
+The command is idempotent — running it again without `--override` reports "already registered" and makes no changes. On a TTY you will be prompted to confirm the overwrite.
+
+## CLI Reference
+
+### Global (persistent) flags
+
+These apply to every subcommand and must come before the subcommand name.
+
+| Flag | Shorthand | Default | Description |
+|------|-----------|---------|-------------|
+| `--log-level <level>` | | `info` | Log level: `debug`, `info`, `warn`, `error` |
+| `--debug` | `-v` | `false` | Enable debug logging (equivalent to `--log-level=debug`) |
+| `--trace` | | `false` | Enable trace logging: debug level + full payload logging |
+
+### `go-apply run`
+
+Run the full apply pipeline against a job description.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--url <url>` | — | URL of the job posting to fetch |
+| `--text <jd>` | — | Raw job description text (mutually exclusive with `--url`) |
+| `--headless` | `true` | JSON output mode (default; TUI coming in future) |
+| `--channel <channel>` | `COLD` | Application channel: `COLD`, `REFERRAL`, `RECRUITER` |
+| `--accomplishments <path>` | — | Path to accomplishments doc for tier-2 bullet rewriting (optional) |
+
+### `go-apply serve`
+
+Start the MCP stdio server for Claude Code integration. No flags.
+
+### `go-apply onboard`
+
+Store resumes, skills, and accomplishments in the profile database.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--resume <path>` | — | Path to a resume file (repeatable; at least one required) |
+| `--skills <path>` | — | Path to skills reference file (optional) |
+| `--accomplishments <path>` | — | Path to accomplishments file (optional) |
+| `--reset` | `false` | Delete profile database and `inputs/` directory |
+| `--yes` | `false` | Skip confirmation prompt for `--reset` (required for non-interactive use) |
+
+### `go-apply config`
+
+Manage go-apply configuration. Subcommands:
+
+| Subcommand | Usage | Description |
+|------------|-------|-------------|
+| `set` | `go-apply config set <key> <value>` | Set a config field by dot-notation key |
+| `get` | `go-apply config get <key>` | Get a config field value by dot-notation key |
+| `show` | `go-apply config show` | Show all config fields (API keys redacted) |
+
+Config keys use dot notation (e.g. `llm.base_url`, `embedder.model`, `user_name`, `log_level`).
+
+### `go-apply setup mcp`
+
+Register or unregister go-apply as an MCP server in an AI agent's config.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--agent <name>` | — | Agent to configure: `claude`, `openclaw`, `hermes`, `all` (required) |
+| `--remove` | `false` | Unregister go-apply from the agent's config |
+| `--override` | `false` | Overwrite an existing registration |
+| `--force` | `false` | Alias for `--override` |
+
+### `go-apply logs`
+
+View recent go-apply log entries.
+
+| Flag | Shorthand | Default | Description |
+|------|-----------|---------|-------------|
+| `--lines <n>` | `-n` | `100` | Number of recent lines to show |
+| `--follow` | `-f` | `false` | Watch for new log lines (tail -f mode) |
+
+### `go-apply update`
+
+Update go-apply to the latest GitHub release. No flags.
+
+> Note: cannot self-update a development build (`go install` builds).
+
+### `go-apply version`
+
+Print the go-apply version. No flags.
 
 ## Roadmap
 
