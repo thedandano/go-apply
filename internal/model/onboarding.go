@@ -16,8 +16,8 @@ type OnboardInput struct {
 // OnboardSummary provides a breakdown of what was embedded during onboarding.
 type OnboardSummary struct {
 	ResumesAdded         int `json:"resumes_added"`
-	SkillsChars          int `json:"skills_chars"`
-	AccomplishmentsChars int `json:"accomplishments_chars"`
+	SkillsCount          int `json:"skills_count"`
+	AccomplishmentsCount int `json:"accomplishments_count"`
 	TotalChunks          int `json:"total_chunks"`
 }
 
