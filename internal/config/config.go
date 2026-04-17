@@ -79,6 +79,7 @@ type Config struct {
 	EmbeddingDim      int               `yaml:"embedding_dim"`
 	DBPath            string            `yaml:"db_path"`
 	LogLevel          string            `yaml:"log_level"`
+	Verbose           bool              `yaml:"verbose"`
 	DefaultSeniority  string            `yaml:"default_seniority"`
 	UserName          string            `yaml:"user_name"`
 	Occupation        string            `yaml:"occupation"`
@@ -98,24 +99,6 @@ func (c *Config) ResolveLogLevel() slog.Level {
 	default:
 		return slog.LevelInfo
 	}
-}
-
-// ResolveLogLevelFromEnv reads GO_APPLY_LOG_LEVEL and parses its value.
-// Returns (level, true) if a valid level is set, or (LevelInfo, false) if unset or unrecognised.
-// Callers must check ok before using the returned level.
-func ResolveLogLevelFromEnv() (slog.Level, bool) {
-	val := os.Getenv("GO_APPLY_LOG_LEVEL")
-	switch strings.ToLower(val) {
-	case "debug":
-		return slog.LevelDebug, true
-	case "info":
-		return slog.LevelInfo, true
-	case "warn":
-		return slog.LevelWarn, true
-	case "error":
-		return slog.LevelError, true
-	}
-	return slog.LevelInfo, false
 }
 
 func (c *Config) ResolveEmbeddingDim() int {
@@ -180,8 +163,6 @@ func (c *Config) ValidateCLI() error {
 }
 
 // AllKeys returns all user-facing dot-notation config keys in canonical order.
-// Internal keys (db_path, log_level, default_seniority) are intentionally excluded;
-// they can only be set by editing config.yaml directly.
 func AllKeys() []string {
 	return []string{
 		"orchestrator.base_url",
@@ -191,6 +172,8 @@ func AllKeys() []string {
 		"embedder.model",
 		"embedder.api_key",
 		"embedding_dim",
+		"log_level",
+		"verbose",
 		"user_name",
 		"occupation",
 		"location",
@@ -240,6 +223,19 @@ func (c *Config) SetField(key, value string) error {
 			return fmt.Errorf("embedding_dim must be an integer: %w", err)
 		}
 		c.EmbeddingDim = n
+	case "log_level":
+		switch strings.ToLower(value) {
+		case "debug", "info", "warn", "error", "":
+			c.LogLevel = strings.ToLower(value)
+		default:
+			return fmt.Errorf("log_level must be one of: debug, info, warn, error")
+		}
+	case "verbose":
+		b, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("verbose must be true or false: %w", err)
+		}
+		c.Verbose = b
 	case "user_name":
 		c.UserName = value
 	case "occupation":
@@ -277,6 +273,10 @@ func (c *Config) GetField(key string) (string, error) {
 		return c.Embedder.APIKey, nil
 	case "embedding_dim":
 		return strconv.Itoa(c.EmbeddingDim), nil
+	case "log_level":
+		return c.LogLevel, nil
+	case "verbose":
+		return strconv.FormatBool(c.Verbose), nil
 	case "user_name":
 		return c.UserName, nil
 	case "occupation":
