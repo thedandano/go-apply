@@ -64,7 +64,7 @@ func (s *Service) AugmentResumeText(ctx context.Context, input model.AugmentInpu
 	)
 
 	if len(input.JDKeywords) == 0 {
-		logger.Decision(ctx, slog.Default(), "augment.output", "original", "no keywords")
+		logger.Decision(ctx, s.log, "augment.output", "original", "no keywords")
 		s.log.DebugContext(ctx, "augment skipped: no keywords")
 		return input.ResumeText, input.RefData, nil
 	}
@@ -74,7 +74,7 @@ func (s *Service) AugmentResumeText(ctx context.Context, input model.AugmentInpu
 		return "", nil, fmt.Errorf("augment: retrieve chunks: %w", err)
 	}
 	if len(chunks) == 0 {
-		logger.Decision(ctx, slog.Default(), "augment.output", "original", "no relevant chunks")
+		logger.Decision(ctx, s.log, "augment.output", "original", "no relevant chunks")
 		s.log.WarnContext(ctx, "augment: no relevant chunks found — returning original resume")
 		return input.ResumeText, input.RefData, nil
 	}
@@ -97,7 +97,7 @@ func (s *Service) AugmentResumeText(ctx context.Context, input model.AugmentInpu
 func (s *Service) retrieveChunks(ctx context.Context, keywords []string) ([]retrievedChunk, error) {
 	chunks, err := s.retrieveByVector(ctx, keywords)
 	if err != nil {
-		logger.Decision(ctx, slog.Default(), "augment.retrieval", "keyword", "vector retrieval failed", slog.String("error", err.Error()))
+		logger.Decision(ctx, s.log, "augment.retrieval", "keyword", "vector retrieval failed", slog.String("error", err.Error()))
 		s.log.WarnContext(ctx, "augment: vector retrieval failed — falling back to keyword matching", "error", err)
 		return s.retrieveByKeyword(ctx, keywords)
 	}

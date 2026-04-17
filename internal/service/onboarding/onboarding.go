@@ -53,7 +53,7 @@ func (s *Service) Run(ctx context.Context, input model.OnboardInput) (model.Onbo
 
 	for _, resume := range input.Resumes {
 		if err := validateLabel(resume.Label); err != nil {
-			logger.Decision(ctx, slog.Default(), "onboard.resume", "skip", err.Error(), slog.String("label", resume.Label))
+			logger.Decision(ctx, s.log, "onboard.resume", "skip", err.Error(), slog.String("label", resume.Label))
 			result.Warnings = append(result.Warnings, model.RiskWarning{
 				Severity: model.SeverityError,
 				Message:  fmt.Sprintf("resume %q: %v", resume.Label, err),
@@ -82,7 +82,7 @@ func (s *Service) Run(ctx context.Context, input model.OnboardInput) (model.Onbo
 			result.Stored = append(result.Stored, "ref:skills")
 		}
 	} else {
-		logger.Decision(ctx, slog.Default(), "onboard.skills", "skip", "empty")
+		logger.Decision(ctx, s.log, "onboard.skills", "skip", "empty")
 	}
 
 	if input.AccomplishmentsText != "" {
@@ -95,7 +95,7 @@ func (s *Service) Run(ctx context.Context, input model.OnboardInput) (model.Onbo
 			result.Stored = append(result.Stored, "accomplishments")
 		}
 	} else {
-		logger.Decision(ctx, slog.Default(), "onboard.accomplishments", "skip", "empty")
+		logger.Decision(ctx, s.log, "onboard.accomplishments", "skip", "empty")
 	}
 
 	result.Summary.SkillsChars = len(input.SkillsText)

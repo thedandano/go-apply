@@ -58,7 +58,7 @@ func (s *Service) TailorResume(ctx context.Context, input *model.TailorInput) (m
 		if input.AccomplishmentsText != "" {
 			reason = "budget=0"
 		}
-		logger.Decision(ctx, slog.Default(), "tailor.tier", "t1", reason)
+		logger.Decision(ctx, s.log, "tailor.tier", "t1", reason)
 		return result, nil
 	}
 
@@ -80,12 +80,12 @@ func (s *Service) TailorResume(ctx context.Context, input *model.TailorInput) (m
 
 	// If tier-2 produced changes, upgrade the result.
 	if len(changes) > 0 {
-		logger.Decision(ctx, slog.Default(), "tailor.tier", "t2", "bullets rewritten", slog.Int("changes", len(changes)))
+		logger.Decision(ctx, s.log, "tailor.tier", "t2", "bullets rewritten", slog.Int("changes", len(changes)))
 		result.TierApplied = model.TierBullet
 		result.RewrittenBullets = changes
 		result.TailoredText = tier2Text
 	} else {
-		logger.Decision(ctx, slog.Default(), "tailor.tier", "t1", "no bullets rewritten")
+		logger.Decision(ctx, s.log, "tailor.tier", "t1", "no bullets rewritten")
 	}
 
 	return result, nil
