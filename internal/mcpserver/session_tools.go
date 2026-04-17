@@ -78,6 +78,7 @@ func HandleLoadJDWithConfig(ctx context.Context, req *mcp.CallToolRequest, deps 
 		slog.String("tool", "load_jd"),
 		slog.String("status", "ok"),
 		slog.Int("result_bytes", len(resultBytes)),
+		logger.PayloadAttr("result", string(resultBytes), logger.Verbose()),
 	)
 	return envelopeResult(okEnvelope(sess.ID, "extract_keywords", resultData))
 }
@@ -170,6 +171,7 @@ func HandleSubmitKeywordsWithConfig(ctx context.Context, req *mcp.CallToolReques
 		slog.String("session_id", sessionID),
 		slog.String("status", "ok"),
 		slog.Int("result_bytes", len(resultBytes)),
+		logger.PayloadAttr("result", string(resultBytes), logger.Verbose()),
 	)
 	return envelopeResult(okEnvelope(sessionID, nextAction, resultData))
 }
@@ -264,6 +266,7 @@ func HandleFinalizeWithConfig(ctx context.Context, req *mcp.CallToolRequest, dep
 		slog.String("session_id", sessionID),
 		slog.String("status", "ok"),
 		slog.Int("result_bytes", len(resultBytes)),
+		logger.PayloadAttr("result", string(resultBytes), logger.Verbose()),
 	)
 	return envelopeResult(okEnvelope(sessionID, "", resultData))
 }
@@ -406,6 +409,7 @@ func HandleSubmitTailorT1WithConfig(ctx context.Context, req *mcp.CallToolReques
 		slog.String("session_id", sessionID),
 		slog.String("status", "ok"),
 		slog.Int("result_bytes", len(resultBytes)),
+		logger.PayloadAttr("result", string(resultBytes), logger.Verbose()),
 	)
 	return envelopeResult(okEnvelope(sessionID, NextActionAfterT1(newScoreTotal), resultData))
 }
@@ -509,6 +513,7 @@ func HandleSubmitTailorT2WithConfig(ctx context.Context, req *mcp.CallToolReques
 		slog.String("session_id", sessionID),
 		slog.String("status", "ok"),
 		slog.Int("result_bytes", len(resultBytes)),
+		logger.PayloadAttr("result", string(resultBytes), logger.Verbose()),
 	)
 	return envelopeResult(okEnvelope(sessionID, "cover_letter", resultData))
 }
