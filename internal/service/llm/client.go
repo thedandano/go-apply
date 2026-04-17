@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/thedandano/go-apply/internal/config"
+	"github.com/thedandano/go-apply/internal/logger"
 	"github.com/thedandano/go-apply/internal/model"
 	"github.com/thedandano/go-apply/internal/port"
 )
@@ -98,6 +99,13 @@ func (c *HTTPClient) ChatComplete(ctx context.Context, messages []model.ChatMess
 		return "", fmt.Errorf("llm: marshal chat request: %w", err)
 	}
 
+	slog.DebugContext(ctx, "llm request",
+		slog.String("model", c.model),
+		slog.Int("prompt_bytes", len(body)),
+		logger.PayloadAttr("prompt", string(body), logger.Verbose()),
+	)
+
+	start := time.Now()
 	var result chatResponse
 	if err := c.doWithRetry(ctx, c.baseURL+"/chat/completions", body, &result); err != nil {
 		return "", err
@@ -105,7 +113,13 @@ func (c *HTTPClient) ChatComplete(ctx context.Context, messages []model.ChatMess
 	if len(result.Choices) == 0 {
 		return "", fmt.Errorf("llm: no choices in chat response")
 	}
-	return result.Choices[0].Message.Content, nil
+	completion := result.Choices[0].Message.Content
+	slog.DebugContext(ctx, "llm response",
+		slog.Int("response_bytes", len(completion)),
+		slog.Int64("elapsed_ms", time.Since(start).Milliseconds()),
+		logger.PayloadAttr("completion", completion, logger.Verbose()),
+	)
+	return completion, nil
 }
 
 // Embed implements port.EmbeddingClient using the /embeddings endpoint.
@@ -116,6 +130,13 @@ func (c *HTTPClient) Embed(ctx context.Context, text string) ([]float32, error) 
 		return nil, fmt.Errorf("llm: marshal embed request: %w", err)
 	}
 
+	slog.DebugContext(ctx, "llm request",
+		slog.String("model", c.model),
+		slog.Int("prompt_bytes", len(body)),
+		logger.PayloadAttr("prompt", string(body), logger.Verbose()),
+	)
+
+	start := time.Now()
 	var result embedResponse
 	if err := c.doWithRetry(ctx, c.baseURL+"/embeddings", body, &result); err != nil {
 		return nil, err
@@ -123,7 +144,12 @@ func (c *HTTPClient) Embed(ctx context.Context, text string) ([]float32, error) 
 	if len(result.Data) == 0 {
 		return nil, fmt.Errorf("llm: no embedding in response")
 	}
-	return result.Data[0].Embedding, nil
+	embedding := result.Data[0].Embedding
+	slog.DebugContext(ctx, "llm response",
+		slog.Int("response_bytes", len(embedding)),
+		slog.Int64("elapsed_ms", time.Since(start).Milliseconds()),
+	)
+	return embedding, nil
 }
 
 // doWithRetry executes a POST request, retrying on 429 and 503 with exponential
@@ -162,6 +188,11 @@ func (c *HTTPClient) doWithRetry(ctx context.Context, url string, body []byte, o
 				"attempt", attempt+1,
 				"error", err,
 			)
+			if attempt+1 < maxAttempts {
+				logger.Decision(ctx, c.log, "llm.retry", "retry", "http error", slog.Int("attempt", attempt+1))
+			} else {
+				logger.Decision(ctx, c.log, "llm.retry", "abort", "http error", slog.Int("attempt", attempt+1))
+			}
 			continue
 		}
 
@@ -177,12 +208,26 @@ func (c *HTTPClient) doWithRetry(ctx context.Context, url string, body []byte, o
 				"status", resp.StatusCode,
 				"attempt", attempt+1,
 			)
+			if attempt+1 < maxAttempts {
+				logger.Decision(ctx, c.log, "llm.retry", "retry", "retryable status",
+					slog.Int("attempt", attempt+1),
+					slog.Int("status", resp.StatusCode),
+				)
+			} else {
+				logger.Decision(ctx, c.log, "llm.retry", "abort", "max attempts exceeded",
+					slog.Int("attempt", attempt+1),
+					slog.Int("status", resp.StatusCode),
+				)
+			}
 		default:
 			var bodySnippet string
 			if b, readErr := io.ReadAll(io.LimitReader(resp.Body, 512)); readErr == nil {
 				bodySnippet = string(b)
 			}
 			_ = resp.Body.Close()
+			logger.Decision(ctx, c.log, "llm.retry", "abort", "non-retryable error",
+				slog.Int("status", resp.StatusCode),
+			)
 			c.log.ErrorContext(ctx, "llm: non-retryable error", "status", resp.StatusCode, "body", bodySnippet, "url", url)
 			return fmt.Errorf("llm: API returned status %d: %s", resp.StatusCode, bodySnippet)
 		}
