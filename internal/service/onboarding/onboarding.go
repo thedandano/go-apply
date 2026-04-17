@@ -65,6 +65,7 @@ func (s *Service) Run(ctx context.Context, input model.OnboardInput) (model.Onbo
 			continue
 		}
 		result.Stored = append(result.Stored, sourceDoc)
+		result.Summary.ResumesAdded++
 	}
 
 	if input.SkillsText != "" {
@@ -84,6 +85,10 @@ func (s *Service) Run(ctx context.Context, input model.OnboardInput) (model.Onbo
 			result.Stored = append(result.Stored, "accomplishments")
 		}
 	}
+
+	result.Summary.SkillsChars = len(input.SkillsText)
+	result.Summary.AccomplishmentsChars = len(input.AccomplishmentsText)
+	result.Summary.TotalChunks = len(result.Stored)
 
 	return result, nil
 }

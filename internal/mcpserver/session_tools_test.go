@@ -292,6 +292,70 @@ func TestHandleFinalizeWithConfig_HappyPath(t *testing.T) {
 	}
 }
 
+func TestHandleFinalizeWithConfig_SummaryIncluded(t *testing.T) {
+	cfg := stubApplyConfigForSession()
+
+	// Full flow: load_jd → submit_keywords (1 required, 0 preferred) → finalize.
+	loadReq := callToolRequest("load_jd", map[string]any{
+		"jd_raw_text": "Senior Go engineer. Required: go.",
+	})
+	loadResult := mcpserver.HandleLoadJDWithConfig(context.Background(), &loadReq, &cfg)
+	loadText := extractText(t, loadResult)
+	var loadEnv map[string]any
+	if err := json.Unmarshal([]byte(loadText), &loadEnv); err != nil {
+		t.Fatalf("load_jd not JSON: %v", err)
+	}
+	sessionID, _ := loadEnv["session_id"].(string)
+
+	kwReq := callToolRequest("submit_keywords", map[string]any{
+		"session_id": sessionID,
+		"jd_json":    `{"title":"Go Engineer","company":"Acme","required":["go"],"preferred":[],"location":"Remote","seniority":"senior","required_years":3}`,
+	})
+	mcpserver.HandleSubmitKeywordsWithConfig(context.Background(), &kwReq, &cfg, &config.Config{})
+
+	const coverLetter = "Dear Hiring Manager, I am applying..."
+	finReq := callToolRequest("finalize", map[string]any{
+		"session_id":   sessionID,
+		"cover_letter": coverLetter,
+	})
+	result := mcpserver.HandleFinalizeWithConfig(context.Background(), &finReq, &cfg)
+	text := extractText(t, result)
+
+	var env map[string]any
+	if err := json.Unmarshal([]byte(text), &env); err != nil {
+		t.Fatalf("finalize response not JSON: %v — raw: %s", err, text)
+	}
+	if env["status"] != "ok" {
+		t.Errorf("status = %v, want ok — full: %s", env["status"], text)
+	}
+	data, _ := env["data"].(map[string]any)
+	if data == nil {
+		t.Fatal("expected data in finalize response")
+	}
+	summary, _ := data["summary"].(map[string]any)
+	if summary == nil {
+		t.Fatalf("expected summary in data, got: %s", text)
+	}
+	if summary["keywords_required"] != float64(1) {
+		t.Errorf("keywords_required = %v, want 1", summary["keywords_required"])
+	}
+	if summary["keywords_preferred"] != float64(0) {
+		t.Errorf("keywords_preferred = %v, want 0", summary["keywords_preferred"])
+	}
+	if summary["cover_letter_chars"] != float64(len(coverLetter)) {
+		t.Errorf("cover_letter_chars = %v, want %d", summary["cover_letter_chars"], len(coverLetter))
+	}
+	if _, ok := summary["resumes_scored"]; !ok {
+		t.Error("expected resumes_scored in summary")
+	}
+	if _, ok := summary["best_resume"]; !ok {
+		t.Error("expected best_resume in summary")
+	}
+	if _, ok := summary["best_score"]; !ok {
+		t.Error("expected best_score in summary")
+	}
+}
+
 // ── nextActionAfterT1 tests ───────────────────────────────────────────────────
 
 func TestNextActionAfterT1(t *testing.T) {
