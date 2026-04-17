@@ -74,7 +74,6 @@ type LLMDefaults struct {
 type AugmentDefaults struct {
 	IncorporationTemp      float64 `json:"incorporation_temp"`
 	IncorporationMaxTokens int     `json:"incorporation_max_tokens"`
-	KeywordMatchMinCount   int     `json:"keyword_match_min_count"`
 	MaxChunksToIncorporate int     `json:"max_chunks_to_incorporate"`
 }
 

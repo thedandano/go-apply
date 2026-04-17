@@ -39,10 +39,6 @@ func (r *stubProfileRepo) FindSimilar(_ context.Context, _ []float32, _ int) ([]
 	return nil, nil
 }
 
-func (r *stubProfileRepo) ListDocuments(_ context.Context) ([]model.ProfileDocument, error) {
-	return nil, nil
-}
-
 // stubEmbedder returns a fixed vector or an error.
 type stubEmbedder struct {
 	fail bool

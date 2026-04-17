@@ -5,10 +5,21 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
+	"sync/atomic"
 	"unicode/utf8"
+
+	"github.com/thedandano/go-apply/internal/redact"
 )
 
 const payloadLimit = 2048
+
+// globalRedactor is the process-level PII redactor. Nil means disabled.
+var globalRedactor atomic.Pointer[redact.Redactor]
+
+// SetRedactor installs r as the process-level PII redactor.
+// After this call, all PayloadAttr string values are redacted before logging.
+// Pass nil to disable redaction.
+func SetRedactor(r *redact.Redactor) { globalRedactor.Store(r) }
 
 // secretPatterns are compiled once at package init.
 var secretPatterns = []*regexp.Regexp{
@@ -60,7 +71,12 @@ func Redact(s string) string {
 // PayloadAttr returns an slog.Attr for a payload value.
 // If verbose is true, only Redact is applied (no truncation).
 // If verbose is false, both Truncate (payloadLimit bytes) and Redact are applied.
+// When a global PII redactor is installed via SetRedactor, it runs before the
+// secret-pattern redaction.
 func PayloadAttr(key, value string, verbose bool) slog.Attr {
+	if r := globalRedactor.Load(); r != nil {
+		value = r.Redact(value)
+	}
 	if verbose {
 		return slog.String(key, Redact(value))
 	}

@@ -110,6 +110,10 @@ func (s *stubAugmenter) AugmentResumeText(_ context.Context, input model.Augment
 	return input.ResumeText, input.RefData, nil
 }
 
+func (s *stubAugmenter) SuggestForKeywords(_ context.Context, _ []string) (model.TailorSuggestions, error) {
+	return nil, nil
+}
+
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 // callToolRequest builds an mcp.CallToolRequest with the given arguments map.

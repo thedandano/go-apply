@@ -17,6 +17,7 @@ You handle reasoning: extract keywords from JD text, interpret scores, drive tai
 |------|---------|------------|
 | load_jd | Fetch JD + start session | jd_url OR jd_raw_text |
 | submit_keywords | Score resumes against extracted JD | session_id (req), jd_json (req) |
+| suggest_tailoring | Optional: inspect profile bank matches for missing JD keywords | session_id (req) |
 | submit_tailor_t1 | Inject missing keywords into the skills section | session_id (req), skill_adds (string array, req) |
 | submit_tailor_t2 | Rewrite resume bullets to surface missing keywords | session_id (req), bullet_rewrites (array of {original, rewritten}, req) |
 | finalize | Persist record + close session | session_id (req), cover_letter (opt) |
@@ -59,6 +60,9 @@ next_action values:
 - "cover_letter" — score ≥ 70, strong fit
 - "tailor_t1" — 40 ≤ score < 70, moderate fit (tailoring may help)
 - "advise_skip" — score < 40, structural mismatch
+
+### Step 4b — suggest_tailoring (optional)
+Call ` + "`" + `suggest_tailoring(session_id:)` + "`" + ` at any point after scoring to inspect what the profile bank found for the JD keywords. This is a diagnostic tool — use its output to inform the skills or bullets you choose to include in submit_tailor_t1 or submit_tailor_t2, but do not forward its raw output as input to those tools.
 
 ### Step 5 — Act on next_action (do NOT wait for user to prompt you)
 
