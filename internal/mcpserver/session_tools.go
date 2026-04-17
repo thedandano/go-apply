@@ -10,6 +10,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 
 	"github.com/thedandano/go-apply/internal/config"
+	"github.com/thedandano/go-apply/internal/logger"
 	"github.com/thedandano/go-apply/internal/model"
 	mcppres "github.com/thedandano/go-apply/internal/presenter/mcp"
 	"github.com/thedandano/go-apply/internal/service/pipeline"
@@ -30,6 +31,10 @@ func HandleLoadJD(ctx context.Context, req *mcp.CallToolRequest) *mcp.CallToolRe
 func HandleLoadJDWithConfig(ctx context.Context, req *mcp.CallToolRequest, deps *pipeline.ApplyConfig) *mcp.CallToolResult {
 	jdURL := req.GetString("jd_url", "")
 	jdRawText := req.GetString("jd_raw_text", "")
+	slog.DebugContext(ctx, "mcp tool invoked",
+		slog.String("tool", "load_jd"),
+		logger.PayloadAttr("args", fmt.Sprintf("jd_url=%q jd_raw_text_len=%d", jdURL, len(jdRawText)), logger.Verbose()),
+	)
 	if (jdURL != "") == (jdRawText != "") {
 		return envelopeResult(stageErrorEnvelope("", "load_jd", "invalid_input",
 			"exactly one of jd_url or jd_raw_text is required", false))
@@ -67,7 +72,14 @@ func HandleLoadJDWithConfig(ctx context.Context, req *mcp.CallToolRequest, deps 
 	type loadJDData struct {
 		JDText string `json:"jd_text"`
 	}
-	return envelopeResult(okEnvelope(sess.ID, "extract_keywords", loadJDData{JDText: jdText}))
+	resultData := loadJDData{JDText: jdText}
+	resultBytes, _ := json.Marshal(resultData)
+	slog.DebugContext(ctx, "mcp tool result",
+		slog.String("tool", "load_jd"),
+		slog.String("status", "ok"),
+		slog.Int("result_bytes", len(resultBytes)),
+	)
+	return envelopeResult(okEnvelope(sess.ID, "extract_keywords", resultData))
 }
 
 // HandleSubmitKeywords is the exported handler for the "submit_keywords" MCP tool.
@@ -82,6 +94,11 @@ func HandleSubmitKeywordsWithConfig(ctx context.Context, req *mcp.CallToolReques
 		return envelopeResult(stageErrorEnvelope("", "submit_keywords", "missing_session", "session_id is required", false))
 	}
 	jdJSONStr := req.GetString("jd_json", "")
+	slog.DebugContext(ctx, "mcp tool invoked",
+		slog.String("tool", "submit_keywords"),
+		slog.String("session_id", sessionID),
+		logger.PayloadAttr("args", fmt.Sprintf("jd_json_len=%d", len(jdJSONStr)), logger.Verbose()),
+	)
 	if jdJSONStr == "" {
 		return envelopeResult(stageErrorEnvelope(sessionID, "submit_keywords", "missing_jd", "jd_json is required", false))
 	}
@@ -142,11 +159,19 @@ func HandleSubmitKeywordsWithConfig(ctx context.Context, req *mcp.CallToolReques
 		BestResume string                       `json:"best_resume"`
 		BestScore  float64                      `json:"best_score"`
 	}
-	return envelopeResult(okEnvelope(sessionID, nextAction, submitKeywordsData{
+	resultData := submitKeywordsData{
 		Scores:     scored.Scores,
 		BestResume: scored.BestLabel,
 		BestScore:  scored.BestScore,
-	}))
+	}
+	resultBytes, _ := json.Marshal(resultData)
+	slog.DebugContext(ctx, "mcp tool result",
+		slog.String("tool", "submit_keywords"),
+		slog.String("session_id", sessionID),
+		slog.String("status", "ok"),
+		slog.Int("result_bytes", len(resultBytes)),
+	)
+	return envelopeResult(okEnvelope(sessionID, nextAction, resultData))
 }
 
 // HandleFinalize is the exported handler for the "finalize" MCP tool.
@@ -161,6 +186,11 @@ func HandleFinalizeWithConfig(ctx context.Context, req *mcp.CallToolRequest, dep
 		return envelopeResult(stageErrorEnvelope("", "finalize", "missing_session", "session_id is required", false))
 	}
 	coverLetter := req.GetString("cover_letter", "")
+	slog.DebugContext(ctx, "mcp tool invoked",
+		slog.String("tool", "finalize"),
+		slog.String("session_id", sessionID),
+		logger.PayloadAttr("args", fmt.Sprintf("cover_letter_len=%d", len(coverLetter)), logger.Verbose()),
+	)
 
 	sess := sessions.Get(sessionID)
 	if sess == nil {
@@ -215,7 +245,7 @@ func HandleFinalizeWithConfig(ctx context.Context, req *mcp.CallToolRequest, dep
 		CoverLetter string          `json:"cover_letter,omitempty"`
 		Summary     finalizeSummary `json:"summary"`
 	}
-	return envelopeResult(okEnvelope(sessionID, "", finalizeData{
+	resultData := finalizeData{
 		BestResume:  sess.ScoreResult.BestLabel,
 		BestScore:   sess.ScoreResult.BestScore,
 		CoverLetter: coverLetter,
@@ -227,7 +257,15 @@ func HandleFinalizeWithConfig(ctx context.Context, req *mcp.CallToolRequest, dep
 			BestScore:         sess.ScoreResult.BestScore,
 			CoverLetterChars:  len(coverLetter),
 		},
-	}))
+	}
+	resultBytes, _ := json.Marshal(resultData)
+	slog.DebugContext(ctx, "mcp tool result",
+		slog.String("tool", "finalize"),
+		slog.String("session_id", sessionID),
+		slog.String("status", "ok"),
+		slog.Int("result_bytes", len(resultBytes)),
+	)
+	return envelopeResult(okEnvelope(sessionID, "", resultData))
 }
 
 // NextActionFromScore returns the recommended next action based on the best resume score.
@@ -281,6 +319,11 @@ func HandleSubmitTailorT1WithConfig(ctx context.Context, req *mcp.CallToolReques
 		return envelopeResult(stageErrorEnvelope("", "submit_tailor_t1", "missing_session", "session_id is required", false))
 	}
 	skillAddsStr := req.GetString("skill_adds", "")
+	slog.DebugContext(ctx, "mcp tool invoked",
+		slog.String("tool", "submit_tailor_t1"),
+		slog.String("session_id", sessionID),
+		logger.PayloadAttr("args", fmt.Sprintf("skill_adds_len=%d", len(skillAddsStr)), logger.Verbose()),
+	)
 	if skillAddsStr == "" {
 		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t1", "missing_skill_adds", "skill_adds is required", false))
 	}
@@ -353,10 +396,18 @@ func HandleSubmitTailorT1WithConfig(ctx context.Context, req *mcp.CallToolReques
 		NewScore      float64  `json:"new_score"`
 		AddedKeywords []string `json:"added_keywords"`
 	}
-	return envelopeResult(okEnvelope(sessionID, NextActionAfterT1(newScoreTotal), t1Data{
+	resultData := t1Data{
 		NewScore:      newScoreTotal,
 		AddedKeywords: addedKeywords,
-	}))
+	}
+	resultBytes, _ := json.Marshal(resultData)
+	slog.DebugContext(ctx, "mcp tool result",
+		slog.String("tool", "submit_tailor_t1"),
+		slog.String("session_id", sessionID),
+		slog.String("status", "ok"),
+		slog.Int("result_bytes", len(resultBytes)),
+	)
+	return envelopeResult(okEnvelope(sessionID, NextActionAfterT1(newScoreTotal), resultData))
 }
 
 // HandleSubmitTailorT2 is the exported handler for the "submit_tailor_t2" MCP tool.
@@ -371,6 +422,11 @@ func HandleSubmitTailorT2WithConfig(ctx context.Context, req *mcp.CallToolReques
 		return envelopeResult(stageErrorEnvelope("", "submit_tailor_t2", "missing_session", "session_id is required", false))
 	}
 	bulletRewritesStr := req.GetString("bullet_rewrites", "")
+	slog.DebugContext(ctx, "mcp tool invoked",
+		slog.String("tool", "submit_tailor_t2"),
+		slog.String("session_id", sessionID),
+		logger.PayloadAttr("args", fmt.Sprintf("bullet_rewrites_len=%d", len(bulletRewritesStr)), logger.Verbose()),
+	)
 	if bulletRewritesStr == "" {
 		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t2", "missing_bullet_rewrites", "bullet_rewrites is required", false))
 	}
@@ -443,8 +499,16 @@ func HandleSubmitTailorT2WithConfig(ctx context.Context, req *mcp.CallToolReques
 		NewScore          float64 `json:"new_score"`
 		SubstitutionsMade int     `json:"substitutions_made"`
 	}
-	return envelopeResult(okEnvelope(sessionID, "cover_letter", t2Data{
+	resultData := t2Data{
 		NewScore:          newScoreTotal,
 		SubstitutionsMade: substitutionsMade,
-	}))
+	}
+	resultBytes, _ := json.Marshal(resultData)
+	slog.DebugContext(ctx, "mcp tool result",
+		slog.String("tool", "submit_tailor_t2"),
+		slog.String("session_id", sessionID),
+		slog.String("status", "ok"),
+		slog.Int("result_bytes", len(resultBytes)),
+	)
+	return envelopeResult(okEnvelope(sessionID, "cover_letter", resultData))
 }
