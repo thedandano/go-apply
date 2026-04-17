@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/thedandano/go-apply/internal/config"
+	"github.com/thedandano/go-apply/internal/logger"
 	"github.com/thedandano/go-apply/internal/model"
 	"github.com/thedandano/go-apply/internal/port"
 )
@@ -54,9 +56,15 @@ func New(profile port.ProfileRepository, cache port.KeywordCacheRepository, embe
 // AugmentResumeText retrieves relevant profile document chunks and incorporates them
 // into the resume text via LLM. Returns an error if retrieval or incorporation fails.
 func (s *Service) AugmentResumeText(ctx context.Context, input model.AugmentInput) (string, *model.ReferenceData, error) {
-	s.log.DebugContext(ctx, "augment started", "input_words", len(strings.Fields(input.ResumeText)), "keyword_count", len(input.JDKeywords))
+	start := time.Now()
+	s.log.DebugContext(ctx, "augment started",
+		"input_bytes", len(input.ResumeText),
+		"input_words", len(strings.Fields(input.ResumeText)),
+		"keyword_count", len(input.JDKeywords),
+	)
 
 	if len(input.JDKeywords) == 0 {
+		logger.Decision(ctx, s.log, "augment.output", "original", "no keywords")
 		s.log.DebugContext(ctx, "augment skipped: no keywords")
 		return input.ResumeText, input.RefData, nil
 	}
@@ -66,6 +74,7 @@ func (s *Service) AugmentResumeText(ctx context.Context, input model.AugmentInpu
 		return "", nil, fmt.Errorf("augment: retrieve chunks: %w", err)
 	}
 	if len(chunks) == 0 {
+		logger.Decision(ctx, s.log, "augment.output", "original", "no relevant chunks")
 		s.log.WarnContext(ctx, "augment: no relevant chunks found — returning original resume")
 		return input.ResumeText, input.RefData, nil
 	}
@@ -75,7 +84,12 @@ func (s *Service) AugmentResumeText(ctx context.Context, input model.AugmentInpu
 		return "", nil, fmt.Errorf("augment: incorporate chunks: %w", err)
 	}
 
-	s.log.DebugContext(ctx, "augment complete", "output_words", len(strings.Fields(augmented)), "chunks_used", len(chunks))
+	s.log.DebugContext(ctx, "augment complete",
+		"output_bytes", len(augmented),
+		"output_words", len(strings.Fields(augmented)),
+		"chunks_used", len(chunks),
+		"elapsed_ms", time.Since(start).Milliseconds(),
+	)
 	return augmented, input.RefData, nil
 }
 
@@ -83,6 +97,7 @@ func (s *Service) AugmentResumeText(ctx context.Context, input model.AugmentInpu
 func (s *Service) retrieveChunks(ctx context.Context, keywords []string) ([]retrievedChunk, error) {
 	chunks, err := s.retrieveByVector(ctx, keywords)
 	if err != nil {
+		logger.Decision(ctx, s.log, "augment.retrieval", "keyword", "vector retrieval failed", slog.String("error", err.Error()))
 		s.log.WarnContext(ctx, "augment: vector retrieval failed — falling back to keyword matching", "error", err)
 		return s.retrieveByKeyword(ctx, keywords)
 	}
