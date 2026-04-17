@@ -5,6 +5,7 @@ import (
 	"log/slog"
 
 	"github.com/thedandano/go-apply/internal/config"
+	"github.com/thedandano/go-apply/internal/logger"
 	"github.com/thedandano/go-apply/internal/model"
 	"github.com/thedandano/go-apply/internal/port"
 )
@@ -39,7 +40,9 @@ func (s *Service) TailorResume(ctx context.Context, input *model.TailorInput) (m
 	allKeywords := append(input.JD.Required, input.JD.Preferred...) //nolint:gocritic // fresh slice intentional
 
 	// Tier-1: inject missing keywords into Skills section.
+	s.log.DebugContext(ctx, "tailor tier-1 start", "input_bytes", len(input.ResumeText), "keywords", len(allKeywords))
 	tier1Text, addedKeywords := AddKeywordsToSkillsSection(input.ResumeText, allKeywords)
+	s.log.DebugContext(ctx, "tailor tier-1 end", "output_bytes", len(tier1Text), "added_keywords", len(addedKeywords))
 
 	result := model.TailorResult{
 		ResumeLabel:   input.Resume.Label,
@@ -51,6 +54,11 @@ func (s *Service) TailorResume(ctx context.Context, input *model.TailorInput) (m
 	// Tier-2: rewrite relevant bullets when accomplishments and budget are provided.
 	runTier2 := input.AccomplishmentsText != "" && input.Options.MaxTier2BulletRewrites > 0
 	if !runTier2 {
+		reason := "no accomplishments text"
+		if input.AccomplishmentsText != "" {
+			reason = "budget=0"
+		}
+		logger.Decision(ctx, slog.Default(), "tailor.tier", "t1", reason)
 		return result, nil
 	}
 
@@ -72,9 +80,12 @@ func (s *Service) TailorResume(ctx context.Context, input *model.TailorInput) (m
 
 	// If tier-2 produced changes, upgrade the result.
 	if len(changes) > 0 {
+		logger.Decision(ctx, slog.Default(), "tailor.tier", "t2", "bullets rewritten", slog.Int("changes", len(changes)))
 		result.TierApplied = model.TierBullet
 		result.RewrittenBullets = changes
 		result.TailoredText = tier2Text
+	} else {
+		logger.Decision(ctx, slog.Default(), "tailor.tier", "t1", "no bullets rewritten")
 	}
 
 	return result, nil

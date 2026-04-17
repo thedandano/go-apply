@@ -18,6 +18,7 @@ import (
 	"github.com/chromedp/chromedp"
 
 	"github.com/thedandano/go-apply/internal/config"
+	"github.com/thedandano/go-apply/internal/logger"
 	"github.com/thedandano/go-apply/internal/port"
 )
 
@@ -48,6 +49,8 @@ func New(defaults *config.AppDefaults, log *slog.Logger) *ChromedpFetcher {
 
 // Fetch navigates to url with a headless browser and returns the visible body text.
 func (f *ChromedpFetcher) Fetch(ctx context.Context, url string) (string, error) {
+	start := time.Now()
+	f.log.DebugContext(ctx, "fetcher: chromedp fetch start", "url", url)
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.Flag("headless", true),
 		chromedp.Flag("disable-gpu", true),
@@ -102,7 +105,11 @@ func (f *ChromedpFetcher) Fetch(ctx context.Context, url string) (string, error)
 		return "", fmt.Errorf("chromedp fetch %s: %w", url, err)
 	}
 	text := ExtractJDMarkdown(body, f.maxChars)
-	f.log.DebugContext(ctx, "fetcher: chromedp fetched page", "url", url, "chars", len(text))
+	f.log.DebugContext(ctx, "fetcher: chromedp fetch end",
+		"url", url,
+		"response_bytes", len(text),
+		"elapsed_ms", time.Since(start).Milliseconds(),
+	)
 	return text, nil
 }
 
@@ -125,6 +132,8 @@ func NewGoquery(maxChars int, log *slog.Logger) *GoqueryFetcher {
 
 // Fetch issues a GET request to url and returns the visible body text.
 func (f *GoqueryFetcher) Fetch(ctx context.Context, url string) (string, error) {
+	start := time.Now()
+	f.log.DebugContext(ctx, "fetcher: goquery fetch start", "url", url)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return "", fmt.Errorf("goquery fetch %s: create request: %w", url, err)
@@ -144,7 +153,12 @@ func (f *GoqueryFetcher) Fetch(ctx context.Context, url string) (string, error) 
 		return "", fmt.Errorf("goquery extract body %s: %w", url, err)
 	}
 	text := ExtractJDMarkdown(bodyHTML, f.maxChars)
-	f.log.DebugContext(ctx, "fetcher: goquery fetched page", "url", url, "chars", len(text))
+	f.log.DebugContext(ctx, "fetcher: goquery fetch end",
+		"url", url,
+		"status_code", resp.StatusCode,
+		"response_bytes", len(text),
+		"elapsed_ms", time.Since(start).Milliseconds(),
+	)
 	return text, nil
 }
 
@@ -190,15 +204,22 @@ func NewFallbackWith(primary, fallback port.JDFetcher, minChars int, log *slog.L
 func (f *FallbackFetcher) Fetch(ctx context.Context, url string) (string, error) {
 	text, err := f.primary.Fetch(ctx, url)
 	if err != nil {
+		logger.Decision(ctx, slog.Default(), "fetcher.source", "fallback", "primary fetch error", slog.String("url", url))
 		f.log.WarnContext(ctx, "fetcher: primary failed, falling back to goquery",
 			"url", url, "error", err)
 		return f.fallback.Fetch(ctx, url)
 	}
 	if len(strings.TrimSpace(text)) < f.minJDTextLengthChars {
+		logger.Decision(ctx, slog.Default(), "fetcher.source", "fallback", "primary returned thin content",
+			slog.String("url", url),
+			slog.Int("chars", len(strings.TrimSpace(text))),
+			slog.Int("min", f.minJDTextLengthChars),
+		)
 		f.log.WarnContext(ctx, "fetcher: primary returned thin content, falling back",
 			"url", url, "chars", len(strings.TrimSpace(text)), "min", f.minJDTextLengthChars)
 		return f.fallback.Fetch(ctx, url)
 	}
+	logger.Decision(ctx, slog.Default(), "fetcher.source", "network", "primary fetch succeeded", slog.String("url", url))
 	return text, nil
 }
 
