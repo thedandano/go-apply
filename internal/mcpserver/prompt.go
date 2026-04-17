@@ -8,8 +8,8 @@ import (
 
 const workflowPromptText = `# go-apply MCP — Job Application Workflow
 
-You are the orchestrator. go-apply's tools handle the mechanical work (fetch, embed, score).
-You handle reasoning: extract keywords from JD text, interpret scores, write cover letters, give honest fit assessments.
+You are the orchestrator. go-apply's tools handle the mechanical work (fetch, embed, score, tailor).
+You handle reasoning: extract keywords from JD text, interpret scores, drive tailoring, write cover letters, give honest fit assessments.
 
 ## Tools
 
@@ -17,6 +17,8 @@ You handle reasoning: extract keywords from JD text, interpret scores, write cov
 |------|---------|------------|
 | load_jd | Fetch JD + start session | jd_url OR jd_raw_text |
 | submit_keywords | Score resumes against extracted JD | session_id (req), jd_json (req) |
+| submit_tailor_t1 | Inject missing keywords into the skills section | session_id (req), skill_adds (string array, req) |
+| submit_tailor_t2 | Rewrite resume bullets to surface missing keywords | session_id (req), bullet_rewrites (array of {original, rewritten}, req) |
 | finalize | Persist record + close session | session_id (req), cover_letter (opt) |
 | onboard_user | Store resume + skills + accomplishments | resume_content, resume_label, skills, accomplishments |
 | add_resume | Add/replace a single resume | resume_content (req), resume_label (req) |
@@ -36,29 +38,47 @@ Provide jd_url OR jd_raw_text (not both).
 Returns: session_id + jd_text (raw job description text for you to reason over).
 
 ### Step 3 — Extract keywords yourself
-From jd_text, extract:
-- title, company, location, seniority, required_years
-- required: 5–10 must-have skills
-- preferred: 2–5 nice-to-have skills
+From jd_text, extract the following fields:
 
-Encode as JSON: {"title":"...","company":"...","required":[...],"preferred":[...],"location":"...","seniority":"senior","required_years":5}
+Required fields: title (string), company (string), required (string array, 5–10 must-have skills)
+Optional fields: preferred (string array, 0–5 nice-to-have skills), location (string), seniority ("junior"|"mid"|"senior"|"lead"|"director"), required_years (number)
+Missing values: omit the field entirely. Do NOT invent values.
+
+Show the extracted keywords to the user BEFORE calling submit_keywords so they can confirm the title, company, required, and preferred fields are correct.
+
+Encode as compact JSON with no extra whitespace:
+{"title":"...","company":"...","required":[...],"preferred":[...],"location":"...","seniority":"senior","required_years":5}
 
 ### Step 4 — submit_keywords
 Send session_id + jd_json.
-Returns: scores, best_resume, best_score, next_action.
+Returns: extracted_keywords (echo), scores per resume, best_resume, best_score (0–100), next_action.
+
+Scores are 0–100. Do NOT rescale or convert to a different denominator. Always display as NN/100.
 
 next_action values:
-- "cover_letter" — score ≥ 0.70, strong fit
-- "tailor_t1" — 0.40 ≤ score < 0.70, moderate fit (tailoring may help)
-- "advise_skip" — score < 0.40, structural mismatch
+- "cover_letter" — score ≥ 70, strong fit
+- "tailor_t1" — 40 ≤ score < 70, moderate fit (tailoring may help)
+- "advise_skip" — score < 40, structural mismatch
 
-### Step 5 — Interpret and act
+### Step 5 — Act on next_action (do NOT wait for user to prompt you)
 
-| Score range | Action |
-|-------------|--------|
-| ≥ 0.70 | Draft cover letter, call finalize with cover_letter |
-| 0.40–0.69 | Identify skill gaps, advise on tailoring |
-| < 0.40 | Advise skip: "structural mismatch — tailoring cannot close this gap" |
+**next_action == "cover_letter"** (score ≥ 70/100):
+Draft a cover letter, then call finalize with cover_letter.
+
+**next_action == "tailor_t1"** (40 ≤ score < 70):
+1. Identify required/preferred keywords that are missing from the best resume.
+2. Call submit_tailor_t1 with skill_adds: ["keyword1", "keyword2", ...] (3–8 items).
+3. Read the new next_action from the response:
+   - "tailor_t2" → proceed to T2 (see below).
+   - "cover_letter" → draft cover letter and call finalize.
+
+**next_action == "tailor_t2"** (follow-on from T1, or standalone if score warrants):
+1. Identify 1–4 resume bullets that, if rewritten, would surface missing keywords.
+2. Call submit_tailor_t2 with bullet_rewrites: [{"original": "...", "rewritten": "..."}, ...].
+3. Read the new next_action from the response and continue (cover_letter → finalize).
+
+**next_action == "advise_skip"** (score < 40):
+Tell the user: "Structural mismatch — tailoring cannot close this gap. Score: NN/100." Do not proceed to tailoring.
 
 ### Step 6 — finalize
 Send session_id and optional cover_letter text.
@@ -71,11 +91,11 @@ This persists the application record and closes the session.
 
 Orchestrator config is NOT used in MCP mode — Claude is the orchestrator.
 
-## Onboarding tailoring tiers
-- resume only: stored. Tier 1 (keyword injection) and Tier 2 (bullet rewriting) unavailable — warn the user.
-- + skills: Tier 1 available. Tier 2 unavailable — warn.
-- + accomplishments: Tier 2 available. Tier 1 unavailable — warn.
-- + skills + accomplishments: full tailoring pipeline active.`
+## Tailoring tiers — signal quality (not availability gates)
+Both T1 and T2 accept your inputs directly — they do not read from the profile.
+- With a skills doc onboarded: T1 keyword suggestions can reference the user's existing skills for better targeting.
+- With accomplishments onboarded: T2 bullet rewrites can draw on real metrics and impact statements.
+- Without either: T1 and T2 still work — your keyword and bullet suggestions drive the output.`
 
 // HandleWorkflowPrompt is the exported handler for the "job_application_workflow" MCP prompt.
 func HandleWorkflowPrompt(_ context.Context, _ mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
