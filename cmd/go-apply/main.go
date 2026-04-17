@@ -6,6 +6,8 @@ import (
 	"os"
 	"runtime/debug"
 
+	"github.com/spf13/cobra"
+
 	"github.com/thedandano/go-apply/internal/cli"
 	"github.com/thedandano/go-apply/internal/config"
 	"github.com/thedandano/go-apply/internal/logger"
@@ -30,18 +32,37 @@ func main() {
 func run() int {
 	logDir := config.LogDir()
 
+	root := cli.NewRootCommand(version)
+
+	// Pre-parse to extract log flags before logger init.
+	// UnknownFlags:true lets us ignore subcommand names and flags that are
+	// not registered on the root command.
+	root.FParseErrWhitelist = cobra.FParseErrWhitelist{UnknownFlags: true}
+	_ = root.ParseFlags(os.Args[1:])
+	root.FParseErrWhitelist = cobra.FParseErrWhitelist{} // restore: unknown flags should error during Execute
+
+	debugFlag, _ := root.PersistentFlags().GetBool("debug")
+	traceFlag, _ := root.PersistentFlags().GetBool("trace")
+	logLevelFlag, _ := root.PersistentFlags().GetString("log-level")
+
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "config load: %v\n", err)
-		// Continue with defaults; CLI will validate later if needed
+		// Continue with defaults; CLI will validate later if needed.
 		cfg = &config.Config{}
 	}
 
-	level := cfg.ResolveLogLevel()
+	fileLevel := resolveLogLevel(debugFlag, traceFlag, logLevelFlag, cfg.ResolveLogLevel())
+	_, envOK := config.ResolveLogLevelFromEnv()
+	stderrLevel := resolveStderrLevel(debugFlag, traceFlag, logLevelFlag, envOK, fileLevel)
+	verbose := traceFlag || os.Getenv("GO_APPLY_LOG_VERBOSE") != ""
+
+	logger.SetVerbose(verbose)
+
 	log, cleanup, err := logger.New(logger.Options{
 		LogDir:      logDir,
-		FileLevel:   level,
-		StderrLevel: slog.LevelWarn,
+		FileLevel:   fileLevel,
+		StderrLevel: stderrLevel,
 	})
 	if err != nil {
 		// New() only returns nil errors per API contract; this is a safeguard.
@@ -51,7 +72,12 @@ func run() int {
 
 	slog.SetDefault(log)
 
-	root := cli.NewRootCommand(version)
+	if logLevelFlag != "" {
+		if _, ok := parseLevelFlag(logLevelFlag); !ok {
+			log.Warn("unrecognised --log-level value, using default", "value", logLevelFlag)
+		}
+	}
+
 	if err := root.Execute(); err != nil {
 		log.Error("command failed", "error", err)
 		return 1
