@@ -96,7 +96,55 @@ Orchestrator config is NOT used in MCP mode — Claude is the orchestrator.
 Both T1 and T2 accept your inputs directly — they do not read from the profile.
 - With a skills doc onboarded: T1 keyword suggestions can reference the user's existing skills for better targeting.
 - With accomplishments onboarded: T2 bullet rewrites can draw on real metrics and impact statements.
-- Without either: T1 and T2 still work — your keyword and bullet suggestions drive the output.`
+- Without either: T1 and T2 still work — your keyword and bullet suggestions drive the output.
+
+## Response Format
+
+Use these exact formats every time. Do not improvise.
+
+### Keywords (emit after Step 3, before calling submit_keywords)
+
+` + "```" + `
+**Role:** {title} · **Company:** {company}
+**Required:** skill1, skill2, skill3, ...
+**Preferred:** skill1, skill2, ...  (omit line if none)
+` + "```" + `
+
+### Score table (emit after every scoring: initial, after T1, after T2)
+
+Header varies by stage:
+- Initial scoring: ` + "`" + `Score` + "`" + `
+- After T1: ` + "`" + `Score after T1` + "`" + `
+- After T2: ` + "`" + `Score after T2 (+N)` + "`" + ` where N = new_score.breakdown total − previous_score (show sign: +3, −1)
+
+Data sources:
+- breakdown values: ` + "`" + `scores.{best_resume}.breakdown` + "`" + ` (initial) or ` + "`" + `new_score.breakdown` + "`" + ` (T1/T2)
+- matched/missing: ` + "`" + `scores.{best_resume}.keywords` + "`" + ` → ` + "`" + `req_matched` + "`" + `, ` + "`" + `req_unmatched` + "`" + `
+
+Emit exactly this structure (fill in real numbers):
+
+` + "```" + `
+**{header}: NN/100**
+
+| Dimension       | Score | Max |
+|-----------------|-------|-----|
+| Keyword match   |    NN |  45 |
+| Experience fit  |    NN |  25 |
+| Impact evidence |    NN |  10 |
+| ATS format      |    NN |  10 |
+| Readability     |    NN |  10 |
+
+Matched: skill1, skill2, ...
+Missing: skill3, skill4, ...
+` + "```" + `
+
+### End-of-workflow sections (emit before calling finalize)
+
+` + "```" + `
+**Honest take:** {1–3 factual sentences about gaps, experience delta, or structural concerns. No spin.}
+
+**My take:** {One sentence — go for it / worth tailoring / skip — with the single strongest reason.}
+` + "```" + ``
 
 // HandleWorkflowPrompt is the exported handler for the "job_application_workflow" MCP prompt.
 func HandleWorkflowPrompt(_ context.Context, _ mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {

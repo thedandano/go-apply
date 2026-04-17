@@ -34,6 +34,17 @@ func TestWorkflowPromptHandler_ContainsKeyWorkflowConcepts(t *testing.T) {
 	}
 }
 
+func TestWorkflowPromptHandler_ContainsResponseFormatDirectives(t *testing.T) {
+	result, _ := mcpserver.HandleWorkflowPrompt(context.Background(), mcp.GetPromptRequest{})
+	text := result.Messages[0].Content.(mcp.TextContent).Text
+
+	for _, want := range []string{"| Keyword match", "Honest take", "My take"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("workflow prompt missing response format directive %q", want)
+		}
+	}
+}
+
 func TestWorkflowPromptHandler_ContainsTailorTools(t *testing.T) {
 	result, _ := mcpserver.HandleWorkflowPrompt(context.Background(), mcp.GetPromptRequest{})
 	text := result.Messages[0].Content.(mcp.TextContent).Text
