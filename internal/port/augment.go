@@ -16,4 +16,8 @@ type Augmenter interface {
 	// and incorporates the most relevant chunks into resumeText via LLM.
 	// Returns the augmented text and an optionally populated ReferenceData.
 	AugmentResumeText(ctx context.Context, input model.AugmentInput) (string, *model.ReferenceData, error)
+
+	// SuggestForKeywords retrieves profile chunks relevant to the given keywords,
+	// returning matches grouped by keyword. No LLM incorporation is performed.
+	SuggestForKeywords(ctx context.Context, keywords []string) (model.TailorSuggestions, error)
 }

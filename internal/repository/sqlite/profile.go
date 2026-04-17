@@ -177,27 +177,6 @@ func (r *ProfileRepository) SetVector(ctx context.Context, keyword string, vecto
 	return nil
 }
 
-// ListDocuments returns all stored document chunks for keyword-based fallback retrieval.
-func (r *ProfileRepository) ListDocuments(ctx context.Context) ([]model.ProfileDocument, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT id, source, chunk FROM profile_docs ORDER BY id`)
-	if err != nil {
-		return nil, fmt.Errorf("augment: list profile documents: %w", err)
-	}
-	defer rows.Close()
-	var docs []model.ProfileDocument
-	for rows.Next() {
-		var d model.ProfileDocument
-		if err := rows.Scan(&d.ID, &d.Source, &d.Text); err != nil {
-			return nil, fmt.Errorf("augment: scan profile document: %w", err)
-		}
-		docs = append(docs, d)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("augment: iterate profile documents: %w", err)
-	}
-	return docs, nil
-}
-
 // Close releases the underlying database connection.
 func (r *ProfileRepository) Close() error {
 	return r.db.Close()

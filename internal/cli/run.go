@@ -10,8 +10,10 @@ import (
 
 	"github.com/thedandano/go-apply/internal/config"
 	"github.com/thedandano/go-apply/internal/loader"
+	"github.com/thedandano/go-apply/internal/logger"
 	"github.com/thedandano/go-apply/internal/model"
 	"github.com/thedandano/go-apply/internal/presenter/headless"
+	"github.com/thedandano/go-apply/internal/redact"
 	"github.com/thedandano/go-apply/internal/repository/fs"
 	"github.com/thedandano/go-apply/internal/service/augment"
 	"github.com/thedandano/go-apply/internal/service/coverletter"
@@ -57,6 +59,15 @@ Outputs a JSON result to stdout when --headless is set.`,
 			}
 			if cfg.Orchestrator.BaseURL == "" || cfg.Orchestrator.Model == "" {
 				return fmt.Errorf("no orchestrator configured — run:\n  go-apply config set llm.base_url <url>\n  go-apply config set llm.model <model>")
+			}
+
+			if !cfg.Debug.DisableRedaction {
+				r := redact.New(&redact.Profile{
+					Name:        cfg.UserName,
+					Location:    cfg.Location,
+					LinkedInURL: cfg.LinkedInURL,
+				})
+				logger.SetRedactor(r)
 			}
 
 			defaults, err := config.LoadDefaults()

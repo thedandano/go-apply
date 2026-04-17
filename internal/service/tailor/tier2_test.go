@@ -78,7 +78,7 @@ Python
 		MaxRewrites:         5,
 	}
 
-	modified, changes, err := rewriteBullets(input)
+	modified, changes, _, err := rewriteBullets(input)
 	if err != nil {
 		t.Fatalf("rewriteBullets returned error: %v", err)
 	}
@@ -117,7 +117,7 @@ Python
 		MaxRewrites:         5,
 	}
 
-	modified, changes, err := rewriteBullets(input)
+	modified, changes, _, err := rewriteBullets(input)
 	if err != nil {
 		t.Fatalf("rewriteBullets returned error: %v", err)
 	}

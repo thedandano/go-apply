@@ -17,9 +17,7 @@ import (
 
 type stubProfileRepository struct {
 	results []model.ProfileEmbedding
-	docs    []model.ProfileDocument
 	findErr error
-	listErr error
 }
 
 var _ port.ProfileRepository = (*stubProfileRepository)(nil)
@@ -30,10 +28,6 @@ func (s *stubProfileRepository) UpsertDocument(_ context.Context, _ string, _ st
 
 func (s *stubProfileRepository) FindSimilar(_ context.Context, _ []float32, _ int) ([]model.ProfileEmbedding, error) {
 	return s.results, s.findErr
-}
-
-func (s *stubProfileRepository) ListDocuments(_ context.Context) ([]model.ProfileDocument, error) {
-	return s.docs, s.listErr
 }
 
 type stubEmbeddingClient struct {
@@ -224,15 +218,12 @@ func TestAugmentResumeText_VectorPath_ReturnsOriginalWhenNoChunksAboveThreshold(
 	}
 }
 
-func TestAugmentResumeText_VectorPath_ErrorWhenFindSimilarFails(t *testing.T) {
+func TestAugmentResumeText_VectorPath_ReturnsOriginalWhenFindSimilarFails(t *testing.T) {
 	t.Parallel()
 
-	// embedder succeeds, FindSimilar fails, ListDocuments also fails (no fallback docs)
+	// FindSimilar fails per-keyword (logged + skipped); no fallback — original resume returned.
 	svc := augment.New(
-		&stubProfileRepository{
-			findErr: errors.New("db unavailable"),
-			listErr: errors.New("db unavailable"),
-		},
+		&stubProfileRepository{findErr: errors.New("db unavailable")},
 		newStubCache(),
 		&stubEmbeddingClient{vector: fakeVector()},
 		&stubLLMClient{},
@@ -245,12 +236,12 @@ func TestAugmentResumeText_VectorPath_ErrorWhenFindSimilarFails(t *testing.T) {
 		JDKeywords: []string{"golang", "kubernetes"},
 	}
 
-	_, _, err := svc.AugmentResumeText(context.Background(), input)
-	if err == nil {
-		t.Fatal("expected error when FindSimilar and ListDocuments both fail")
+	got, _, err := svc.AugmentResumeText(context.Background(), input)
+	if err != nil {
+		t.Fatalf("expected no error when FindSimilar fails (per-keyword skip), got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "list documents") {
-		t.Errorf("expected error to mention 'list documents', got: %v", err)
+	if got != input.ResumeText {
+		t.Errorf("expected original resume text when no chunks found, got: %q", got)
 	}
 }
 
@@ -305,93 +296,13 @@ func TestAugmentResumeText_VectorPath_ErrorWhenLLMReturnsEmpty(t *testing.T) {
 	}
 }
 
-func TestAugmentResumeText_KeywordFallback_WhenEmbedderFails(t *testing.T) {
+func TestAugmentResumeText_EmbedderFails_ReturnsOriginalResume(t *testing.T) {
 	t.Parallel()
 
-	embedder := &stubEmbeddingClient{err: errors.New("embedding service unavailable")}
-	llm := &stubLLMClient{response: "augmented resume"}
-	docs := []model.ProfileDocument{
-		{ID: 1, Source: "resume:backend", Text: "Led golang microservices at scale"},
-	}
-	svc := augment.New(
-		&stubProfileRepository{docs: docs},
-		newStubCache(),
-		embedder,
-		llm,
-		testDefaults(),
-		testLogger(),
-	)
-
-	input := model.AugmentInput{
-		ResumeText: "experienced software engineer",
-		JDKeywords: []string{"golang"},
-	}
-
-	got, _, err := svc.AugmentResumeText(context.Background(), input)
-	if err != nil {
-		t.Fatalf("expected no error (keyword fallback succeeds), got: %v", err)
-	}
-	if got != "augmented resume" {
-		t.Errorf("expected LLM response, got %q", got)
-	}
-	if embedder.callCount != 1 {
-		t.Errorf("expected embedder called exactly once (tried, failed), got %d calls", embedder.callCount)
-	}
-}
-
-func TestAugmentResumeText_KeywordFallback_FiltersByMinCount(t *testing.T) {
-	t.Parallel()
-
-	embedder := &stubEmbeddingClient{err: errors.New("embedding service unavailable")}
-	llm := &stubLLMClient{response: "augmented resume"}
-	docs := []model.ProfileDocument{
-		{ID: 1, Source: "resume:backend", Text: "Led golang distributed systems at scale"},
-		{ID: 2, Source: "resume:frontend", Text: "Built React dashboards"},
-	}
-	d := testDefaults()
-	d.Augment.KeywordMatchMinCount = 2
-	svc := augment.New(
-		&stubProfileRepository{docs: docs},
-		newStubCache(),
-		embedder,
-		llm,
-		d,
-		testLogger(),
-	)
-
-	input := model.AugmentInput{
-		ResumeText: "experienced software engineer",
-		JDKeywords: []string{"golang", "distributed"},
-	}
-
-	_, _, err := svc.AugmentResumeText(context.Background(), input)
-	if err != nil {
-		t.Fatalf("expected no error, got: %v", err)
-	}
-	if llm.calls != 1 {
-		t.Fatalf("expected LLM called once, got %d", llm.calls)
-	}
-	// The user prompt should contain only the matching doc text, not the React one
-	found := false
-	for _, msg := range llm.lastMsgs {
-		if strings.Contains(msg.Content, "Led golang distributed") {
-			found = true
-		}
-		if strings.Contains(msg.Content, "Built React dashboards") {
-			t.Error("expected below-mincount doc to be filtered out of LLM prompt")
-		}
-	}
-	if !found {
-		t.Error("expected matching doc text to appear in LLM prompt")
-	}
-}
-
-func TestAugmentResumeText_KeywordFallback_ErrorWhenListDocumentsFails(t *testing.T) {
-	t.Parallel()
-
+	// Embedder fails — no vectors, no chunks, original resume returned. No fallback.
 	embedder := &stubEmbeddingClient{err: errors.New("embedding service unavailable")}
 	svc := augment.New(
-		&stubProfileRepository{listErr: errors.New("db gone")},
+		&stubProfileRepository{},
 		newStubCache(),
 		embedder,
 		&stubLLMClient{},
@@ -404,12 +315,15 @@ func TestAugmentResumeText_KeywordFallback_ErrorWhenListDocumentsFails(t *testin
 		JDKeywords: []string{"golang"},
 	}
 
-	_, _, err := svc.AugmentResumeText(context.Background(), input)
-	if err == nil {
-		t.Fatal("expected error when ListDocuments fails")
+	got, _, err := svc.AugmentResumeText(context.Background(), input)
+	if err != nil {
+		t.Fatalf("expected no error when embedder fails (per-keyword skip), got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "list documents") {
-		t.Errorf("expected error to mention 'list documents', got: %v", err)
+	if got != input.ResumeText {
+		t.Errorf("expected original resume text when embedder fails, got: %q", got)
+	}
+	if embedder.callCount != 1 {
+		t.Errorf("expected embedder called exactly once (tried, failed), got %d calls", embedder.callCount)
 	}
 }
 
@@ -576,4 +490,127 @@ func TestNew_PanicsOnNilEmbedder(t *testing.T) {
 		testDefaults(),
 		testLogger(),
 	)
+}
+
+// --- SuggestForKeywords tests ---
+
+func TestSuggestForKeywords_ReturnsNilForEmptyKeywords(t *testing.T) {
+	t.Parallel()
+
+	svc := augment.New(
+		&stubProfileRepository{},
+		newStubCache(),
+		&stubEmbeddingClient{vector: fakeVector()},
+		nil, // no LLM needed
+		testDefaults(),
+		testLogger(),
+	)
+
+	suggestions, err := svc.SuggestForKeywords(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if suggestions != nil {
+		t.Errorf("expected nil suggestions for empty keywords, got: %v", suggestions)
+	}
+}
+
+func TestSuggestForKeywords_VectorPath_ReturnsSuggestions(t *testing.T) {
+	t.Parallel()
+
+	svc := augment.New(
+		&stubProfileRepository{results: []model.ProfileEmbedding{aboveThresholdEmbedding()}},
+		newStubCache(),
+		&stubEmbeddingClient{vector: fakeVector()},
+		nil, // no LLM needed
+		testDefaults(),
+		testLogger(),
+	)
+
+	suggestions, err := svc.SuggestForKeywords(context.Background(), []string{"distributed"})
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if len(suggestions) == 0 {
+		t.Fatal("expected suggestions, got none")
+	}
+	chunks, ok := suggestions["distributed"]
+	if !ok || len(chunks) == 0 {
+		t.Error("expected suggestions for keyword 'distributed'")
+	}
+	if chunks[0].Similarity == 0 {
+		t.Error("expected non-zero similarity for vector match")
+	}
+	if chunks[0].Text == "" {
+		t.Error("expected non-empty chunk text")
+	}
+}
+
+func TestSuggestForKeywords_BelowThreshold_NoSuggestions(t *testing.T) {
+	t.Parallel()
+
+	below := model.ProfileEmbedding{
+		ID: 1, SourceDoc: "resume:other", Term: "irrelevant", Weight: 0.1,
+	}
+	svc := augment.New(
+		&stubProfileRepository{results: []model.ProfileEmbedding{below}},
+		newStubCache(),
+		&stubEmbeddingClient{vector: fakeVector()},
+		nil,
+		testDefaults(),
+		testLogger(),
+	)
+
+	suggestions, err := svc.SuggestForKeywords(context.Background(), []string{"golang"})
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if len(suggestions["golang"]) != 0 {
+		t.Errorf("expected no suggestions for keyword below threshold, got: %v", suggestions["golang"])
+	}
+}
+
+func TestSuggestForKeywords_EmbedderFails_NoSuggestions(t *testing.T) {
+	t.Parallel()
+
+	// Embedder fails — no vectors produced, no suggestions returned. No fallback.
+	embedder := &stubEmbeddingClient{err: errors.New("embedding unavailable")}
+	svc := augment.New(
+		&stubProfileRepository{},
+		newStubCache(),
+		embedder,
+		nil,
+		testDefaults(),
+		testLogger(),
+	)
+
+	suggestions, err := svc.SuggestForKeywords(context.Background(), []string{"golang"})
+	if err != nil {
+		t.Fatalf("expected no error when embedder fails, got: %v", err)
+	}
+	if len(suggestions) != 0 {
+		t.Errorf("expected nil/empty suggestions when embedder fails, got: %v", suggestions)
+	}
+}
+
+func TestSuggestForKeywords_NoLLMCalled(t *testing.T) {
+	t.Parallel()
+
+	llm := &stubLLMClient{response: "should not be called"}
+	svc := augment.New(
+		&stubProfileRepository{results: []model.ProfileEmbedding{aboveThresholdEmbedding()}},
+		newStubCache(),
+		&stubEmbeddingClient{vector: fakeVector()},
+		llm,
+		testDefaults(),
+		testLogger(),
+	)
+
+	_, err := svc.SuggestForKeywords(context.Background(), []string{"distributed"})
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if llm.calls != 0 {
+		t.Errorf("SuggestForKeywords must never call LLM, got %d calls", llm.calls)
+	}
 }

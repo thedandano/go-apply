@@ -12,6 +12,7 @@ import (
 	"github.com/thedandano/go-apply/internal/loader"
 	"github.com/thedandano/go-apply/internal/logger"
 	"github.com/thedandano/go-apply/internal/port"
+	"github.com/thedandano/go-apply/internal/redact"
 	"github.com/thedandano/go-apply/internal/repository/fs"
 	"github.com/thedandano/go-apply/internal/repository/sqlite"
 	"github.com/thedandano/go-apply/internal/service/augment"
@@ -89,6 +90,15 @@ func loadDeps() (*config.Config, pipeline.ApplyConfig, error) {
 		Augment:  augmentSvc,
 		Defaults: defaults,
 		Tailor:   nil,
+	}
+
+	if !cfg.Debug.DisableRedaction {
+		r := redact.New(&redact.Profile{
+			Name:        cfg.UserName,
+			Location:    cfg.Location,
+			LinkedInURL: cfg.LinkedInURL,
+		})
+		logger.SetRedactor(r)
 	}
 
 	return cfg, deps, nil
