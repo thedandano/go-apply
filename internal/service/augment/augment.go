@@ -1,5 +1,5 @@
 // Package augment enriches resume text by retrieving relevant profile document
-// chunks (via vector similarity or keyword fallback) and incorporating them via LLM.
+// chunks via vector similarity and incorporating them via LLM.
 package augment
 
 import (
@@ -26,8 +26,8 @@ type retrievedChunk struct {
 }
 
 // Service composes ProfileRepository, KeywordCacheRepository, EmbeddingClient, and LLMClient.
-// It retrieves relevant profile document chunks by vector similarity (with keyword fallback)
-// and incorporates them into the resume text via LLM.
+// It retrieves relevant profile document chunks by vector similarity and incorporates
+// them into the resume text via LLM.
 type Service struct {
 	profile  port.ProfileRepository
 	cache    port.KeywordCacheRepository
@@ -100,18 +100,15 @@ func (s *Service) AugmentResumeText(ctx context.Context, input model.AugmentInpu
 	return augmented, input.RefData, nil
 }
 
-// retrieveChunks attempts vector retrieval first. Falls back to keyword matching
-// when vector retrieval fails or returns no results above the similarity threshold.
+// retrieveChunks retrieves profile chunks via vector similarity only.
+// Returns empty when no chunks score above the similarity threshold.
 func (s *Service) retrieveChunks(ctx context.Context, keywords []string) ([]retrievedChunk, error) {
 	chunks, err := s.retrieveByVector(ctx, keywords)
 	if err != nil {
-		logger.Decision(ctx, s.log, "augment.retrieval", "keyword", "vector retrieval failed", slog.String("error", err.Error()))
-		s.log.WarnContext(ctx, "augment: vector retrieval failed — falling back to keyword matching", "error", err)
-		return s.retrieveByKeyword(ctx, keywords)
+		return nil, err
 	}
 	if len(chunks) == 0 {
-		logger.Decision(ctx, s.log, "augment.retrieval", "keyword", "no vector matches above threshold — falling back to keyword matching")
-		return s.retrieveByKeyword(ctx, keywords)
+		logger.Decision(ctx, s.log, "augment.retrieval", "none", "no vector matches above threshold")
 	}
 	return chunks, nil
 }
@@ -154,19 +151,20 @@ func (s *Service) retrieveByVector(ctx context.Context, keywords []string) ([]re
 			}
 		}
 
-		if len(matchedTerms) > 0 {
+		switch {
+		case len(matchedTerms) > 0:
 			s.log.DebugContext(ctx, "keyword vector match",
 				slog.String("keyword", keyword),
 				slog.Any("similar_chunks", matchedTerms),
 				slog.Float64("threshold", threshold),
 			)
-		} else if len(candidates) > 0 {
+		case len(candidates) > 0:
 			s.log.DebugContext(ctx, "keyword vector no match above threshold",
 				slog.String("keyword", keyword),
 				slog.Float64("threshold", threshold),
 				slog.Int("candidates_below", len(candidates)),
 			)
-		} else {
+		default:
 			s.log.DebugContext(ctx, "keyword vector empty result",
 				slog.String("keyword", keyword),
 			)
@@ -208,35 +206,6 @@ func (s *Service) embedWithCache(ctx context.Context, keywords []string) map[str
 	return vectors
 }
 
-// retrieveByKeyword fetches all documents and filters by keyword match count.
-func (s *Service) retrieveByKeyword(ctx context.Context, keywords []string) ([]retrievedChunk, error) {
-	docs, err := s.profile.ListDocuments(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("list documents for keyword fallback: %w", err)
-	}
-
-	minCount := s.defaults.Augment.KeywordMatchMinCount
-	maxChunks := s.defaults.Augment.MaxChunksToIncorporate
-	var chunks []retrievedChunk
-	for _, doc := range docs {
-		lower := strings.ToLower(doc.Text)
-		hits := 0
-		for _, kw := range keywords {
-			if strings.Contains(lower, strings.ToLower(kw)) {
-				hits++
-			}
-		}
-		if hits >= minCount {
-			chunks = append(chunks, retrievedChunk{Source: doc.Source, Text: doc.Text})
-			if len(chunks) >= maxChunks {
-				break
-			}
-		}
-	}
-	s.log.DebugContext(ctx, "augment: keyword fallback complete", "total_docs", len(docs), "matched", len(chunks))
-	return chunks, nil
-}
-
 const incorporationSystemPrompt = `You are a resume augmentation assistant. Incorporate relevant experience from the provided profile chunks into the resume.
 
 Rules:
@@ -266,15 +235,15 @@ Job description keywords: %s
 Respond only with the complete augmented resume.`
 
 // SuggestForKeywords retrieves profile chunks relevant to keywords via vector
-// similarity (falling back to keyword matching if vector fails or returns nothing).
-// Returns matches grouped by keyword with similarity scores. No LLM is called.
+// similarity. Returns matches grouped by keyword with similarity scores.
+// No LLM is called. Keywords with no matches above the similarity threshold
+// are absent from the returned map.
 func (s *Service) SuggestForKeywords(ctx context.Context, keywords []string) (model.TailorSuggestions, error) {
 	if len(keywords) == 0 {
 		return nil, nil
 	}
 	suggestions := make(model.TailorSuggestions, len(keywords))
 
-	// Try vector first for each keyword.
 	vectors := s.embedWithCache(ctx, keywords)
 	threshold := s.defaults.VectorSearch.SimilarityThreshold
 
@@ -289,12 +258,10 @@ func (s *Service) SuggestForKeywords(ctx context.Context, keywords []string) (mo
 			slog.Int("candidates", len(candidates)),
 			slog.Float64("threshold", threshold),
 		)
-		var matched int
 		for _, c := range candidates {
 			if c.Weight < threshold {
 				continue
 			}
-			matched++
 			suggestions[keyword] = append(suggestions[keyword], model.TailorSuggestion{
 				Keyword:    keyword,
 				SourceDoc:  c.SourceDoc,
@@ -302,43 +269,16 @@ func (s *Service) SuggestForKeywords(ctx context.Context, keywords []string) (mo
 				Similarity: float32(c.Weight),
 			})
 		}
-		if len(candidates) > 0 && matched == 0 {
-			s.log.DebugContext(ctx, "SuggestForKeywords: all candidates below threshold — will use keyword fallback",
+		if len(candidates) > 0 && len(suggestions[keyword]) == 0 {
+			s.log.DebugContext(ctx, "SuggestForKeywords: all candidates below threshold",
 				slog.String("keyword", keyword),
 				slog.Int("candidates_below", len(candidates)),
 				slog.Float64("threshold", threshold),
 			)
 		} else if len(candidates) == 0 {
-			s.log.DebugContext(ctx, "SuggestForKeywords: vector returned no candidates — will use keyword fallback",
+			s.log.DebugContext(ctx, "SuggestForKeywords: no vector candidates",
 				slog.String("keyword", keyword),
 			)
-		}
-	}
-
-	// For keywords that got no vector matches, fall back to keyword matching.
-	var missingKeywords []string
-	for _, kw := range keywords {
-		if len(suggestions[kw]) == 0 {
-			missingKeywords = append(missingKeywords, kw)
-		}
-	}
-	if len(missingKeywords) > 0 {
-		fallbackChunks, err := s.retrieveByKeyword(ctx, missingKeywords)
-		if err != nil {
-			s.log.WarnContext(ctx, "SuggestForKeywords: keyword fallback failed", "error", err)
-		} else {
-			for _, chunk := range fallbackChunks {
-				for _, kw := range missingKeywords {
-					if strings.Contains(strings.ToLower(chunk.Text), strings.ToLower(kw)) {
-						suggestions[kw] = append(suggestions[kw], model.TailorSuggestion{
-							Keyword:    kw,
-							SourceDoc:  chunk.Source,
-							Text:       chunk.Text,
-							Similarity: 0, // keyword-fallback has no similarity score
-						})
-					}
-				}
-			}
 		}
 	}
 

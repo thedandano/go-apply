@@ -25,20 +25,10 @@ func (p *ApplyPipeline) SuggestTailoring(ctx context.Context, jd *model.JDData, 
 		return nil, "none", nil
 	}
 
-	// Determine retrieval mode: "vector" if any suggestion has Similarity > 0,
-	// "keyword_fallback" if all have Similarity == 0, "none" if empty.
+	// Retrieval is vector-only: mode is "vector" when suggestions were found, "none" otherwise.
 	retrievalMode := "none"
-	for _, chunks := range suggestions {
-		for _, c := range chunks {
-			if c.Similarity > 0 {
-				retrievalMode = "vector"
-				goto done
-			}
-		}
-	}
 	if len(suggestions) > 0 {
-		retrievalMode = "keyword_fallback"
+		retrievalMode = "vector"
 	}
-done:
 	return suggestions, retrievalMode, nil
 }
