@@ -14,6 +14,7 @@ import (
 	"github.com/thedandano/go-apply/internal/port"
 	"github.com/thedandano/go-apply/internal/repository/fs"
 	"github.com/thedandano/go-apply/internal/repository/sqlite"
+	"github.com/thedandano/go-apply/internal/service/augment"
 	"github.com/thedandano/go-apply/internal/service/fetcher"
 	"github.com/thedandano/go-apply/internal/service/llm"
 	"github.com/thedandano/go-apply/internal/service/pipeline"
@@ -34,10 +35,11 @@ func newSQLiteProfile(cfg *config.Config) (*sqlite.ProfileRepository, error) {
 
 // loadDeps loads configuration and wires all pipeline dependencies.
 // Config is loaded fresh per invocation so changes take effect immediately.
-// By default the MCP host is the orchestrator in MCP mode — LLM, CLGen, Augment, and
-// Tailor are nil so the MCP host handles keyword extraction, cover letters, etc.
-// When the orchestrator section is configured (base_url + model), an LLM client
-// is created so the pipeline can extract keywords autonomously.
+// The MCP host is the orchestrator — LLM, CLGen, and Tailor are nil so the host
+// handles keyword extraction, cover letters, and tailoring.
+// When the embedder section is configured (base_url + model), an augment service
+// is wired for vector retrieval and embedding cache — but LLM incorporation is
+// skipped since the host is the orchestrator.
 func loadDeps() (*config.Config, pipeline.ApplyConfig, error) {
 	log := slog.Default()
 
@@ -59,23 +61,32 @@ func loadDeps() (*config.Config, pipeline.ApplyConfig, error) {
 	scorerSvc := scorer.New(defaults)
 	fetcherSvc := fetcher.NewFallback(defaults, log)
 
-	var llmClient port.LLMClient
-	if cfg.Orchestrator.BaseURL != "" && cfg.Orchestrator.Model != "" {
-		log.Info("orchestrator LLM configured — pipeline will extract keywords", "model", cfg.Orchestrator.Model)
-		llmClient = llm.New(cfg.Orchestrator.BaseURL, cfg.Orchestrator.Model, cfg.Orchestrator.APIKey, defaults, log)
+	logger.Decision(context.Background(), log, "keyword_extraction", "mcp_host", "MCP host is the orchestrator")
+
+	var augmentSvc port.Augmenter
+	if cfg.Embedder.BaseURL != "" && cfg.Embedder.Model != "" {
+		profileRepo, profileErr := newSQLiteProfile(cfg)
+		if profileErr != nil {
+			log.Warn("augment: could not open profile db — vector retrieval disabled", "error", profileErr)
+		} else {
+			embedderClient := llm.New(cfg.Embedder.BaseURL, cfg.Embedder.Model, cfg.Embedder.APIKey, defaults, log)
+			// nil LLM: retrieval + cache runs, but incorporation is skipped (MCP host incorporates).
+			augmentSvc = augment.New(profileRepo, profileRepo, embedderClient, nil, defaults, log)
+			log.Info("augment: embedder wired for vector retrieval", "model", cfg.Embedder.Model)
+		}
 	} else {
-		logger.Decision(context.Background(), log, "keyword_extraction", "mcp_host", "no orchestrator LLM configured")
+		logger.Decision(context.Background(), log, "augment", "disabled", "no embedder configured")
 	}
 
 	deps := pipeline.ApplyConfig{
 		Fetcher:  fetcherSvc,
-		LLM:      llmClient,
+		LLM:      nil,
 		Scorer:   scorerSvc,
 		CLGen:    nil,
 		Resumes:  resumeRepo,
 		Loader:   docLoader,
 		AppRepo:  appRepo,
-		Augment:  nil,
+		Augment:  augmentSvc,
 		Defaults: defaults,
 		Tailor:   nil,
 	}

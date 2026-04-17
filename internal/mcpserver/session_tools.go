@@ -33,7 +33,8 @@ func HandleLoadJDWithConfig(ctx context.Context, req *mcp.CallToolRequest, deps 
 	jdRawText := req.GetString("jd_raw_text", "")
 	slog.DebugContext(ctx, "mcp tool invoked",
 		slog.String("tool", "load_jd"),
-		logger.PayloadAttr("args", fmt.Sprintf("jd_url=%q jd_raw_text_len=%d", jdURL, len(jdRawText)), logger.Verbose()),
+		logger.PayloadAttr("jd_url", jdURL, logger.Verbose()),
+		logger.PayloadAttr("jd_raw_text", jdRawText, logger.Verbose()),
 	)
 	if (jdURL != "") == (jdRawText != "") {
 		return envelopeResult(stageErrorEnvelope("", "load_jd", "invalid_input",
@@ -98,7 +99,7 @@ func HandleSubmitKeywordsWithConfig(ctx context.Context, req *mcp.CallToolReques
 	slog.DebugContext(ctx, "mcp tool invoked",
 		slog.String("tool", "submit_keywords"),
 		slog.String("session_id", sessionID),
-		logger.PayloadAttr("args", fmt.Sprintf("jd_json_len=%d", len(jdJSONStr)), logger.Verbose()),
+		logger.PayloadAttr("jd_json", jdJSONStr, logger.Verbose()),
 	)
 	if jdJSONStr == "" {
 		return envelopeResult(stageErrorEnvelope(sessionID, "submit_keywords", "missing_jd", "jd_json is required", false))
@@ -191,7 +192,7 @@ func HandleFinalizeWithConfig(ctx context.Context, req *mcp.CallToolRequest, dep
 	slog.DebugContext(ctx, "mcp tool invoked",
 		slog.String("tool", "finalize"),
 		slog.String("session_id", sessionID),
-		logger.PayloadAttr("args", fmt.Sprintf("cover_letter_len=%d", len(coverLetter)), logger.Verbose()),
+		logger.PayloadAttr("cover_letter", coverLetter, logger.Verbose()),
 	)
 
 	sess := sessions.Get(sessionID)
@@ -326,7 +327,7 @@ func HandleSubmitTailorT1WithConfig(ctx context.Context, req *mcp.CallToolReques
 	slog.DebugContext(ctx, "mcp tool invoked",
 		slog.String("tool", "submit_tailor_t1"),
 		slog.String("session_id", sessionID),
-		logger.PayloadAttr("args", fmt.Sprintf("skill_adds_len=%d", len(skillAddsStr)), logger.Verbose()),
+		logger.PayloadAttr("skill_adds", skillAddsStr, logger.Verbose()),
 	)
 	if skillAddsStr == "" {
 		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t1", "missing_skill_adds", "skill_adds is required", false))
@@ -430,7 +431,7 @@ func HandleSubmitTailorT2WithConfig(ctx context.Context, req *mcp.CallToolReques
 	slog.DebugContext(ctx, "mcp tool invoked",
 		slog.String("tool", "submit_tailor_t2"),
 		slog.String("session_id", sessionID),
-		logger.PayloadAttr("args", fmt.Sprintf("bullet_rewrites_len=%d", len(bulletRewritesStr)), logger.Verbose()),
+		logger.PayloadAttr("bullet_rewrites", bulletRewritesStr, logger.Verbose()),
 	)
 	if bulletRewritesStr == "" {
 		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t2", "missing_bullet_rewrites", "bullet_rewrites is required", false))

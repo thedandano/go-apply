@@ -250,7 +250,14 @@ Job description keywords: %s
 Respond only with the complete augmented resume.`
 
 // incorporateChunks calls the LLM to weave the retrieved chunks into the resume.
+// When s.llm is nil (MCP mode — host is the orchestrator), retrieval still ran
+// for cache warming but incorporation is skipped; the original resume is returned.
 func (s *Service) incorporateChunks(ctx context.Context, resumeText string, chunks []retrievedChunk, keywords []string) (string, error) {
+	if s.llm == nil {
+		logger.Decision(ctx, s.log, "augment.incorporate", "skip", "no LLM — MCP host incorporates",
+			slog.Int("chunks_retrieved", len(chunks)))
+		return resumeText, nil
+	}
 	var sb strings.Builder
 	for i, c := range chunks {
 		fmt.Fprintf(&sb, "Chunk %d [%s]:\n%s\n\n", i+1, c.Source, c.Text)

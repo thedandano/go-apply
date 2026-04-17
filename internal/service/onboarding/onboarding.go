@@ -98,8 +98,8 @@ func (s *Service) Run(ctx context.Context, input model.OnboardInput) (model.Onbo
 		logger.Decision(ctx, s.log, "onboard.accomplishments", "skip", "empty")
 	}
 
-	result.Summary.SkillsChars = len(input.SkillsText)
-	result.Summary.AccomplishmentsChars = len(input.AccomplishmentsText)
+	result.Summary.SkillsCount = countSkillItems(input.SkillsText)
+	result.Summary.AccomplishmentsCount = countAccomplishmentSections(input.AccomplishmentsText)
 	result.Summary.TotalChunks = len(result.Stored)
 
 	return result, nil
@@ -135,6 +135,31 @@ func (s *Service) storeDocument(ctx context.Context, sourceDoc, text, path strin
 
 	s.log.InfoContext(ctx, "onboard: stored document", "source", sourceDoc, "path", path)
 	return ""
+}
+
+// countSkillItems counts non-empty, non-heading lines in a skills document.
+// Each such line represents an individual skill entry.
+func countSkillItems(text string) int {
+	count := 0
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" && !strings.HasPrefix(trimmed, "#") {
+			count++
+		}
+	}
+	return count
+}
+
+// countAccomplishmentSections counts ## headings in an accomplishments document.
+// Each ## section represents a distinct accomplishment.
+func countAccomplishmentSections(text string) int {
+	count := 0
+	for _, line := range strings.Split(text, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "## ") {
+			count++
+		}
+	}
+	return count
 }
 
 // validateLabel rejects empty labels and labels containing path separators.

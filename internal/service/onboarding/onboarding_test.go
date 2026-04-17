@@ -190,8 +190,8 @@ func TestOnboardingService_RejectsEmptyLabel(t *testing.T) {
 }
 
 func TestOnboardingService_SummaryPopulated(t *testing.T) {
-	skills := "Go, Python, Docker"
-	accomplishments := "Led team of 5 engineers"
+	skills := "Go\nPython\nDocker"
+	accomplishments := "## Scaled backend\nLed team of 5 engineers\n\n## Reduced latency\nCut p99 from 800ms to 120ms"
 
 	repo := &stubProfileRepo{}
 	svc := newService(t, repo, &stubEmbedder{})
@@ -208,11 +208,11 @@ func TestOnboardingService_SummaryPopulated(t *testing.T) {
 	if result.Summary.ResumesAdded != 1 {
 		t.Errorf("ResumesAdded = %d, want 1", result.Summary.ResumesAdded)
 	}
-	if result.Summary.SkillsChars != len(skills) {
-		t.Errorf("SkillsChars = %d, want %d", result.Summary.SkillsChars, len(skills))
+	if result.Summary.SkillsCount != 3 {
+		t.Errorf("SkillsCount = %d, want 3", result.Summary.SkillsCount)
 	}
-	if result.Summary.AccomplishmentsChars != len(accomplishments) {
-		t.Errorf("AccomplishmentsChars = %d, want %d", result.Summary.AccomplishmentsChars, len(accomplishments))
+	if result.Summary.AccomplishmentsCount != 2 {
+		t.Errorf("AccomplishmentsCount = %d, want 2", result.Summary.AccomplishmentsCount)
 	}
 	// 1 resume + skills + accomplishments = 3 chunks
 	if result.Summary.TotalChunks != 3 {
