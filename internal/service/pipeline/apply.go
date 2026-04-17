@@ -187,7 +187,8 @@ func (p *ApplyPipeline) Run(ctx context.Context, req ApplyRequest) error {
 
 	stageStart = time.Now()
 	slog.DebugContext(ctx, "stage start", "stage", "score_resumes", slog.Int("resume_count", len(resumeFiles)))
-	scores, bestLabel, bestScore, err := p.scoreResumes(ctx, resumeFiles, &jd, req.Config)
+	scores, bestLabel, bestScore, scoreWarnings, err := p.scoreResumes(ctx, resumeFiles, &jd, req.Config)
+	result.Warnings = append(result.Warnings, scoreWarnings...)
 	if err != nil {
 		result.Status = "error"
 		result.Error = err.Error()
@@ -227,7 +228,7 @@ func (p *ApplyPipeline) Run(ctx context.Context, req ApplyRequest) error {
 			slog.WarnContext(ctx, "tailor step failed — continuing", "error", tailorErr)
 			p.presenter.OnEvent(model.StepFailedEvent{StepID: "tailor", Label: "Tailor failed", Err: tailorErr.Error()})
 			result.Warnings = append(result.Warnings, model.RiskWarning{
-				Severity: "warn",
+				Severity: model.SeverityWarn,
 				Message:  fmt.Sprintf("tailor step failed: %v", tailorErr),
 			})
 		} else {
@@ -237,6 +238,14 @@ func (p *ApplyPipeline) Run(ctx context.Context, req ApplyRequest) error {
 				ElapsedMS: time.Since(tailorStart).Milliseconds(),
 			})
 			result.Cascade = tailorResult
+			// Surface tier-2 all-fail as a structured warning: the user requested
+			// bullet rewrites but every LLM call failed; result is tier-1 only.
+			if tailorResult.BulletsAttempted > 0 && len(tailorResult.RewrittenBullets) == 0 {
+				result.Warnings = append(result.Warnings, model.RiskWarning{
+					Severity: model.SeverityWarn,
+					Message:  fmt.Sprintf("tier-2 bullet rewriting attempted %d bullet(s) but all LLM calls failed — result is tier-1 only", tailorResult.BulletsAttempted),
+				})
+			}
 			// Update best score if tailored version scores higher.
 			if tailored := tailorResult.NewScore.Breakdown.Total(); tailored > result.BestScore {
 				result.BestScore = tailored
@@ -263,7 +272,7 @@ func (p *ApplyPipeline) Run(ctx context.Context, req ApplyRequest) error {
 			slog.WarnContext(ctx, "cover letter generation failed", "error", clErr)
 			p.presenter.OnEvent(model.StepFailedEvent{StepID: "05", Label: "Cover Letter failed", Err: clErr.Error()})
 			result.Warnings = append(result.Warnings, model.RiskWarning{
-				Severity: "warn",
+				Severity: model.SeverityWarn,
 				Message:  fmt.Sprintf("cover letter generation failed: %v", clErr),
 			})
 		} else {
@@ -315,7 +324,9 @@ func (p *ApplyPipeline) ScoreResumes(ctx context.Context, jd *model.JDData, cfg 
 	if err != nil {
 		return ScoreResumeResult{}, fmt.Errorf("list resumes: %w", err)
 	}
-	scores, bestLabel, bestScore, err := p.scoreResumes(ctx, resumeFiles, jd, cfg)
+	// Warnings from skipped resumes are discarded here — this path is the MCP
+	// score-only step where no PipelineResult accumulator exists.
+	scores, bestLabel, bestScore, _, err := p.scoreResumes(ctx, resumeFiles, jd, cfg)
 	if err != nil {
 		return ScoreResumeResult{}, err
 	}
@@ -477,24 +488,30 @@ Respond only with valid JSON matching the schema above.`, jdText)
 // retrieval. Retrieval belongs to the tailoring flow.
 
 // scoreResumes scores each resume against the JD, returning the full scores map,
-// the label of the best resume, and its score.
+// the label of the best resume, and its score. skipped collects per-resume
+// load/score failures as warnings for the caller to surface in PipelineResult.Warnings.
 func (p *ApplyPipeline) scoreResumes(
 	ctx context.Context,
 	resumeFiles []model.ResumeFile,
 	jd *model.JDData,
 	cfg *config.Config,
-) (map[string]model.ScoreResult, string, float64, error) {
+) (map[string]model.ScoreResult, string, float64, []model.RiskWarning, error) {
 	scoreStart := time.Now()
 	p.presenter.OnEvent(model.StepStartedEvent{StepID: "score", Label: "Scoring resumes"})
 
 	scores := make(map[string]model.ScoreResult, len(resumeFiles))
 	var bestLabel string
 	var bestScore float64
+	var skipped []model.RiskWarning
 
 	for _, r := range resumeFiles {
 		text, err := p.loader.Load(r.Path)
 		if err != nil {
 			slog.WarnContext(ctx, "failed to load resume — skipping", "path", r.Path, "error", err)
+			skipped = append(skipped, model.RiskWarning{
+				Severity: model.SeverityWarn,
+				Message:  fmt.Sprintf("resume %q failed to load — skipped: %v", r.Label, err),
+			})
 			continue
 		}
 
@@ -513,6 +530,10 @@ func (p *ApplyPipeline) scoreResumes(
 		})
 		if err != nil {
 			slog.WarnContext(ctx, "scoring failed — skipping resume", "label", r.Label, "error", err)
+			skipped = append(skipped, model.RiskWarning{
+				Severity: model.SeverityWarn,
+				Message:  fmt.Sprintf("resume %q failed to score — skipped: %v", r.Label, err),
+			})
 			continue
 		}
 
@@ -528,7 +549,7 @@ func (p *ApplyPipeline) scoreResumes(
 	if len(scores) == 0 && len(resumeFiles) > 0 {
 		err := fmt.Errorf("scoring: all %d resume(s) failed to load or score", len(resumeFiles))
 		p.presenter.OnEvent(model.StepFailedEvent{StepID: "score", Label: "Score Resumes", Err: err.Error()})
-		return nil, "", 0, err
+		return nil, "", 0, skipped, err
 	}
 
 	p.presenter.OnEvent(model.StepCompletedEvent{
@@ -536,7 +557,7 @@ func (p *ApplyPipeline) scoreResumes(
 		Label:     "Scoring complete",
 		ElapsedMS: time.Since(scoreStart).Milliseconds(),
 	})
-	return scores, bestLabel, bestScore, nil
+	return scores, bestLabel, bestScore, skipped, nil
 }
 
 // resolveSeniorityMatch maps the candidate's configured seniority and the JD's
@@ -636,6 +657,10 @@ func (p *ApplyPipeline) runTailorStep(
 		suggestions, sErr = p.augment.SuggestForKeywords(ctx, allKeywords)
 		if sErr != nil {
 			slog.WarnContext(ctx, "runTailorStep: SuggestForKeywords failed — tailoring without suggestions", "error", sErr)
+			result.Warnings = append(result.Warnings, model.RiskWarning{
+				Severity: model.SeverityWarn,
+				Message:  fmt.Sprintf("profile bank retrieval failed — tailoring without suggestions: %v", sErr),
+			})
 		}
 	}
 

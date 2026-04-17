@@ -135,14 +135,14 @@ type BulletRewriteInput struct {
 
 // rewriteBullets rewrites Experience bullets that are relevant to the JD keywords,
 // grounded in the candidate's accomplishments. Returns the modified resume text,
-// the list of changes, and any fatal error. LLM errors on individual bullets are
-// logged and skipped — they do not abort the entire rewrite.
-func rewriteBullets(input *BulletRewriteInput) (string, []model.BulletChange, error) {
+// the list of changes, the number of LLM calls attempted, and any fatal error.
+// LLM errors on individual bullets are logged and skipped — they do not abort the entire rewrite.
+func rewriteBullets(input *BulletRewriteInput) (string, []model.BulletChange, int, error) {
 	input.Log.DebugContext(input.Ctx, "tailor tier-2 start", "input_bytes", len(input.ResumeText), "keywords", len(input.JDKeywords))
 	bullets := extractExperienceBullets(input.ResumeText)
 	if len(bullets) == 0 {
 		input.Log.DebugContext(input.Ctx, "tailor tier-2 end", "output_bytes", len(input.ResumeText), "changes", 0)
-		return input.ResumeText, nil, nil
+		return input.ResumeText, nil, 0, nil
 	}
 
 	maxRewrites := input.MaxRewrites
@@ -152,6 +152,7 @@ func rewriteBullets(input *BulletRewriteInput) (string, []model.BulletChange, er
 	lines := strings.Split(input.ResumeText, "\n")
 	changes := make([]model.BulletChange, 0, maxRewrites)
 	rewroteCount := 0
+	attempted := 0
 
 	for _, b := range bullets {
 		if maxRewrites > 0 && rewroteCount >= maxRewrites {
@@ -189,6 +190,7 @@ func rewriteBullets(input *BulletRewriteInput) (string, []model.BulletChange, er
 			MaxTokens:   input.Defaults.LLM.BulletRewriteMaxTokens,
 		}
 
+		attempted++
 		resp, err := input.LLM.ChatComplete(input.Ctx, messages, opts)
 		if err != nil {
 			input.Log.WarnContext(input.Ctx, "bullet rewrite LLM call failed — skipping bullet",
@@ -225,6 +227,6 @@ func rewriteBullets(input *BulletRewriteInput) (string, []model.BulletChange, er
 	}
 
 	result := strings.Join(lines, "\n")
-	input.Log.DebugContext(input.Ctx, "tailor tier-2 end", "output_bytes", len(result), "changes", len(changes))
-	return result, changes, nil
+	input.Log.DebugContext(input.Ctx, "tailor tier-2 end", "output_bytes", len(result), "changes", len(changes), "attempted", attempted)
+	return result, changes, attempted, nil
 }

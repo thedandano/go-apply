@@ -81,18 +81,24 @@ func (s *Service) TailorResume(ctx context.Context, input *model.TailorInput) (m
 	}
 
 	// rewriteBullets handles per-bullet LLM errors internally (log + skip).
-	// It always returns nil error; degradation to tier-1 is implicit when no
-	// changes are produced (e.g. all bullets fail or none match keywords).
-	tier2Text, changes, _ := rewriteBullets(tier2Input)
+	// attempted distinguishes "no keyword-matching bullets found" from "all LLM calls failed".
+	tier2Text, changes, attempted, _ := rewriteBullets(tier2Input)
+
+	result.BulletsAttempted = attempted
 
 	// If tier-2 produced changes, upgrade the result.
-	if len(changes) > 0 {
+	switch {
+	case len(changes) > 0:
 		logger.Decision(ctx, s.log, "tailor.tier", "t2", "bullets rewritten", slog.Int("changes", len(changes)))
 		result.TierApplied = model.TierBullet
 		result.RewrittenBullets = changes
 		result.TailoredText = tier2Text
-	} else {
-		logger.Decision(ctx, s.log, "tailor.tier", "t1", "no bullets rewritten")
+	case attempted > 0:
+		// Every LLM call failed — degrade to tier-1 but signal the failure explicitly.
+		logger.Decision(ctx, s.log, "tailor.tier", "t1", "all bullet LLM rewrites failed",
+			slog.Int("attempted", attempted))
+	default:
+		logger.Decision(ctx, s.log, "tailor.tier", "t1", "no keyword-matching bullets found")
 	}
 
 	return result, nil

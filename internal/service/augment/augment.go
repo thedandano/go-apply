@@ -63,7 +63,10 @@ func (s *Service) AugmentResumeText(ctx context.Context, input model.AugmentInpu
 		"keyword_count", len(input.JDKeywords),
 	)
 	if s.llm == nil {
-		logger.Decision(ctx, s.log, "augment.output", "skip", "no LLM — skipping augmentation in MCP mode")
+		// In MCP mode no LLM is wired here — the MCP host (Claude Code) is the
+		// orchestrator that performs text incorporation. Retrieval still runs for
+		// cache warming; only the in-process incorporation step is skipped.
+		logger.Decision(ctx, s.log, "augment.incorporate", "skip", "no LLM — MCP host incorporates")
 		return input.ResumeText, input.RefData, nil
 	}
 
