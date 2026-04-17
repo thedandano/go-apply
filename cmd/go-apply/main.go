@@ -79,8 +79,16 @@ func run() int {
 	}
 
 	if err := root.Execute(); err != nil {
-		log.Error("command failed", "error", err)
-		return 1
+		level, msg, code := classifyRunError(err)
+		switch level {
+		case "info":
+			log.Info(msg)
+		case "warn":
+			log.Warn(msg, "error", err)
+		default:
+			log.Error(msg, "error", err)
+		}
+		return code
 	}
 	return 0
 }

@@ -1,6 +1,9 @@
 package main
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"testing"
 
@@ -123,6 +126,78 @@ func TestParseLevelFlag(t *testing.T) {
 			}
 			if got != tc.wantLvl {
 				t.Errorf("parseLevelFlag(%q) level = %s, want %s", tc.input, got, tc.wantLvl)
+			}
+		})
+	}
+}
+
+func TestClassifyRunError(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		err      error
+		wantLvl  string
+		wantMsg  string
+		wantCode int
+	}{
+		{
+			name:     "context.Canceled",
+			err:      context.Canceled,
+			wantLvl:  "info",
+			wantMsg:  "command canceled",
+			wantCode: 130,
+		},
+		{
+			name:     "wrapped context.Canceled",
+			err:      fmt.Errorf("doing X: %w", context.Canceled),
+			wantLvl:  "info",
+			wantMsg:  "command canceled",
+			wantCode: 130,
+		},
+		{
+			name:     "context.DeadlineExceeded",
+			err:      context.DeadlineExceeded,
+			wantLvl:  "warn",
+			wantMsg:  "command timed out",
+			wantCode: 1,
+		},
+		{
+			name:     "wrapped context.DeadlineExceeded",
+			err:      fmt.Errorf("waiting: %w", context.DeadlineExceeded),
+			wantLvl:  "warn",
+			wantMsg:  "command timed out",
+			wantCode: 1,
+		},
+		{
+			name:     "generic error",
+			err:      errors.New("boom"),
+			wantLvl:  "error",
+			wantMsg:  "command failed",
+			wantCode: 1,
+		},
+		{
+			name:     "wrapped generic error",
+			err:      fmt.Errorf("failed to execute: %w", errors.New("boom")),
+			wantLvl:  "error",
+			wantMsg:  "command failed",
+			wantCode: 1,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			gotLvl, gotMsg, gotCode := classifyRunError(tc.err)
+			if gotLvl != tc.wantLvl {
+				t.Errorf("level = %q, want %q", gotLvl, tc.wantLvl)
+			}
+			if gotMsg != tc.wantMsg {
+				t.Errorf("msg = %q, want %q", gotMsg, tc.wantMsg)
+			}
+			if gotCode != tc.wantCode {
+				t.Errorf("code = %d, want %d", gotCode, tc.wantCode)
 			}
 		})
 	}

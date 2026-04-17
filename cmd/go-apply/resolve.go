@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"log/slog"
 	"strings"
 
@@ -51,4 +53,19 @@ func parseLevelFlag(s string) (slog.Level, bool) {
 		return slog.LevelError, true
 	}
 	return slog.LevelInfo, false
+}
+
+// classifyRunError returns the log level, message, and exit code for a cobra.Command.Execute() error.
+// It classifies context.Canceled as INFO with exit code 130,
+// context.DeadlineExceeded as WARN with exit code 1,
+// and all other errors as ERROR with exit code 1.
+func classifyRunError(err error) (level string, msg string, code int) {
+	switch {
+	case errors.Is(err, context.Canceled):
+		return "info", "command canceled", 130
+	case errors.Is(err, context.DeadlineExceeded):
+		return "warn", "command timed out", 1
+	default:
+		return "error", "command failed", 1
+	}
 }
