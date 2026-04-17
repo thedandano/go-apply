@@ -93,6 +93,8 @@ func (p *ApplyPipeline) Run(ctx context.Context, req ApplyRequest) error {
 	result := model.NewPipelineResult()
 	result.StartTime = start
 
+	logger.Banner(ctx, slog.Default(), "Session", logger.ShortID())
+
 	// Step 1: Acquire JD text.
 	stageStart := time.Now()
 	slog.DebugContext(ctx, "stage start", "stage", "acquire_jd",
@@ -186,6 +188,7 @@ func (p *ApplyPipeline) Run(ctx context.Context, req ApplyRequest) error {
 	}
 
 	stageStart = time.Now()
+	logger.Banner(ctx, slog.Default(), "Score", "Original")
 	slog.DebugContext(ctx, "stage start", "stage", "score_resumes", slog.Int("resume_count", len(resumeFiles)))
 	scores, bestLabel, bestScore, scoreWarnings, err := p.scoreResumes(ctx, resumeFiles, &jd, req.Config)
 	result.Warnings = append(result.Warnings, scoreWarnings...)
@@ -254,6 +257,7 @@ func (p *ApplyPipeline) Run(ctx context.Context, req ApplyRequest) error {
 	}
 
 	// Step 5: Generate cover letter — only when CLGen is configured and score meets threshold.
+	logger.Banner(ctx, slog.Default(), "Cover Letter", "")
 	switch {
 	case p.clGen != nil && result.BestScore >= p.defaults.Thresholds.ScorePass:
 		logger.Decision(ctx, slog.Default(), "pipeline.cover_letter", "generate",
@@ -650,6 +654,7 @@ func (p *ApplyPipeline) runTailorStep(
 	scoreBefore := result.Scores[result.BestResume]
 
 	// Retrieve relevant profile chunks for missing keywords before tailoring.
+	logger.Banner(ctx, slog.Default(), "Augment", "Profile Retrieval")
 	var suggestions model.TailorSuggestions
 	if p.augment != nil {
 		allKeywords := append(jd.Required, jd.Preferred...) //nolint:gocritic // fresh slice intentional
@@ -664,6 +669,7 @@ func (p *ApplyPipeline) runTailorStep(
 		}
 	}
 
+	logger.Banner(ctx, slog.Default(), "Tailor", "T1+T2")
 	tailorResult, err := p.tailor.TailorResume(ctx, &model.TailorInput{
 		Resume:              bestFile,
 		ResumeText:          resumeText,
@@ -680,6 +686,7 @@ func (p *ApplyPipeline) runTailorStep(
 	}
 
 	// Re-score using tailored text for accurate delta.
+	logger.Banner(ctx, slog.Default(), "Score", "After Tailor")
 	seniorityMatch := resolveSeniorityMatch(req.Config.DefaultSeniority, jd)
 	scoreAfter, err := p.scorer.Score(&model.ScorerInput{
 		ResumeText:     tailorResult.TailoredText,

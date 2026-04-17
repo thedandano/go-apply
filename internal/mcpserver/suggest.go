@@ -50,6 +50,7 @@ func HandleSuggestTailoringWithConfig(ctx context.Context, req *mcp.CallToolRequ
 	deps.Presenter = pres
 	pl := pipeline.NewApplyPipeline(deps)
 
+	logger.Banner(ctx, slog.Default(), "Augment", "Profile Retrieval")
 	suggestions, retrievalMode, err := pl.SuggestTailoring(ctx, &sess.JD, sess.ScoreResult)
 	if err != nil {
 		slog.ErrorContext(ctx, "suggest_tailoring: failed", "session_id", sessionID, "error", err)
