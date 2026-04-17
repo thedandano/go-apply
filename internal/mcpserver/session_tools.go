@@ -272,12 +272,12 @@ func HandleFinalizeWithConfig(ctx context.Context, req *mcp.CallToolRequest, dep
 }
 
 // NextActionFromScore returns the recommended next action based on the best resume score.
-// Exported for testing.
+// Score is on a 0–100 scale (sum of weighted breakdown components). Exported for testing.
 func NextActionFromScore(score float64) string {
 	switch {
-	case score < 0.40:
+	case score < 40.0:
 		return "advise_skip"
-	case score < 0.70:
+	case score < 70.0:
 		return "tailor_t1"
 	default:
 		return "cover_letter"
@@ -285,8 +285,9 @@ func NextActionFromScore(score float64) string {
 }
 
 // NextActionAfterT1 returns next_action after T1 tailoring — floored to tailor_t2 or cover_letter.
+// Score is on a 0–100 scale.
 func NextActionAfterT1(score float64) string {
-	if score >= 0.70 {
+	if score >= 70.0 {
 		return "cover_letter"
 	}
 	return "tailor_t2"
