@@ -19,22 +19,29 @@ const (
 	logFilePrefix = "go-apply-"
 )
 
-// New creates a *slog.Logger writing JSON lines to a daily log file in logDir.
+// Options configures the logger.
+type Options struct {
+	LogDir      string     // Directory for log files
+	FileLevel   slog.Level // Level for file handler
+	StderrLevel slog.Level // Level for stderr handler
+}
+
+// New creates a *slog.Logger writing JSON lines to a daily log file in opts.LogDir.
 //
 // File naming: go-apply-2006-01-02.log (one per day; multiple invocations append)
-// Dual output: file at level (respects cfg.LogLevel) + stderr at WARN+ (keeps TUI clean)
+// Dual output: file at FileLevel + stderr at StderrLevel (keeps TUI clean)
 // Retention: keeps the last maxLogFiles files, prunes older ones on startup
-// Fallback: if logDir is unwritable → stderr-only logger at WARN+, no error returned
-func New(logDir string, level slog.Level) (*slog.Logger, func(), error) {
-	if err := os.MkdirAll(logDir, 0750); err != nil {
+// Fallback: if LogDir is unwritable → stderr-only logger at WARN+, no error returned
+func New(opts Options) (*slog.Logger, func(), error) {
+	if err := os.MkdirAll(opts.LogDir, 0750); err != nil {
 		return stderrOnly(), func() {}, nil
 	}
 
 	// Keep maxLogFiles-1 existing files so the new file below brings the total to maxLogFiles.
-	pruneOldLogs(logDir, maxLogFiles-1)
+	pruneOldLogs(opts.LogDir, maxLogFiles-1)
 
 	timestamp := time.Now().UTC().Format("2006-01-02")
-	logPath := filepath.Join(logDir, logFilePrefix+timestamp+".log")
+	logPath := filepath.Join(opts.LogDir, logFilePrefix+timestamp+".log")
 
 	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600) // #nosec G304 -- logPath built from os.UserHomeDir() + fixed suffix, not user input
 	if err != nil {
@@ -43,12 +50,12 @@ func New(logDir string, level slog.Level) (*slog.Logger, func(), error) {
 
 	log := slog.New(&multiHandler{
 		file: charmlog.NewWithOptions(f, charmlog.Options{
-			Level:           charmlogLevelFromSlog(level),
+			Level:           charmlogLevelFromSlog(opts.FileLevel),
 			ReportTimestamp: true,
 			TimeFormat:      "2006-01-02 15:04:05",
 		}),
 		stderr: charmlog.NewWithOptions(os.Stderr, charmlog.Options{
-			Level:           charmlog.WarnLevel,
+			Level:           charmlogLevelFromSlog(opts.StderrLevel),
 			ReportTimestamp: true,
 			TimeFormat:      "2006-01-02 15:04:05",
 		}),
