@@ -201,15 +201,32 @@ func HandleFinalizeWithConfig(ctx context.Context, req *mcp.CallToolRequest, dep
 
 	sess.State = stateFinalized
 
+	type finalizeSummary struct {
+		KeywordsRequired  int     `json:"keywords_required"`
+		KeywordsPreferred int     `json:"keywords_preferred"`
+		ResumesScored     int     `json:"resumes_scored"`
+		BestResume        string  `json:"best_resume"`
+		BestScore         float64 `json:"best_score"`
+		CoverLetterChars  int     `json:"cover_letter_chars"`
+	}
 	type finalizeData struct {
-		BestResume  string  `json:"best_resume"`
-		BestScore   float64 `json:"best_score"`
-		CoverLetter string  `json:"cover_letter,omitempty"`
+		BestResume  string          `json:"best_resume"`
+		BestScore   float64         `json:"best_score"`
+		CoverLetter string          `json:"cover_letter,omitempty"`
+		Summary     finalizeSummary `json:"summary"`
 	}
 	return envelopeResult(okEnvelope(sessionID, "", finalizeData{
 		BestResume:  sess.ScoreResult.BestLabel,
 		BestScore:   sess.ScoreResult.BestScore,
 		CoverLetter: coverLetter,
+		Summary: finalizeSummary{
+			KeywordsRequired:  len(sess.JD.Required),
+			KeywordsPreferred: len(sess.JD.Preferred),
+			ResumesScored:     len(sess.ScoreResult.Scores),
+			BestResume:        sess.ScoreResult.BestLabel,
+			BestScore:         sess.ScoreResult.BestScore,
+			CoverLetterChars:  len(coverLetter),
+		},
 	}))
 }
 

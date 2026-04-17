@@ -189,6 +189,56 @@ func TestOnboardingService_RejectsEmptyLabel(t *testing.T) {
 	}
 }
 
+func TestOnboardingService_SummaryPopulated(t *testing.T) {
+	skills := "Go, Python, Docker"
+	accomplishments := "Led team of 5 engineers"
+
+	repo := &stubProfileRepo{}
+	svc := newService(t, repo, &stubEmbedder{})
+
+	result, err := svc.Run(context.Background(), model.OnboardInput{
+		Resumes:             []model.ResumeEntry{{Label: "backend", Text: "Go engineer resume"}},
+		SkillsText:          skills,
+		AccomplishmentsText: accomplishments,
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if result.Summary.ResumesAdded != 1 {
+		t.Errorf("ResumesAdded = %d, want 1", result.Summary.ResumesAdded)
+	}
+	if result.Summary.SkillsChars != len(skills) {
+		t.Errorf("SkillsChars = %d, want %d", result.Summary.SkillsChars, len(skills))
+	}
+	if result.Summary.AccomplishmentsChars != len(accomplishments) {
+		t.Errorf("AccomplishmentsChars = %d, want %d", result.Summary.AccomplishmentsChars, len(accomplishments))
+	}
+	// 1 resume + skills + accomplishments = 3 chunks
+	if result.Summary.TotalChunks != 3 {
+		t.Errorf("TotalChunks = %d, want 3", result.Summary.TotalChunks)
+	}
+}
+
+func TestOnboardingService_SummaryResumesAddedOnlyCountsSuccessful(t *testing.T) {
+	repo := &stubProfileRepo{}
+	svc := newService(t, repo, &stubEmbedder{})
+
+	// One valid resume and one invalid (path traversal) — only the valid one should count.
+	result, err := svc.Run(context.Background(), model.OnboardInput{
+		Resumes: []model.ResumeEntry{
+			{Label: "backend", Text: "Go engineer resume"},
+			{Label: "../etc/passwd", Text: "malicious"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.Summary.ResumesAdded != 1 {
+		t.Errorf("ResumesAdded = %d, want 1 (only successful stores count)", result.Summary.ResumesAdded)
+	}
+}
+
 func TestOnboardingService_WritesFilesToDisk(t *testing.T) {
 	repo := &stubProfileRepo{}
 	dataDir := t.TempDir()
