@@ -1,6 +1,7 @@
 package mcpserver
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/thedandano/go-apply/internal/config"
 	"github.com/thedandano/go-apply/internal/loader"
+	"github.com/thedandano/go-apply/internal/logger"
 	"github.com/thedandano/go-apply/internal/port"
 	"github.com/thedandano/go-apply/internal/repository/fs"
 	"github.com/thedandano/go-apply/internal/repository/sqlite"
@@ -62,7 +64,7 @@ func loadDeps() (*config.Config, pipeline.ApplyConfig, error) {
 		log.Info("orchestrator LLM configured — pipeline will extract keywords", "model", cfg.Orchestrator.Model)
 		llmClient = llm.New(cfg.Orchestrator.BaseURL, cfg.Orchestrator.Model, cfg.Orchestrator.APIKey, defaults, log)
 	} else {
-		log.Info("no orchestrator LLM — MCP host handles keyword extraction")
+		logger.Decision(context.Background(), log, "keyword_extraction", "mcp_host", "no orchestrator LLM configured")
 	}
 
 	deps := pipeline.ApplyConfig{
