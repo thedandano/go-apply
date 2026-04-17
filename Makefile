@@ -1,4 +1,4 @@
-.PHONY: build test test-unit test-integration test-e2e lint fmt vet security check tools clean
+.PHONY: build install test test-unit test-integration test-e2e lint fmt vet security check tools clean
 
 # Install dev tools at pinned versions (run once after cloning)
 tools:
@@ -8,6 +8,9 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev
 
 build:
 	go build -ldflags "-s -w -X main.version=$(VERSION)" -o bin/go-apply ./cmd/go-apply/
+
+install: clean build
+	install -m 0755 bin/go-apply "$${INSTALL_DIR:-$$HOME/.local/bin}/go-apply"
 
 test: test-unit test-integration
 
