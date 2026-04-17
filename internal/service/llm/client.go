@@ -99,7 +99,7 @@ func (c *HTTPClient) ChatComplete(ctx context.Context, messages []model.ChatMess
 		return "", fmt.Errorf("llm: marshal chat request: %w", err)
 	}
 
-	slog.DebugContext(ctx, "llm request",
+	c.log.DebugContext(ctx, "llm request",
 		slog.String("model", c.model),
 		slog.Int("prompt_bytes", len(body)),
 		logger.PayloadAttr("prompt", string(body), logger.Verbose()),
@@ -114,7 +114,7 @@ func (c *HTTPClient) ChatComplete(ctx context.Context, messages []model.ChatMess
 		return "", fmt.Errorf("llm: no choices in chat response")
 	}
 	completion := result.Choices[0].Message.Content
-	slog.DebugContext(ctx, "llm response",
+	c.log.DebugContext(ctx, "llm response",
 		slog.Int("response_bytes", len(completion)),
 		slog.Int64("elapsed_ms", time.Since(start).Milliseconds()),
 		logger.PayloadAttr("completion", completion, logger.Verbose()),
@@ -130,7 +130,7 @@ func (c *HTTPClient) Embed(ctx context.Context, text string) ([]float32, error) 
 		return nil, fmt.Errorf("llm: marshal embed request: %w", err)
 	}
 
-	slog.DebugContext(ctx, "llm request",
+	c.log.DebugContext(ctx, "llm request",
 		slog.String("model", c.model),
 		slog.Int("prompt_bytes", len(body)),
 		logger.PayloadAttr("prompt", string(body), logger.Verbose()),
@@ -145,7 +145,7 @@ func (c *HTTPClient) Embed(ctx context.Context, text string) ([]float32, error) 
 		return nil, fmt.Errorf("llm: no embedding in response")
 	}
 	embedding := result.Data[0].Embedding
-	slog.DebugContext(ctx, "llm response",
+	c.log.DebugContext(ctx, "llm response",
 		slog.Int("response_bytes", len(embedding)),
 		slog.Int64("elapsed_ms", time.Since(start).Milliseconds()),
 	)
