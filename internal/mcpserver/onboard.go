@@ -12,6 +12,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 
 	"github.com/thedandano/go-apply/internal/config"
+	"github.com/thedandano/go-apply/internal/logger"
 	"github.com/thedandano/go-apply/internal/model"
 	"github.com/thedandano/go-apply/internal/port"
 	"github.com/thedandano/go-apply/internal/repository/fs"
@@ -26,6 +27,15 @@ func HandleOnboardUser(ctx context.Context, req *mcp.CallToolRequest, svc port.O
 	resumeLabel := req.GetString("resume_label", "")
 	skills := req.GetString("skills", "")
 	accomplishments := req.GetString("accomplishments", "")
+
+	slog.DebugContext(ctx, "mcp tool invoked",
+		slog.String("tool", "onboard_user"),
+		slog.String("resume_label", resumeLabel),
+		slog.Int("resume_content_len", len(resumeContent)),
+		slog.Int("skills_len", len(skills)),
+		slog.Int("accomplishments_len", len(accomplishments)),
+		logger.PayloadAttr("resume_content", resumeContent, logger.Verbose()),
+	)
 
 	// XOR validation: both or neither.
 	if (resumeContent == "") != (resumeLabel == "") {
@@ -50,6 +60,12 @@ func HandleOnboardUser(ctx context.Context, req *mcp.CallToolRequest, svc port.O
 	}
 
 	data, _ := json.Marshal(result)
+	slog.DebugContext(ctx, "mcp tool result",
+		slog.String("tool", "onboard_user"),
+		slog.String("status", "ok"),
+		slog.Int("result_bytes", len(data)),
+		logger.PayloadAttr("result", string(data), logger.Verbose()),
+	)
 	return mcp.NewToolResultText(string(data))
 }
 
@@ -58,6 +74,13 @@ func HandleOnboardUser(ctx context.Context, req *mcp.CallToolRequest, svc port.O
 func HandleAddResume(ctx context.Context, req *mcp.CallToolRequest, svc port.Onboarder) *mcp.CallToolResult {
 	resumeContent := req.GetString("resume_content", "")
 	resumeLabel := req.GetString("resume_label", "")
+
+	slog.DebugContext(ctx, "mcp tool invoked",
+		slog.String("tool", "add_resume"),
+		slog.String("resume_label", resumeLabel),
+		slog.Int("resume_content_len", len(resumeContent)),
+		logger.PayloadAttr("resume_content", resumeContent, logger.Verbose()),
+	)
 
 	if resumeContent == "" || resumeLabel == "" {
 		return errorResult("resume_content and resume_label are both required")
@@ -71,14 +94,31 @@ func HandleAddResume(ctx context.Context, req *mcp.CallToolRequest, svc port.Onb
 	}
 
 	data, _ := json.Marshal(result)
+	slog.DebugContext(ctx, "mcp tool result",
+		slog.String("tool", "add_resume"),
+		slog.String("status", "ok"),
+		slog.Int("result_bytes", len(data)),
+		logger.PayloadAttr("result", string(data), logger.Verbose()),
+	)
 	return mcp.NewToolResultText(string(data))
 }
 
 // HandleUpdateConfig is the exported, injectable handler for "update_config".
 // cfg is loaded and saved by the caller.
-func HandleUpdateConfig(_ context.Context, req *mcp.CallToolRequest, cfg *config.Config) *mcp.CallToolResult {
+func HandleUpdateConfig(ctx context.Context, req *mcp.CallToolRequest, cfg *config.Config) *mcp.CallToolResult {
 	key := req.GetString("key", "")
 	value := req.GetString("value", "")
+
+	displayValue := value
+	if config.IsAPIKey(key) && value != "" {
+		displayValue = "***"
+	}
+	slog.DebugContext(ctx, "mcp tool invoked",
+		slog.String("tool", "update_config"),
+		slog.String("key", key),
+		slog.String("value", displayValue),
+	)
+
 	if key == "" {
 		return errorResult("key is required")
 	}
@@ -91,11 +131,13 @@ func HandleUpdateConfig(_ context.Context, req *mcp.CallToolRequest, cfg *config
 	if err := cfg.Save(); err != nil {
 		return errorResult(fmt.Sprintf("save config: %v", err))
 	}
-	displayValue := value
-	if config.IsAPIKey(key) && value != "" {
-		displayValue = "***"
-	}
 	data, _ := json.Marshal(map[string]string{"updated": key, "value": displayValue})
+	slog.DebugContext(ctx, "mcp tool result",
+		slog.String("tool", "update_config"),
+		slog.String("status", "ok"),
+		slog.String("key", key),
+		slog.String("value", displayValue),
+	)
 	return mcp.NewToolResultText(string(data))
 }
 
@@ -112,6 +154,7 @@ func HandleGetConfigWith(cfg *config.Config) *mcp.CallToolResult {
 // in MCP mode Claude is the orchestrator.
 // Exported for testing.
 func HandleGetConfigWithProfileAndFiles(cfg *config.Config, dataDir string) *mcp.CallToolResult {
+	slog.Debug("mcp tool invoked", slog.String("tool", "get_config"))
 	response := make(map[string]interface{}, len(config.MCPKeys())+1)
 
 	// Add config fields
@@ -134,6 +177,12 @@ func HandleGetConfigWithProfileAndFiles(cfg *config.Config, dataDir string) *mcp
 	response["profile"] = profileObj
 
 	data, _ := json.Marshal(response)
+	slog.Debug("mcp tool result",
+		slog.String("tool", "get_config"),
+		slog.String("status", "ok"),
+		slog.Int("result_bytes", len(data)),
+		logger.PayloadAttr("result", string(data), logger.Verbose()),
+	)
 	return mcp.NewToolResultText(string(data))
 }
 

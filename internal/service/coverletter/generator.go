@@ -6,8 +6,10 @@ import (
 	"log/slog"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/thedandano/go-apply/internal/config"
+	"github.com/thedandano/go-apply/internal/logger"
 	"github.com/thedandano/go-apply/internal/model"
 	"github.com/thedandano/go-apply/internal/port"
 )
@@ -39,10 +41,14 @@ func New(llm port.LLMClient, defaults *config.AppDefaults, log *slog.Logger) *Ge
 // Generate selects the highest-scoring resume, builds a prompt, calls the LLM, and returns
 // a CoverLetterResult with the generated text plus word and sentence counts.
 func (g *Generator) Generate(ctx context.Context, input *model.CoverLetterInput) (model.CoverLetterResult, error) {
-	g.log.DebugContext(ctx, "cover letter generate started",
+	start := time.Now()
+	g.log.DebugContext(ctx, "cover_letter start",
 		"job_title", input.JD.Title,
 		"company", input.JD.Company,
 		"channel", input.Channel,
+		"jd_raw_bytes", len(input.JDRawText),
+		"scores_count", len(input.Scores),
+		logger.PayloadAttr("jd_title", input.JD.Title, logger.Verbose()),
 	)
 
 	if input.JDRawText == "" {
@@ -91,9 +97,11 @@ func (g *Generator) Generate(ctx context.Context, input *model.CoverLetterInput)
 		return model.CoverLetterResult{}, fmt.Errorf("cover letter llm call: empty response")
 	}
 
-	g.log.DebugContext(ctx, "cover letter generated",
+	g.log.DebugContext(ctx, "cover_letter end",
+		"output_bytes", len(text),
 		"word_count", countWords(text),
 		"sentence_count", countSentences(text),
+		"elapsed_ms", time.Since(start).Milliseconds(),
 	)
 
 	return model.CoverLetterResult{
