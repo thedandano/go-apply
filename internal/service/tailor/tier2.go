@@ -136,8 +136,10 @@ type BulletRewriteInput struct {
 // the list of changes, and any fatal error. LLM errors on individual bullets are
 // logged and skipped — they do not abort the entire rewrite.
 func rewriteBullets(input *BulletRewriteInput) (string, []model.BulletChange, error) {
+	input.Log.DebugContext(input.Ctx, "tailor tier-2 start", "input_bytes", len(input.ResumeText), "keywords", len(input.JDKeywords))
 	bullets := extractExperienceBullets(input.ResumeText)
 	if len(bullets) == 0 {
+		input.Log.DebugContext(input.Ctx, "tailor tier-2 end", "output_bytes", len(input.ResumeText), "changes", 0)
 		return input.ResumeText, nil, nil
 	}
 
@@ -214,5 +216,7 @@ func rewriteBullets(input *BulletRewriteInput) (string, []model.BulletChange, er
 		rewroteCount++
 	}
 
-	return strings.Join(lines, "\n"), changes, nil
+	result := strings.Join(lines, "\n")
+	input.Log.DebugContext(input.Ctx, "tailor tier-2 end", "output_bytes", len(result), "changes", len(changes))
+	return result, changes, nil
 }

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/thedandano/go-apply/internal/config"
+	"github.com/thedandano/go-apply/internal/logger"
 	"github.com/thedandano/go-apply/internal/model"
 	"github.com/thedandano/go-apply/internal/port"
 )
@@ -93,6 +94,11 @@ func (p *ApplyPipeline) Run(ctx context.Context, req ApplyRequest) error {
 	result.StartTime = start
 
 	// Step 1: Acquire JD text.
+	stageStart := time.Now()
+	slog.DebugContext(ctx, "stage start", "stage", "acquire_jd",
+		logger.PayloadAttr("input", req.URLOrText, logger.Verbose()),
+		slog.Bool("is_text", req.IsText),
+	)
 	jdText, err := p.acquireJDText(ctx, req)
 	if err != nil {
 		result.Status = "error"
@@ -101,10 +107,16 @@ func (p *ApplyPipeline) Run(ctx context.Context, req ApplyRequest) error {
 		p.presenter.ShowError(err)
 		return err
 	}
+	slog.DebugContext(ctx, "stage end", "stage", "acquire_jd",
+		slog.Int("jd_bytes", len(jdText)),
+		slog.Int64("elapsed_ms", time.Since(stageStart).Milliseconds()),
+	)
 	result.JDText = jdText // returned so the MCP host can extract keywords and reason over it
 	// TODO: (priority critical) MCP host needs to be able to return the keywords to the pipeline with provided structure
 
 	// Step 2: Extract keywords from JD text via LLM.
+	stageStart = time.Now()
+	slog.DebugContext(ctx, "stage start", "stage", "extract_keywords", slog.Int("jd_bytes", len(jdText)))
 	jd, _, kwErr := p.extractKeywords(ctx, jdText)
 	if kwErr != nil {
 		jdErr := fmt.Errorf("could not extract a job description from the provided input — " +
@@ -118,6 +130,13 @@ func (p *ApplyPipeline) Run(ctx context.Context, req ApplyRequest) error {
 		_ = p.presenter.ShowResult(result)
 		return jdErr
 	}
+	slog.DebugContext(ctx, "stage end", "stage", "extract_keywords",
+		slog.Int("required", len(jd.Required)),
+		slog.Int("preferred", len(jd.Preferred)),
+		slog.String("title", jd.Title),
+		slog.String("company", jd.Company),
+		slog.Int64("elapsed_ms", time.Since(stageStart).Milliseconds()),
+	)
 	result.JD = jd
 	result.Keywords.Required = jd.Required
 	result.Keywords.Preferred = jd.Preferred
@@ -142,6 +161,7 @@ func (p *ApplyPipeline) Run(ctx context.Context, req ApplyRequest) error {
 	emptyJD := len(jd.Required) == 0 && len(jd.Preferred) == 0 &&
 		strings.TrimSpace(jd.Title) == "" && strings.TrimSpace(jd.Company) == ""
 	if emptyJD {
+		logger.Decision(ctx, slog.Default(), "pipeline.abort", "empty_jd", "keyword extraction produced no usable JD fields")
 		jdErr := fmt.Errorf("could not extract a job description from the provided input — " +
 			"the page may have expired, require a login, or failed to load. " +
 			"Please provide the job description text directly using --text \"<jd text>\" " +
@@ -165,6 +185,8 @@ func (p *ApplyPipeline) Run(ctx context.Context, req ApplyRequest) error {
 		return fmt.Errorf("list resumes: %w", err)
 	}
 
+	stageStart = time.Now()
+	slog.DebugContext(ctx, "stage start", "stage", "score_resumes", slog.Int("resume_count", len(resumeFiles)))
 	scores, bestLabel, bestScore, err := p.scoreResumes(ctx, resumeFiles, &jd, req.Config)
 	if err != nil {
 		result.Status = "error"
@@ -173,6 +195,11 @@ func (p *ApplyPipeline) Run(ctx context.Context, req ApplyRequest) error {
 		p.presenter.ShowError(err)
 		return err
 	}
+	slog.DebugContext(ctx, "stage end", "stage", "score_resumes",
+		slog.String("best_resume", bestLabel),
+		slog.Float64("best_score", bestScore),
+		slog.Int64("elapsed_ms", time.Since(stageStart).Milliseconds()),
+	)
 	result.Scores = scores
 	result.BestResume = bestLabel
 	result.BestScore = bestScore
@@ -180,6 +207,18 @@ func (p *ApplyPipeline) Run(ctx context.Context, req ApplyRequest) error {
 	// TODO (priority critical)
 
 	// Step 4 (optional): Tailor the best-matching resume when --accomplishments is set.
+	var tailorChosen, tailorReason string
+	switch {
+	case p.tailor == nil:
+		tailorChosen, tailorReason = "skip", "tailor not configured"
+	case req.AccomplishmentsText == "":
+		tailorChosen, tailorReason = "skip", "no accomplishments"
+	case result.BestResume == "":
+		tailorChosen, tailorReason = "skip", "no best resume"
+	default:
+		tailorChosen, tailorReason = "run", "accomplishments present and best resume selected"
+	}
+	logger.Decision(ctx, slog.Default(), "pipeline.tailor", tailorChosen, tailorReason)
 	if req.AccomplishmentsText != "" && result.BestResume != "" && p.tailor != nil {
 		tailorStart := time.Now()
 		p.presenter.OnEvent(model.StepStartedEvent{StepID: "tailor", Label: "Tailoring resume"})
@@ -208,6 +247,9 @@ func (p *ApplyPipeline) Run(ctx context.Context, req ApplyRequest) error {
 	// Step 5: Generate cover letter — only when CLGen is configured and score meets threshold.
 	switch {
 	case p.clGen != nil && result.BestScore >= p.defaults.Thresholds.ScorePass:
+		logger.Decision(ctx, slog.Default(), "pipeline.cover_letter", "generate",
+			fmt.Sprintf("score %.2f >= threshold %.2f", result.BestScore, p.defaults.Thresholds.ScorePass),
+		)
 		clStart := time.Now()
 		p.presenter.OnEvent(model.StepStartedEvent{StepID: "05", Label: "Cover Letter"})
 		clResult, clErr := p.clGen.Generate(ctx, &model.CoverLetterInput{
@@ -233,8 +275,12 @@ func (p *ApplyPipeline) Run(ctx context.Context, req ApplyRequest) error {
 			result.CoverLetter = clResult
 		}
 	case p.clGen == nil:
+		logger.Decision(ctx, slog.Default(), "pipeline.cover_letter", "skip_no_clgen", "CLGen not configured")
 		slog.InfoContext(ctx, "cover letter skipped — CLGen not configured (MCP mode: Claude generates cover letters)")
 	default:
+		logger.Decision(ctx, slog.Default(), "pipeline.cover_letter", "skip_below_threshold",
+			fmt.Sprintf("score %.2f < threshold %.2f", result.BestScore, p.defaults.Thresholds.ScorePass),
+		)
 		slog.InfoContext(ctx, "cover letter skipped — best score below threshold",
 			"best_score", result.BestScore,
 			"threshold", p.defaults.Thresholds.ScorePass,
@@ -307,9 +353,11 @@ func (p *ApplyPipeline) acquireJDText(ctx context.Context, req ApplyRequest) (st
 		slog.WarnContext(ctx, "cache lookup error — proceeding with fetch", "url", req.URLOrText, "error", err)
 	}
 	if found && rec != nil && rec.RawText != "" {
+		logger.Decision(ctx, slog.Default(), "jd.source", "cache", "cache hit", slog.String("url", req.URLOrText))
 		p.presenter.OnEvent(model.StepCompletedEvent{StepID: "cache_lookup", Label: "Cache hit", ElapsedMS: 0})
 		return rec.RawText, nil
 	}
+	logger.Decision(ctx, slog.Default(), "jd.source", "fetch", "cache miss or text input", slog.String("url", req.URLOrText))
 	p.presenter.OnEvent(model.StepCompletedEvent{StepID: "cache_lookup", Label: "Cache miss — fetching", ElapsedMS: 0})
 
 	// Fetch from URL.
@@ -458,6 +506,7 @@ func (p *ApplyPipeline) scoreResumes(
 				JDKeywords: append(jd.Required, jd.Preferred...),
 			})
 			if augErr != nil {
+				logger.Decision(ctx, slog.Default(), "resume.augment", "fallback", "augmentation failed", slog.String("label", r.Label))
 				slog.WarnContext(ctx, "augmentation failed — using original text", "label", r.Label, "error", augErr)
 				augmented = text
 				refData = nil
@@ -481,6 +530,7 @@ func (p *ApplyPipeline) scoreResumes(
 			continue
 		}
 
+		slog.DebugContext(ctx, "resume scored", "label", r.Label, "score", sr.Breakdown.Total())
 		scores[r.Label] = sr
 		total := sr.Breakdown.Total()
 		if total > bestScore {
