@@ -96,7 +96,7 @@ func TestOnboardingService_SkillsAndAccomplishmentsStored(t *testing.T) {
 	if len(result.Warnings) > 0 {
 		t.Errorf("unexpected warnings: %v", result.Warnings)
 	}
-	wantStored := map[string]bool{"ref:skills": true, "accomplishments": true}
+	wantStored := map[string]bool{"ref:skills": true, "accomplishments:0": true}
 	for _, s := range result.Stored {
 		delete(wantStored, s)
 	}
@@ -190,8 +190,8 @@ func TestOnboardingService_RejectsEmptyLabel(t *testing.T) {
 }
 
 func TestOnboardingService_SummaryPopulated(t *testing.T) {
-	skills := "Go, Python, Docker"
-	accomplishments := "Led team of 5 engineers"
+	skills := "Go\nPython\nDocker"
+	accomplishments := "## Scaled backend\nLed team of 5 engineers\n\n## Reduced latency\nCut p99 from 800ms to 120ms"
 
 	repo := &stubProfileRepo{}
 	svc := newService(t, repo, &stubEmbedder{})
@@ -208,15 +208,15 @@ func TestOnboardingService_SummaryPopulated(t *testing.T) {
 	if result.Summary.ResumesAdded != 1 {
 		t.Errorf("ResumesAdded = %d, want 1", result.Summary.ResumesAdded)
 	}
-	if result.Summary.SkillsChars != len(skills) {
-		t.Errorf("SkillsChars = %d, want %d", result.Summary.SkillsChars, len(skills))
+	if result.Summary.SkillsCount != 3 {
+		t.Errorf("SkillsCount = %d, want 3", result.Summary.SkillsCount)
 	}
-	if result.Summary.AccomplishmentsChars != len(accomplishments) {
-		t.Errorf("AccomplishmentsChars = %d, want %d", result.Summary.AccomplishmentsChars, len(accomplishments))
+	if result.Summary.AccomplishmentsCount != 2 {
+		t.Errorf("AccomplishmentsCount = %d, want 2", result.Summary.AccomplishmentsCount)
 	}
-	// 1 resume + skills + accomplishments = 3 chunks
-	if result.Summary.TotalChunks != 3 {
-		t.Errorf("TotalChunks = %d, want 3", result.Summary.TotalChunks)
+	// 1 resume + skills + 2 accomplishment sections = 4 chunks
+	if result.Summary.TotalChunks != 4 {
+		t.Errorf("TotalChunks = %d, want 4", result.Summary.TotalChunks)
 	}
 }
 
@@ -266,5 +266,5 @@ func TestOnboardingService_WritesFilesToDisk(t *testing.T) {
 	inputsDir := filepath.Join(dataDir, "inputs")
 	check(filepath.Join(inputsDir, "backend.txt"), "resume content")
 	check(filepath.Join(inputsDir, "skills.md"), "skills content")
-	check(filepath.Join(inputsDir, "accomplishments.md"), "accomplishments content")
+	check(filepath.Join(inputsDir, "accomplishments-0.md"), "accomplishments content")
 }
