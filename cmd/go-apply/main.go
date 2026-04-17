@@ -38,7 +38,11 @@ func run() int {
 	}
 
 	level := cfg.ResolveLogLevel()
-	log, cleanup, err := logger.New(logDir, level)
+	log, cleanup, err := logger.New(logger.Options{
+		LogDir:      logDir,
+		FileLevel:   level,
+		StderrLevel: slog.LevelWarn,
+	})
 	if err != nil {
 		// New() only returns nil errors per API contract; this is a safeguard.
 		fmt.Fprintf(os.Stderr, "logger init: %v\n", err)
