@@ -460,7 +460,8 @@ func TestAugmentResumeText_CacheHitSkipsEmbedder(t *testing.T) {
 
 	cache := newStubCache()
 	cachedVector := []float32{0.9, 0.8, 0.7}
-	_ = cache.SetVector(context.Background(), "golang kubernetes", cachedVector)
+	_ = cache.SetVector(context.Background(), "golang", cachedVector)
+	_ = cache.SetVector(context.Background(), "kubernetes", cachedVector)
 	cache.setCalls = 0 // reset after seeding
 
 	embedder := &stubEmbeddingClient{vector: fakeVector()}
@@ -517,11 +518,11 @@ func TestAugmentResumeText_CacheMissStoresVector(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
-	if embedder.callCount != 1 {
-		t.Errorf("expected exactly 1 embedding API call on cache miss, got %d", embedder.callCount)
+	if embedder.callCount != 2 {
+		t.Errorf("expected 2 embedding API calls on cache miss (one per keyword), got %d", embedder.callCount)
 	}
-	if cache.setCalls != 1 {
-		t.Errorf("expected SetVector called once for cache miss, got %d calls", cache.setCalls)
+	if cache.setCalls != 2 {
+		t.Errorf("expected SetVector called twice for cache miss (one per keyword), got %d calls", cache.setCalls)
 	}
 }
 

@@ -93,7 +93,8 @@ func (s *Service) AugmentResumeText(ctx context.Context, input model.AugmentInpu
 	return augmented, input.RefData, nil
 }
 
-// retrieveChunks attempts vector retrieval first. On failure, falls back to keyword matching.
+// retrieveChunks attempts vector retrieval first. Falls back to keyword matching
+// when vector retrieval fails or returns no results above the similarity threshold.
 func (s *Service) retrieveChunks(ctx context.Context, keywords []string) ([]retrievedChunk, error) {
 	chunks, err := s.retrieveByVector(ctx, keywords)
 	if err != nil {
@@ -101,42 +102,92 @@ func (s *Service) retrieveChunks(ctx context.Context, keywords []string) ([]retr
 		s.log.WarnContext(ctx, "augment: vector retrieval failed — falling back to keyword matching", "error", err)
 		return s.retrieveByKeyword(ctx, keywords)
 	}
+	if len(chunks) == 0 {
+		logger.Decision(ctx, s.log, "augment.retrieval", "keyword", "no vector matches above threshold — falling back to keyword matching")
+		return s.retrieveByKeyword(ctx, keywords)
+	}
 	return chunks, nil
 }
 
-// retrieveByVector embeds the keywords (with cache), then finds similar profile chunks.
+// retrieveByVector embeds each keyword individually (with per-keyword cache),
+// finds similar profile chunks for each, and merges results deduplicating by source.
 func (s *Service) retrieveByVector(ctx context.Context, keywords []string) ([]retrievedChunk, error) {
-	vector, stored, err := s.embedWithCache(ctx, keywords)
-	if err != nil {
-		return nil, fmt.Errorf("embed keywords: %w", err)
-	}
-	if !stored && s.cache != nil {
-		cacheKey := strings.Join(keywords, " ")
-		if setErr := s.cache.SetVector(ctx, cacheKey, vector); setErr != nil {
-			s.log.WarnContext(ctx, "augment: cache write failed — continuing", "error", setErr)
-		}
-	}
-
-	candidates, err := s.profile.FindSimilar(ctx, vector, s.defaults.VectorSearch.TopK)
-	if err != nil {
-		return nil, fmt.Errorf("find similar chunks: %w", err)
-	}
-
 	threshold := s.defaults.VectorSearch.SimilarityThreshold
 	maxChunks := s.defaults.Augment.MaxChunksToIncorporate
+	seen := make(map[string]bool, maxChunks)
 	var chunks []retrievedChunk
-	for _, c := range candidates {
-		if c.Weight >= threshold {
-			chunks = append(chunks, retrievedChunk{Source: c.SourceDoc, Text: c.Term})
-			if len(chunks) >= maxChunks {
-				break
+
+	for _, keyword := range keywords {
+		if len(chunks) >= maxChunks {
+			break
+		}
+
+		vector, err := s.embedKeywordWithCache(ctx, keyword)
+		if err != nil {
+			s.log.WarnContext(ctx, "augment: embed failed for keyword — skipping", "keyword", keyword, "error", err)
+			continue
+		}
+
+		candidates, err := s.profile.FindSimilar(ctx, vector, s.defaults.VectorSearch.TopK)
+		if err != nil {
+			s.log.WarnContext(ctx, "augment: find similar failed for keyword — skipping", "keyword", keyword, "error", err)
+			continue
+		}
+
+		var matchedTerms []string
+		for _, c := range candidates {
+			if c.Weight < threshold {
+				continue
+			}
+			matchedTerms = append(matchedTerms, c.Term)
+			if !seen[c.SourceDoc] {
+				seen[c.SourceDoc] = true
+				chunks = append(chunks, retrievedChunk{Source: c.SourceDoc, Text: c.Term})
 			}
 		}
+
+		if len(matchedTerms) > 0 {
+			s.log.DebugContext(ctx, "keyword vector match",
+				slog.String("keyword", keyword),
+				slog.Any("similar_chunks", matchedTerms),
+				slog.Float64("threshold", threshold),
+			)
+		} else if len(candidates) > 0 {
+			s.log.DebugContext(ctx, "keyword vector no match above threshold",
+				slog.String("keyword", keyword),
+				slog.Float64("threshold", threshold),
+				slog.Int("candidates_below", len(candidates)),
+			)
+		}
 	}
-	if len(chunks) == 0 && len(candidates) > 0 {
-		s.log.WarnContext(ctx, "augment: all vector candidates below threshold", "threshold", threshold, "candidates", len(candidates))
-	}
+
 	return chunks, nil
+}
+
+// embedKeywordWithCache returns the embedding vector for a single keyword,
+// reading from cache on hit and writing to cache on miss.
+func (s *Service) embedKeywordWithCache(ctx context.Context, keyword string) ([]float32, error) {
+	if s.cache != nil {
+		if cached, ok, err := s.cache.GetVector(ctx, keyword); err == nil && ok {
+			s.log.DebugContext(ctx, "keyword vector cache hit", slog.String("keyword", keyword))
+			return cached, nil
+		}
+	}
+
+	s.log.DebugContext(ctx, "keyword vector cache miss", slog.String("keyword", keyword))
+	vector, err := s.embedder.Embed(ctx, keyword)
+	if err != nil {
+		return nil, err
+	}
+
+	if s.cache != nil {
+		if setErr := s.cache.SetVector(ctx, keyword, vector); setErr != nil {
+			s.log.WarnContext(ctx, "augment: cache write failed — continuing", "keyword", keyword, "error", setErr)
+		} else {
+			s.log.DebugContext(ctx, "keyword vector cached", slog.String("keyword", keyword))
+		}
+	}
+	return vector, nil
 }
 
 // retrieveByKeyword fetches all documents and filters by keyword match count.
@@ -166,27 +217,6 @@ func (s *Service) retrieveByKeyword(ctx context.Context, keywords []string) ([]r
 	}
 	s.log.DebugContext(ctx, "augment: keyword fallback complete", "total_docs", len(docs), "matched", len(chunks))
 	return chunks, nil
-}
-
-// embedWithCache joins keywords into a single query string and checks the cache.
-// Returns (vector, true, nil) on a cache hit, or (vector, false, nil) on a cache miss
-// after calling the embedding API. The caller is responsible for storing misses in cache.
-func (s *Service) embedWithCache(ctx context.Context, keywords []string) ([]float32, bool, error) {
-	cacheKey := strings.Join(keywords, " ")
-
-	if s.cache != nil {
-		if cached, ok, err := s.cache.GetVector(ctx, cacheKey); err == nil && ok {
-			s.log.DebugContext(ctx, "augment: keyword vector cache hit", "key_len", len(cacheKey))
-			return cached, true, nil
-		}
-	}
-
-	vector, err := s.embedder.Embed(ctx, cacheKey)
-	if err != nil {
-		return nil, false, err
-	}
-
-	return vector, false, nil
 }
 
 const incorporationSystemPrompt = `You are a resume augmentation assistant. Incorporate relevant experience from the provided profile chunks into the resume.
