@@ -86,20 +86,24 @@ func (s *Service) Run(ctx context.Context, input model.OnboardInput) (model.Onbo
 	}
 
 	if input.AccomplishmentsText != "" {
-		path := filepath.Join(inputsDir, "accomplishments.md")
-		s.log.DebugContext(ctx, "onboard: storing accomplishments", "input_bytes", len(input.AccomplishmentsText))
-		if warn := s.storeDocument(ctx, "accomplishments", input.AccomplishmentsText, path); warn != "" {
-			result.Warnings = append(result.Warnings, model.RiskWarning{Severity: model.SeverityWarn, Message: warn})
-		} else {
-			s.log.DebugContext(ctx, "onboard: accomplishments stored")
-			result.Stored = append(result.Stored, "accomplishments")
+		sections := splitAccomplishmentSections(input.AccomplishmentsText)
+		s.log.DebugContext(ctx, "onboard: storing accomplishments", "sections", len(sections))
+		for i, section := range sections {
+			sourceDoc := fmt.Sprintf("accomplishments:%d", i)
+			path := filepath.Join(inputsDir, fmt.Sprintf("accomplishments-%d.md", i))
+			if warn := s.storeDocument(ctx, sourceDoc, section, path); warn != "" {
+				result.Warnings = append(result.Warnings, model.RiskWarning{Severity: model.SeverityWarn, Message: warn})
+				continue
+			}
+			result.Stored = append(result.Stored, sourceDoc)
 		}
+		result.Summary.AccomplishmentsCount = len(sections)
+		s.log.DebugContext(ctx, "onboard: accomplishments stored", "chunks", result.Summary.AccomplishmentsCount)
 	} else {
 		logger.Decision(ctx, s.log, "onboard.accomplishments", "skip", "empty")
 	}
 
 	result.Summary.SkillsCount = countSkillItems(input.SkillsText)
-	result.Summary.AccomplishmentsCount = countAccomplishmentSections(input.AccomplishmentsText)
 	result.Summary.TotalChunks = len(result.Stored)
 
 	return result, nil
@@ -150,16 +154,30 @@ func countSkillItems(text string) int {
 	return count
 }
 
-// countAccomplishmentSections counts ## headings in an accomplishments document.
-// Each ## section represents a distinct accomplishment.
-func countAccomplishmentSections(text string) int {
-	count := 0
-	for _, line := range strings.Split(text, "\n") {
-		if strings.HasPrefix(strings.TrimSpace(line), "## ") {
-			count++
+// splitAccomplishmentSections splits accomplishments text on ## headings.
+// Each ## section (including its heading) becomes a separate chunk.
+// If no ## headings are found, the entire text is returned as one chunk.
+func splitAccomplishmentSections(text string) []string {
+	lines := strings.Split(text, "\n")
+	var sections []string
+	var current strings.Builder
+	for _, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), "## ") && current.Len() > 0 {
+			if s := strings.TrimSpace(current.String()); s != "" {
+				sections = append(sections, s)
+			}
+			current.Reset()
 		}
+		current.WriteString(line)
+		current.WriteByte('\n')
 	}
-	return count
+	if s := strings.TrimSpace(current.String()); s != "" {
+		sections = append(sections, s)
+	}
+	if len(sections) == 0 && strings.TrimSpace(text) != "" {
+		return []string{strings.TrimSpace(text)}
+	}
+	return sections
 }
 
 // validateLabel rejects empty labels and labels containing path separators.
