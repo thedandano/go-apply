@@ -156,12 +156,31 @@ func HandleSubmitKeywordsWithConfig(ctx context.Context, req *mcp.CallToolReques
 
 	nextAction := NextActionFromScore(scored.BestScore)
 
+	type extractedKeywordsData struct {
+		Title         string               `json:"title"`
+		Company       string               `json:"company"`
+		Required      []string             `json:"required"`
+		Preferred     []string             `json:"preferred,omitempty"`
+		Location      string               `json:"location,omitempty"`
+		Seniority     model.SeniorityLevel `json:"seniority,omitempty"`
+		RequiredYears float64              `json:"required_years,omitempty"`
+	}
 	type submitKeywordsData struct {
-		Scores     map[string]model.ScoreResult `json:"scores"`
-		BestResume string                       `json:"best_resume"`
-		BestScore  float64                      `json:"best_score"`
+		ExtractedKeywords extractedKeywordsData        `json:"extracted_keywords"`
+		Scores            map[string]model.ScoreResult `json:"scores"`
+		BestResume        string                       `json:"best_resume"`
+		BestScore         float64                      `json:"best_score"`
 	}
 	resultData := submitKeywordsData{
+		ExtractedKeywords: extractedKeywordsData{
+			Title:         jd.Title,
+			Company:       jd.Company,
+			Required:      jd.Required,
+			Preferred:     jd.Preferred,
+			Location:      jd.Location,
+			Seniority:     jd.Seniority,
+			RequiredYears: jd.RequiredYears,
+		},
 		Scores:     scored.Scores,
 		BestResume: scored.BestLabel,
 		BestScore:  scored.BestScore,
@@ -390,6 +409,7 @@ func HandleSubmitTailorT1WithConfig(ctx context.Context, req *mcp.CallToolReques
 		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t1", "rescore_failed", err.Error(), false))
 	}
 
+	previousScore := sess.ScoreResult.BestScore
 	newScoreTotal := newScore.Breakdown.Total()
 	if sess.ScoreResult.Scores == nil {
 		sess.ScoreResult.Scores = make(map[string]model.ScoreResult)
@@ -398,11 +418,13 @@ func HandleSubmitTailorT1WithConfig(ctx context.Context, req *mcp.CallToolReques
 	sess.ScoreResult.BestScore = newScoreTotal
 
 	type t1Data struct {
-		NewScore      float64  `json:"new_score"`
-		AddedKeywords []string `json:"added_keywords"`
+		PreviousScore float64           `json:"previous_score"`
+		NewScore      model.ScoreResult `json:"new_score"`
+		AddedKeywords []string          `json:"added_keywords"`
 	}
 	resultData := t1Data{
-		NewScore:      newScoreTotal,
+		PreviousScore: previousScore,
+		NewScore:      newScore,
 		AddedKeywords: addedKeywords,
 	}
 	resultBytes, _ := json.Marshal(resultData)
@@ -494,6 +516,7 @@ func HandleSubmitTailorT2WithConfig(ctx context.Context, req *mcp.CallToolReques
 		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t2", "rescore_failed", err.Error(), false))
 	}
 
+	previousScore := sess.ScoreResult.BestScore
 	newScoreTotal := newScore.Breakdown.Total()
 	if sess.ScoreResult.Scores == nil {
 		sess.ScoreResult.Scores = make(map[string]model.ScoreResult)
@@ -502,11 +525,13 @@ func HandleSubmitTailorT2WithConfig(ctx context.Context, req *mcp.CallToolReques
 	sess.ScoreResult.BestScore = newScoreTotal
 
 	type t2Data struct {
-		NewScore          float64 `json:"new_score"`
-		SubstitutionsMade int     `json:"substitutions_made"`
+		PreviousScore     float64           `json:"previous_score"`
+		NewScore          model.ScoreResult `json:"new_score"`
+		SubstitutionsMade int               `json:"substitutions_made"`
 	}
 	resultData := t2Data{
-		NewScore:          newScoreTotal,
+		PreviousScore:     previousScore,
+		NewScore:          newScore,
 		SubstitutionsMade: substitutionsMade,
 	}
 	resultBytes, _ := json.Marshal(resultData)
