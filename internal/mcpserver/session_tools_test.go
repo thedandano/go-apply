@@ -196,6 +196,19 @@ func TestHandleSubmitKeywordsWithConfig_HappyPath_ReturnsScores(t *testing.T) {
 	if !validActions[nextAction] {
 		t.Errorf("next_action = %q, want one of: cover_letter, tailor_t1, advise_skip", nextAction)
 	}
+
+	// Verify extracted keywords are echoed back in the response.
+	ekRaw, ok := data["extracted_keywords"].(map[string]any)
+	if !ok || ekRaw == nil {
+		t.Fatal("expected extracted_keywords in data")
+	}
+	if ekRaw["title"] != "Go Engineer" {
+		t.Errorf("extracted_keywords.title = %v, want Go Engineer", ekRaw["title"])
+	}
+	required, _ := ekRaw["required"].([]any)
+	if len(required) == 0 {
+		t.Error("expected at least one item in extracted_keywords.required")
+	}
 }
 
 // ── HandleFinalize tests ──────────────────────────────────────────────────────
