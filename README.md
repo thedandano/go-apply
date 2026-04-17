@@ -102,6 +102,70 @@ tail -f $(ls -t ~/.local/state/go-apply/logs/*.log | head -1) | jq .
 cat ~/.local/state/go-apply/logs/go-apply-*.log | jq 'select(.level=="ERROR")'
 ```
 
+## Logging
+
+### Flags
+
+| Flag | Shorthand | Description |
+|------|-----------|-------------|
+| `--log-level <level>` | | Set log level: `debug`, `info`, `warn`, `error` |
+| `--debug` | `-v` | Enable debug logging (shorthand for `--log-level=debug`) |
+| `--trace` | | Enable trace logging: debug level + full payload logging |
+
+```bash
+# Debug a single run
+go-apply --debug run --url https://example.com/jobs/123
+
+# Same via shorthand
+go-apply -v run --url https://example.com/jobs/123
+
+# Trace mode (debug + full request/response payloads)
+go-apply --trace run --url https://example.com/jobs/123
+
+# Set level explicitly
+go-apply --log-level=warn run --url https://example.com/jobs/123
+```
+
+### Environment variables
+
+| Variable | Description |
+|----------|-------------|
+| `GO_APPLY_LOG_LEVEL` | Log level: `debug`, `info`, `warn`, `error` |
+| `GO_APPLY_LOG_VERBOSE` | Any non-empty value enables verbose/trace mode |
+
+```bash
+GO_APPLY_LOG_LEVEL=debug go-apply run --url https://example.com/jobs/123
+GO_APPLY_LOG_VERBOSE=1 go-apply run --url https://example.com/jobs/123
+```
+
+### Precedence
+
+Flag > environment variable > config file (`log_level`) > default (`INFO`)
+
+### Log file location
+
+`~/.local/state/go-apply/logs/go-apply-YYYY-MM-DD.log` — one file per day; last 50 retained.
+
+### MCP server debug logging
+
+To enable debug logs when running as an MCP server, add the `env` block to Claude Code's `settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "go-apply": {
+      "command": "go-apply",
+      "args": ["serve"],
+      "env": { "GO_APPLY_LOG_LEVEL": "debug" }
+    }
+  }
+}
+```
+
+### Config file fallback
+
+The `log_level` field in `~/.config/go-apply/config.yaml` sets a persistent default without needing a flag or env var each time. Flags and env vars always take precedence.
+
 ## Commands
 
 ### `go-apply run`

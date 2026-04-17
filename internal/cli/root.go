@@ -40,6 +40,10 @@ func NewRootCommand(version string) *cobra.Command {
 			return nil
 		},
 	}
+	cmd.PersistentFlags().String("log-level", "", "log level (debug|info|warn|error)")
+	cmd.PersistentFlags().BoolP("debug", "v", false, "enable debug logging (shorthand for --log-level=debug)")
+	cmd.PersistentFlags().Bool("trace", false, "enable trace logging (debug + full payloads)")
+
 	cmd.AddCommand(NewApplyCommand())
 	cmd.AddCommand(NewServeCommand())
 	cmd.AddCommand(NewConfigCommand())

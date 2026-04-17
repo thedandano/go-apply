@@ -100,6 +100,24 @@ func (c *Config) ResolveLogLevel() slog.Level {
 	}
 }
 
+// ResolveLogLevelFromEnv reads GO_APPLY_LOG_LEVEL and parses its value.
+// Returns (level, true) if a valid level is set, or (LevelInfo, false) if unset or unrecognised.
+// Callers must check ok before using the returned level.
+func ResolveLogLevelFromEnv() (slog.Level, bool) {
+	val := os.Getenv("GO_APPLY_LOG_LEVEL")
+	switch strings.ToLower(val) {
+	case "debug":
+		return slog.LevelDebug, true
+	case "info":
+		return slog.LevelInfo, true
+	case "warn":
+		return slog.LevelWarn, true
+	case "error":
+		return slog.LevelError, true
+	}
+	return slog.LevelInfo, false
+}
+
 func (c *Config) ResolveEmbeddingDim() int {
 	if c.EmbeddingDim > 0 {
 		return c.EmbeddingDim

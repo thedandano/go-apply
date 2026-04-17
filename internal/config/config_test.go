@@ -92,6 +92,36 @@ func TestLoadAutoCreatesConfigWhenMissing(t *testing.T) {
 	}
 }
 
+func TestResolveLogLevelFromEnv(t *testing.T) {
+	cases := []struct {
+		envVal  string
+		wantStr string
+		wantOK  bool
+	}{
+		{"debug", "DEBUG", true},
+		{"DEBUG", "DEBUG", true},
+		{"info", "INFO", true},
+		{"INFO", "INFO", true},
+		{"warn", "WARN", true},
+		{"WARN", "WARN", true},
+		{"error", "ERROR", true},
+		{"ERROR", "ERROR", true},
+		{"", "INFO", false},
+		{"invalid", "INFO", false},
+		{"verbose", "INFO", false},
+	}
+	for _, tc := range cases {
+		t.Setenv("GO_APPLY_LOG_LEVEL", tc.envVal)
+		got, ok := config.ResolveLogLevelFromEnv()
+		if ok != tc.wantOK {
+			t.Errorf("ResolveLogLevelFromEnv(%q) ok = %v, want %v", tc.envVal, ok, tc.wantOK)
+		}
+		if got.String() != tc.wantStr {
+			t.Errorf("ResolveLogLevelFromEnv(%q) level = %q, want %q", tc.envVal, got.String(), tc.wantStr)
+		}
+	}
+}
+
 func TestResolveLogLevel(t *testing.T) {
 	cases := []struct {
 		input string
