@@ -110,29 +110,29 @@ Use these exact formats every time. Do not improvise.
 **Preferred:** skill1, skill2, ...  (omit line if none)
 ` + "```" + `
 
-### Score table (emit after every scoring: initial, after T1, after T2)
+### Score progression table (emit once, before calling finalize)
 
-Header varies by stage:
-- Initial scoring: ` + "`" + `Score` + "`" + `
-- After T1: ` + "`" + `Score after T1` + "`" + `
-- After T2: ` + "`" + `Score after T2 (+N)` + "`" + ` where N = new_score.breakdown total − previous_score (show sign: +3, −1)
+Do NOT emit score tables after each tool call. Accumulate scores as you go, then emit one table at the end.
+
+Include only the columns for stages that were actually run. Omit T1/T2 columns if those stages did not run.
 
 Data sources:
-- breakdown values: ` + "`" + `scores.{best_resume}.breakdown` + "`" + ` (initial) or ` + "`" + `new_score.breakdown` + "`" + ` (T1/T2)
-- matched/missing: ` + "`" + `scores.{best_resume}.keywords` + "`" + ` → ` + "`" + `req_matched` + "`" + `, ` + "`" + `req_unmatched` + "`" + `
+- Original: ` + "`" + `scores.{best_resume}.breakdown` + "`" + ` from submit_keywords
+- T1: ` + "`" + `new_score.breakdown` + "`" + ` from submit_tailor_t1
+- T2: ` + "`" + `new_score.breakdown` + "`" + ` from submit_tailor_t2
+- Matched/missing (final state): ` + "`" + `new_score.keywords` + "`" + ` → ` + "`" + `req_matched` + "`" + `, ` + "`" + `req_unmatched` + "`" + ` (use ` + "`" + `scores.{best_resume}.keywords` + "`" + ` if no tailoring ran)
 
-Emit exactly this structure (fill in real numbers):
+Emit exactly this structure (fill in real numbers, omit unused columns):
 
 ` + "```" + `
-**{header}: NN/100**
-
-| Dimension       | Score | Max |
-|-----------------|-------|-----|
-| Keyword match   |    NN |  45 |
-| Experience fit  |    NN |  25 |
-| Impact evidence |    NN |  10 |
-| ATS format      |    NN |  10 |
-| Readability     |    NN |  10 |
+| Dimension       | Original | T1 | T2 |
+|-----------------|----------|----|-----|
+| Keyword match   |       NN | NN |  NN |
+| Experience fit  |       NN | NN |  NN |
+| Impact evidence |       NN | NN |  NN |
+| ATS format      |       NN | NN |  NN |
+| Readability     |       NN | NN |  NN |
+| **Total**       |   **NN** |**NN**|**NN**|
 
 Matched: skill1, skill2, ...
 Missing: skill3, skill4, ...
