@@ -72,6 +72,7 @@ Outputs a JSON result to stdout when --headless is set.`,
 			if err != nil {
 				return fmt.Errorf("load defaults: %w", err)
 			}
+			cfg.ApplyOverrides(defaults)
 
 			channel, err := model.ParseChannel(channelFlag)
 			if err != nil {

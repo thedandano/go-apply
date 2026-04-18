@@ -55,6 +55,20 @@ type LLMProviderConfig struct {
 	APIKey  string `yaml:"api_key"`
 }
 
+// ThresholdOverrides lets users tune scoring thresholds in config.yaml.
+// Zero values mean "use the embedded default".
+type ThresholdOverrides struct {
+	ScorePass     float64 `yaml:"score_pass"`
+	ScoreBoostMin float64 `yaml:"score_boost_min"`
+}
+
+// TimeoutOverrides lets users tune service timeouts in config.yaml.
+// Zero values mean "use the embedded default".
+type TimeoutOverrides struct {
+	LLMMS     int `yaml:"llm_ms"`
+	FetcherMS int `yaml:"fetcher_ms"`
+}
+
 // Config is the top-level application configuration.
 //
 // Two independent LLM providers:
@@ -74,18 +88,20 @@ type LLMProviderConfig struct {
 //	  api_key: ""
 //	embedding_dim: 768
 type Config struct {
-	Orchestrator      LLMProviderConfig `yaml:"orchestrator"`
-	Embedder          LLMProviderConfig `yaml:"embedder"`
-	EmbeddingDim      int               `yaml:"embedding_dim"`
-	DBPath            string            `yaml:"db_path"`
-	LogLevel          string            `yaml:"log_level"`
-	Verbose           bool              `yaml:"verbose"`
-	DefaultSeniority  string            `yaml:"default_seniority"`
-	UserName          string            `yaml:"user_name"`
-	Occupation        string            `yaml:"occupation"`
-	Location          string            `yaml:"location"`
-	LinkedInURL       string            `yaml:"linkedin_url"`
-	YearsOfExperience float64           `yaml:"years_of_experience"`
+	Orchestrator      LLMProviderConfig  `yaml:"orchestrator"`
+	Embedder          LLMProviderConfig  `yaml:"embedder"`
+	EmbeddingDim      int                `yaml:"embedding_dim"`
+	DBPath            string             `yaml:"db_path"`
+	LogLevel          string             `yaml:"log_level"`
+	Verbose           bool               `yaml:"verbose"`
+	DefaultSeniority  string             `yaml:"default_seniority"`
+	UserName          string             `yaml:"user_name"`
+	Occupation        string             `yaml:"occupation"`
+	Location          string             `yaml:"location"`
+	LinkedInURL       string             `yaml:"linkedin_url"`
+	YearsOfExperience float64            `yaml:"years_of_experience"`
+	Thresholds        ThresholdOverrides `yaml:"thresholds"`
+	Timeouts          TimeoutOverrides   `yaml:"timeouts"`
 }
 
 func (c *Config) ResolveLogLevel() slog.Level {
@@ -113,6 +129,23 @@ func (c *Config) ResolveDBPath() string {
 		return c.DBPath
 	}
 	return filepath.Join(DataDir(), "profile.db")
+}
+
+// ApplyOverrides merges non-zero config values into d, letting users tune
+// thresholds and timeouts in config.yaml without touching defaults.json.
+func (c *Config) ApplyOverrides(d *AppDefaults) {
+	if c.Thresholds.ScorePass > 0 {
+		d.Thresholds.ScorePass = c.Thresholds.ScorePass
+	}
+	if c.Thresholds.ScoreBoostMin > 0 {
+		d.Thresholds.ScoreBoostMin = c.Thresholds.ScoreBoostMin
+	}
+	if c.Timeouts.LLMMS > 0 {
+		d.LLM.TimeoutMS = c.Timeouts.LLMMS
+	}
+	if c.Timeouts.FetcherMS > 0 {
+		d.Fetcher.ChromedpTimeoutMS = c.Timeouts.FetcherMS
+	}
 }
 
 // Load reads config.yaml from the XDG config directory.

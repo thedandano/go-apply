@@ -53,6 +53,7 @@ func loadDeps() (*config.Config, pipeline.ApplyConfig, error) {
 	if err != nil {
 		return nil, pipeline.ApplyConfig{}, fmt.Errorf("load defaults: %w", err)
 	}
+	cfg.ApplyOverrides(defaults)
 
 	dataDir := config.DataDir()
 	appRepo := fs.NewApplicationRepository(dataDir)

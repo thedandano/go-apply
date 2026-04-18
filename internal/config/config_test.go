@@ -92,6 +92,56 @@ func TestLoadAutoCreatesConfigWhenMissing(t *testing.T) {
 	}
 }
 
+func TestApplyOverrides_AllFields(t *testing.T) {
+	defaults := config.EmbeddedDefaults()
+	cfg := &config.Config{
+		Thresholds: config.ThresholdOverrides{ScorePass: 80, ScoreBoostMin: 50},
+		Timeouts:   config.TimeoutOverrides{LLMMS: 120000, FetcherMS: 90000},
+	}
+	cfg.ApplyOverrides(defaults)
+	if defaults.Thresholds.ScorePass != 80 {
+		t.Errorf("ScorePass = %f, want 80", defaults.Thresholds.ScorePass)
+	}
+	if defaults.Thresholds.ScoreBoostMin != 50 {
+		t.Errorf("ScoreBoostMin = %f, want 50", defaults.Thresholds.ScoreBoostMin)
+	}
+	if defaults.LLM.TimeoutMS != 120000 {
+		t.Errorf("LLM.TimeoutMS = %d, want 120000", defaults.LLM.TimeoutMS)
+	}
+	if defaults.Fetcher.ChromedpTimeoutMS != 90000 {
+		t.Errorf("Fetcher.ChromedpTimeoutMS = %d, want 90000", defaults.Fetcher.ChromedpTimeoutMS)
+	}
+}
+
+func TestApplyOverrides_ZeroFields_DoNotOverride(t *testing.T) {
+	defaults := config.EmbeddedDefaults()
+	wantScorePass := defaults.Thresholds.ScorePass
+	wantLLMMS := defaults.LLM.TimeoutMS
+	cfg := &config.Config{} // zero overrides
+	cfg.ApplyOverrides(defaults)
+	if defaults.Thresholds.ScorePass != wantScorePass {
+		t.Errorf("ScorePass changed: got %f, want %f", defaults.Thresholds.ScorePass, wantScorePass)
+	}
+	if defaults.LLM.TimeoutMS != wantLLMMS {
+		t.Errorf("LLM.TimeoutMS changed: got %d, want %d", defaults.LLM.TimeoutMS, wantLLMMS)
+	}
+}
+
+func TestApplyOverrides_Partial(t *testing.T) {
+	defaults := config.EmbeddedDefaults()
+	origBoostMin := defaults.Thresholds.ScoreBoostMin
+	cfg := &config.Config{
+		Thresholds: config.ThresholdOverrides{ScorePass: 75}, // only ScorePass set
+	}
+	cfg.ApplyOverrides(defaults)
+	if defaults.Thresholds.ScorePass != 75 {
+		t.Errorf("ScorePass = %f, want 75", defaults.Thresholds.ScorePass)
+	}
+	if defaults.Thresholds.ScoreBoostMin != origBoostMin {
+		t.Errorf("ScoreBoostMin changed unexpectedly: got %f", defaults.Thresholds.ScoreBoostMin)
+	}
+}
+
 func TestResolveLogLevel(t *testing.T) {
 	cases := []struct {
 		input string
