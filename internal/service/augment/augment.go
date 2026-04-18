@@ -27,8 +27,8 @@ type retrievedChunk struct {
 // filterCandidates applies a similarity threshold and source-dedup to candidates,
 // returning matched chunks and the list of matched terms.
 func filterCandidates(candidates []model.ProfileEmbedding, threshold float64, seen map[string]bool) ([]retrievedChunk, []string) {
-	var chunks []retrievedChunk
-	var matched []string
+	chunks := make([]retrievedChunk, 0, len(candidates))
+	matched := make([]string, 0, len(candidates))
 	for _, c := range candidates {
 		if c.Weight < threshold {
 			continue
