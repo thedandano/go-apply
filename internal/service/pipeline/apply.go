@@ -163,7 +163,7 @@ func (p *ApplyPipeline) Run(ctx context.Context, req ApplyRequest) error {
 	emptyJD := len(jd.Required) == 0 && len(jd.Preferred) == 0 &&
 		strings.TrimSpace(jd.Title) == "" && strings.TrimSpace(jd.Company) == ""
 	if emptyJD {
-		logger.Decision(ctx, slog.Default(), "pipeline.abort", "empty_jd", "keyword extraction produced no usable JD fields")
+		slog.DebugContext(ctx, "pipeline: aborting — keyword extraction produced no usable JD fields")
 		jdErr := fmt.Errorf("could not extract a job description from the provided input — " +
 			"the page may have expired, require a login, or failed to load. " +
 			"Please provide the job description text directly using --text \"<jd text>\" " +
@@ -211,18 +211,18 @@ func (p *ApplyPipeline) Run(ctx context.Context, req ApplyRequest) error {
 	// TODO (priority critical)
 
 	// Step 4 (optional): Tailor the best-matching resume when --accomplishments is set.
-	var tailorChosen, tailorReason string
+	var tailorChosen string
 	switch {
 	case p.tailor == nil:
-		tailorChosen, tailorReason = "skip", "tailor not configured"
+		tailorChosen = "skip"
 	case req.AccomplishmentsText == "":
-		tailorChosen, tailorReason = "skip", "no accomplishments"
+		tailorChosen = "skip"
 	case result.BestResume == "":
-		tailorChosen, tailorReason = "skip", "no best resume"
+		tailorChosen = "skip"
 	default:
-		tailorChosen, tailorReason = "run", "accomplishments present and best resume selected"
+		tailorChosen = "run"
 	}
-	logger.Decision(ctx, slog.Default(), "pipeline.tailor", tailorChosen, tailorReason)
+	slog.DebugContext(ctx, "pipeline: tailor", slog.String("chosen", tailorChosen))
 	if req.AccomplishmentsText != "" && result.BestResume != "" && p.tailor != nil {
 		tailorStart := time.Now()
 		p.presenter.OnEvent(model.StepStartedEvent{StepID: "tailor", Label: "Tailoring resume"})
@@ -260,8 +260,9 @@ func (p *ApplyPipeline) Run(ctx context.Context, req ApplyRequest) error {
 	logger.Banner(ctx, slog.Default(), "Cover Letter", "")
 	switch {
 	case p.clGen != nil && result.BestScore >= p.defaults.Thresholds.ScorePass:
-		logger.Decision(ctx, slog.Default(), "pipeline.cover_letter", "generate",
-			fmt.Sprintf("score %.2f >= threshold %.2f", result.BestScore, p.defaults.Thresholds.ScorePass),
+		slog.DebugContext(ctx, "pipeline: generating cover letter — score meets threshold",
+			slog.Float64("score", result.BestScore),
+			slog.Float64("threshold", p.defaults.Thresholds.ScorePass),
 		)
 		clStart := time.Now()
 		p.presenter.OnEvent(model.StepStartedEvent{StepID: "05", Label: "Cover Letter"})
@@ -288,11 +289,12 @@ func (p *ApplyPipeline) Run(ctx context.Context, req ApplyRequest) error {
 			result.CoverLetter = clResult
 		}
 	case p.clGen == nil:
-		logger.Decision(ctx, slog.Default(), "pipeline.cover_letter", "skip_no_clgen", "CLGen not configured")
+		slog.DebugContext(ctx, "pipeline: skipping cover letter — CLGen not configured")
 		slog.InfoContext(ctx, "cover letter skipped — CLGen not configured (MCP mode: Claude generates cover letters)")
 	default:
-		logger.Decision(ctx, slog.Default(), "pipeline.cover_letter", "skip_below_threshold",
-			fmt.Sprintf("score %.2f < threshold %.2f", result.BestScore, p.defaults.Thresholds.ScorePass),
+		slog.DebugContext(ctx, "pipeline: skipping cover letter — score below threshold",
+			slog.Float64("score", result.BestScore),
+			slog.Float64("threshold", p.defaults.Thresholds.ScorePass),
 		)
 		slog.InfoContext(ctx, "cover letter skipped — best score below threshold",
 			"best_score", result.BestScore,
@@ -341,8 +343,9 @@ func (p *ApplyPipeline) ScoreResumes(ctx context.Context, jd *model.JDData, cfg 
 	}, nil
 }
 
-// RescoreResume scores a single resume text against a JD, used after mechanical tailoring.
-func (p *ApplyPipeline) RescoreResume(_ context.Context, resumeText, resumeLabel string, jd *model.JDData, cfg *config.Config) (model.ScoreResult, error) {
+// ScoreResume scores a single resume text against a JD. It is a pure function:
+// no I/O, no side effects — only the scorer is called.
+func (p *ApplyPipeline) ScoreResume(_ context.Context, resumeText, resumeLabel string, jd *model.JDData, cfg *config.Config) (model.ScoreResult, error) {
 	seniorityMatch := resolveSeniorityMatch(cfg.DefaultSeniority, jd)
 	return p.scorer.Score(&model.ScorerInput{
 		ResumeText:     resumeText,
@@ -368,11 +371,11 @@ func (p *ApplyPipeline) acquireJDText(ctx context.Context, req ApplyRequest) (st
 		slog.WarnContext(ctx, "cache lookup error — proceeding with fetch", "url", req.URLOrText, "error", err)
 	}
 	if found && rec != nil && rec.RawText != "" {
-		logger.Decision(ctx, slog.Default(), "jd.source", "cache", "cache hit", slog.String("url", req.URLOrText))
+		slog.DebugContext(ctx, "jd: serving from cache", slog.String("url", req.URLOrText))
 		p.presenter.OnEvent(model.StepCompletedEvent{StepID: "cache_lookup", Label: "Cache hit", ElapsedMS: 0})
 		return rec.RawText, nil
 	}
-	logger.Decision(ctx, slog.Default(), "jd.source", "fetch", "cache miss or text input", slog.String("url", req.URLOrText))
+	slog.DebugContext(ctx, "jd: fetching from network — cache miss", slog.String("url", req.URLOrText))
 	p.presenter.OnEvent(model.StepCompletedEvent{StepID: "cache_lookup", Label: "Cache miss — fetching", ElapsedMS: 0})
 
 	// Fetch from URL.
@@ -519,19 +522,9 @@ func (p *ApplyPipeline) scoreResumes(
 			continue
 		}
 
-		seniorityMatch := resolveSeniorityMatch(cfg.DefaultSeniority, jd)
-
 		// ReferenceData is intentionally omitted — scoring uses raw resume text only.
 		// Profile bank retrieval happens at tailoring time, not scoring time.
-		sr, err := p.scorer.Score(&model.ScorerInput{
-			ResumeText:     text,
-			ResumeLabel:    r.Label,
-			ResumePath:     r.Path,
-			JD:             *jd,
-			CandidateYears: cfg.YearsOfExperience,
-			RequiredYears:  jd.RequiredYears,
-			SeniorityMatch: seniorityMatch,
-		})
+		sr, err := p.ScoreResume(ctx, text, r.Label, jd, cfg)
 		if err != nil {
 			slog.WarnContext(ctx, "scoring failed — skipping resume", "label", r.Label, "error", err)
 			skipped = append(skipped, model.RiskWarning{
@@ -632,42 +625,20 @@ func (p *ApplyPipeline) runTailorStep(
 	req ApplyRequest,
 	resumeFiles []model.ResumeFile,
 ) (*model.TailorResult, error) {
-	// Find and load the best resume from the already-scored file list.
-
-	// TODO: (priority low) this should be a func called getBestResume(resumeFiles, bestLabel)
-	var bestFile model.ResumeFile
-	for _, r := range resumeFiles {
-		if r.Label == result.BestResume {
-			bestFile = r
-			break
-		}
-	}
-	if bestFile.Path == "" {
-		return nil, fmt.Errorf("best resume %q not found in repository", result.BestResume)
-	}
-
-	resumeText, err := p.loader.Load(bestFile.Path)
+	bestFile, err := findBestResume(resumeFiles, result.BestResume)
 	if err != nil {
-		return nil, fmt.Errorf("load best resume for tailor: %w", err)
+		return nil, err
+	}
+
+	resumeText, err := p.loadBestResumeText(bestFile.Path)
+	if err != nil {
+		return nil, err
 	}
 
 	scoreBefore := result.Scores[result.BestResume]
 
-	// Retrieve relevant profile chunks for missing keywords before tailoring.
 	logger.Banner(ctx, slog.Default(), "Augment", "Profile Retrieval")
-	var suggestions model.TailorSuggestions
-	if p.augment != nil {
-		allKeywords := append(jd.Required, jd.Preferred...) //nolint:gocritic // fresh slice intentional
-		var sErr error
-		suggestions, sErr = p.augment.SuggestForKeywords(ctx, allKeywords)
-		if sErr != nil {
-			slog.WarnContext(ctx, "runTailorStep: SuggestForKeywords failed — tailoring without suggestions", "error", sErr)
-			result.Warnings = append(result.Warnings, model.RiskWarning{
-				Severity: model.SeverityWarn,
-				Message:  fmt.Sprintf("profile bank retrieval failed — tailoring without suggestions: %v", sErr),
-			})
-		}
-	}
+	suggestions := p.retrieveSuggestions(ctx, jd, result)
 
 	logger.Banner(ctx, slog.Default(), "Tailor", "T1+T2")
 	tailorResult, err := p.tailor.TailorResume(ctx, &model.TailorInput{
@@ -703,4 +674,44 @@ func (p *ApplyPipeline) runTailorStep(
 
 	tailorResult.NewScore = scoreAfter
 	return &tailorResult, nil
+}
+
+// findBestResume returns the ResumeFile whose Label matches bestLabel.
+// Returns an error if no match is found.
+func findBestResume(resumeFiles []model.ResumeFile, bestLabel string) (model.ResumeFile, error) {
+	for _, r := range resumeFiles {
+		if r.Label == bestLabel {
+			return r, nil
+		}
+	}
+	return model.ResumeFile{}, fmt.Errorf("best resume %q not found in repository", bestLabel)
+}
+
+// loadBestResumeText reads and returns the text content of the resume at path.
+func (p *ApplyPipeline) loadBestResumeText(path string) (string, error) {
+	text, err := p.loader.Load(path)
+	if err != nil {
+		return "", fmt.Errorf("load best resume for tailor: %w", err)
+	}
+	return text, nil
+}
+
+// retrieveSuggestions calls the augment service for keyword-based profile suggestions.
+// If the augment service is nil or returns an error, it degrades gracefully: a warning
+// is appended to result.Warnings and an empty suggestions map is returned.
+func (p *ApplyPipeline) retrieveSuggestions(ctx context.Context, jd *model.JDData, result *model.PipelineResult) model.TailorSuggestions {
+	if p.augment == nil {
+		return nil
+	}
+	allKeywords := append(jd.Required, jd.Preferred...) //nolint:gocritic // fresh slice intentional
+	suggestions, err := p.augment.SuggestForKeywords(ctx, allKeywords)
+	if err != nil {
+		slog.WarnContext(ctx, "runTailorStep: SuggestForKeywords failed — tailoring without suggestions", "error", err)
+		result.Warnings = append(result.Warnings, model.RiskWarning{
+			Severity: model.SeverityWarn,
+			Message:  fmt.Sprintf("profile bank retrieval failed — tailoring without suggestions: %v", err),
+		})
+		return nil
+	}
+	return suggestions
 }
