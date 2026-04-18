@@ -649,42 +649,20 @@ func (p *ApplyPipeline) runTailorStep(
 	req ApplyRequest,
 	resumeFiles []model.ResumeFile,
 ) (*model.TailorResult, error) {
-	// Find and load the best resume from the already-scored file list.
-
-	// TODO: (priority low) this should be a func called getBestResume(resumeFiles, bestLabel)
-	var bestFile model.ResumeFile
-	for _, r := range resumeFiles {
-		if r.Label == result.BestResume {
-			bestFile = r
-			break
-		}
-	}
-	if bestFile.Path == "" {
-		return nil, fmt.Errorf("best resume %q not found in repository", result.BestResume)
-	}
-
-	resumeText, err := p.loader.Load(bestFile.Path)
+	bestFile, err := findBestResume(resumeFiles, result.BestResume)
 	if err != nil {
-		return nil, fmt.Errorf("load best resume for tailor: %w", err)
+		return nil, err
+	}
+
+	resumeText, err := p.loadBestResumeText(bestFile.Path)
+	if err != nil {
+		return nil, err
 	}
 
 	scoreBefore := result.Scores[result.BestResume]
 
-	// Retrieve relevant profile chunks for missing keywords before tailoring.
 	logger.Banner(ctx, slog.Default(), "Augment", "Profile Retrieval")
-	var suggestions model.TailorSuggestions
-	if p.augment != nil {
-		allKeywords := append(jd.Required, jd.Preferred...) //nolint:gocritic // fresh slice intentional
-		var sErr error
-		suggestions, sErr = p.augment.SuggestForKeywords(ctx, allKeywords)
-		if sErr != nil {
-			slog.WarnContext(ctx, "runTailorStep: SuggestForKeywords failed — tailoring without suggestions", "error", sErr)
-			result.Warnings = append(result.Warnings, model.RiskWarning{
-				Severity: model.SeverityWarn,
-				Message:  fmt.Sprintf("profile bank retrieval failed — tailoring without suggestions: %v", sErr),
-			})
-		}
-	}
+	suggestions := p.retrieveSuggestions(ctx, jd, result)
 
 	logger.Banner(ctx, slog.Default(), "Tailor", "T1+T2")
 	tailorResult, err := p.tailor.TailorResume(ctx, &model.TailorInput{
@@ -720,4 +698,44 @@ func (p *ApplyPipeline) runTailorStep(
 
 	tailorResult.NewScore = scoreAfter
 	return &tailorResult, nil
+}
+
+// findBestResume returns the ResumeFile whose Label matches bestLabel.
+// Returns an error if no match is found.
+func findBestResume(resumeFiles []model.ResumeFile, bestLabel string) (model.ResumeFile, error) {
+	for _, r := range resumeFiles {
+		if r.Label == bestLabel {
+			return r, nil
+		}
+	}
+	return model.ResumeFile{}, fmt.Errorf("best resume %q not found in repository", bestLabel)
+}
+
+// loadBestResumeText reads and returns the text content of the resume at path.
+func (p *ApplyPipeline) loadBestResumeText(path string) (string, error) {
+	text, err := p.loader.Load(path)
+	if err != nil {
+		return "", fmt.Errorf("load best resume for tailor: %w", err)
+	}
+	return text, nil
+}
+
+// retrieveSuggestions calls the augment service for keyword-based profile suggestions.
+// If the augment service is nil or returns an error, it degrades gracefully: a warning
+// is appended to result.Warnings and an empty suggestions map is returned.
+func (p *ApplyPipeline) retrieveSuggestions(ctx context.Context, jd *model.JDData, result *model.PipelineResult) model.TailorSuggestions {
+	if p.augment == nil {
+		return nil
+	}
+	allKeywords := append(jd.Required, jd.Preferred...) //nolint:gocritic // fresh slice intentional
+	suggestions, err := p.augment.SuggestForKeywords(ctx, allKeywords)
+	if err != nil {
+		slog.WarnContext(ctx, "runTailorStep: SuggestForKeywords failed — tailoring without suggestions", "error", err)
+		result.Warnings = append(result.Warnings, model.RiskWarning{
+			Severity: model.SeverityWarn,
+			Message:  fmt.Sprintf("profile bank retrieval failed — tailoring without suggestions: %v", err),
+		})
+		return nil
+	}
+	return suggestions
 }
