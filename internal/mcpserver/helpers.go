@@ -62,8 +62,6 @@ func loadDeps() (*config.Config, pipeline.ApplyConfig, error) {
 	scorerSvc := scorer.New(defaults)
 	fetcherSvc := fetcher.NewFallback(defaults, log)
 
-	logger.Decision(context.Background(), log, "keyword_extraction", "mcp_host", "MCP host is the orchestrator")
-
 	var augmentSvc port.Augmenter
 	if cfg.Embedder.BaseURL != "" && cfg.Embedder.Model != "" {
 		profileRepo, profileErr := newSQLiteProfile(cfg)
@@ -76,7 +74,7 @@ func loadDeps() (*config.Config, pipeline.ApplyConfig, error) {
 			log.Info("augment: embedder wired for vector retrieval", "model", cfg.Embedder.Model)
 		}
 	} else {
-		logger.Decision(context.Background(), log, "augment", "disabled", "no embedder configured")
+		log.DebugContext(context.Background(), "mcp: augment disabled — no embedder configured")
 	}
 
 	deps := pipeline.ApplyConfig{
@@ -92,14 +90,12 @@ func loadDeps() (*config.Config, pipeline.ApplyConfig, error) {
 		Tailor:   nil,
 	}
 
-	if !cfg.Debug.DisableRedaction {
-		r := redact.New(&redact.Profile{
-			Name:        cfg.UserName,
-			Location:    cfg.Location,
-			LinkedInURL: cfg.LinkedInURL,
-		})
-		logger.SetRedactor(r)
-	}
+	r := redact.New(&redact.Profile{
+		Name:        cfg.UserName,
+		Location:    cfg.Location,
+		LinkedInURL: cfg.LinkedInURL,
+	})
+	logger.SetRedactor(r)
 
 	return cfg, deps, nil
 }

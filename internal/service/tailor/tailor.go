@@ -61,11 +61,11 @@ func (s *Service) TailorResume(ctx context.Context, input *model.TailorInput) (m
 	// Tier-2: rewrite relevant bullets when accomplishments and budget are provided.
 	runTier2 := input.AccomplishmentsText != "" && input.Options.MaxTier2BulletRewrites > 0
 	if !runTier2 {
-		reason := "no accomplishments text"
 		if input.AccomplishmentsText != "" {
-			reason = "budget=0"
+			s.log.DebugContext(ctx, "tailor: tier-1 only — bullet rewrites disabled (MaxTier2BulletRewrites=0)")
+		} else {
+			s.log.DebugContext(ctx, "tailor: applying tier-1 only — no accomplishments text")
 		}
-		logger.Decision(ctx, s.log, "tailor.tier", "t1", reason)
 		return result, nil
 	}
 
@@ -89,16 +89,15 @@ func (s *Service) TailorResume(ctx context.Context, input *model.TailorInput) (m
 	// If tier-2 produced changes, upgrade the result.
 	switch {
 	case len(changes) > 0:
-		logger.Decision(ctx, s.log, "tailor.tier", "t2", "bullets rewritten", slog.Int("changes", len(changes)))
+		s.log.DebugContext(ctx, "tailor: applied tier-2 — bullets rewritten", slog.Int("changes", len(changes)))
 		result.TierApplied = model.TierBullet
 		result.RewrittenBullets = changes
 		result.TailoredText = tier2Text
 	case attempted > 0:
 		// Every LLM call failed — degrade to tier-1 but signal the failure explicitly.
-		logger.Decision(ctx, s.log, "tailor.tier", "t1", "all bullet LLM rewrites failed",
-			slog.Int("attempted", attempted))
+		s.log.DebugContext(ctx, "tailor: degrading to tier-1 — all bullet LLM rewrites failed", slog.Int("attempted", attempted))
 	default:
-		logger.Decision(ctx, s.log, "tailor.tier", "t1", "no keyword-matching bullets found")
+		s.log.DebugContext(ctx, "tailor: applying tier-1 only — no keyword-matching bullets found")
 	}
 
 	return result, nil

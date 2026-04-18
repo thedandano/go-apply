@@ -1,7 +1,6 @@
 package logger
 
 import (
-	"context"
 	"fmt"
 	"log/slog"
 	"regexp"
@@ -81,21 +80,4 @@ func PayloadAttr(key, value string, verbose bool) slog.Attr {
 		return slog.String(key, Redact(value))
 	}
 	return slog.String(key, Truncate(Redact(value), payloadLimit))
-}
-
-// Decision logs a branch decision at DEBUG level.
-// name:   the decision point (e.g. "fetcher.source", "tailor.tier")
-// chosen: which branch was taken (e.g. "cache", "t1")
-// reason: why (e.g. "cache hit", "score below threshold")
-// attrs:  optional additional slog.Attr for context
-func Decision(ctx context.Context, log *slog.Logger, name, chosen, reason string, attrs ...slog.Attr) {
-	args := []any{
-		slog.String("name", name),
-		slog.String("chosen", chosen),
-		slog.String("reason", reason),
-	}
-	for _, a := range attrs {
-		args = append(args, a)
-	}
-	log.DebugContext(ctx, "decision", args...)
 }

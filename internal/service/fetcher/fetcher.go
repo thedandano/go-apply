@@ -18,7 +18,6 @@ import (
 	"github.com/chromedp/chromedp"
 
 	"github.com/thedandano/go-apply/internal/config"
-	"github.com/thedandano/go-apply/internal/logger"
 	"github.com/thedandano/go-apply/internal/port"
 )
 
@@ -204,13 +203,13 @@ func NewFallbackWith(primary, fallback port.JDFetcher, minChars int, log *slog.L
 func (f *FallbackFetcher) Fetch(ctx context.Context, url string) (string, error) {
 	text, err := f.primary.Fetch(ctx, url)
 	if err != nil {
-		logger.Decision(ctx, f.log, "fetcher.source", "fallback", "primary fetch error", slog.String("url", url))
+		f.log.DebugContext(ctx, "fetcher: primary failed — falling back to goquery", slog.String("url", url))
 		f.log.WarnContext(ctx, "fetcher: primary failed, falling back to goquery",
 			"url", url, "error", err)
 		return f.fallback.Fetch(ctx, url)
 	}
 	if len(strings.TrimSpace(text)) < f.minJDTextLengthChars {
-		logger.Decision(ctx, f.log, "fetcher.source", "fallback", "primary returned thin content",
+		f.log.DebugContext(ctx, "fetcher: primary returned thin content — falling back",
 			slog.String("url", url),
 			slog.Int("chars", len(strings.TrimSpace(text))),
 			slog.Int("min", f.minJDTextLengthChars),
@@ -219,7 +218,7 @@ func (f *FallbackFetcher) Fetch(ctx context.Context, url string) (string, error)
 			"url", url, "chars", len(strings.TrimSpace(text)), "min", f.minJDTextLengthChars)
 		return f.fallback.Fetch(ctx, url)
 	}
-	logger.Decision(ctx, f.log, "fetcher.source", "network", "primary fetch succeeded", slog.String("url", url))
+	f.log.DebugContext(ctx, "fetcher: primary succeeded", slog.String("url", url))
 	return text, nil
 }
 
