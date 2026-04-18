@@ -90,14 +90,24 @@ func loadDeps() (*config.Config, pipeline.ApplyConfig, error) {
 		Tailor:   nil,
 	}
 
+	return cfg, deps, nil
+}
+
+// initRedactor loads configuration and initializes the global redactor once at startup.
+// It logs a warning if config loading fails, allowing the server to continue without redaction.
+func initRedactor() {
+	cfg, err := config.Load()
+	if err != nil {
+		slog.Default().Warn("init redactor: could not load config", "error", err)
+		return
+	}
+
 	r := redact.New(&redact.Profile{
 		Name:        cfg.UserName,
 		Location:    cfg.Location,
 		LinkedInURL: cfg.LinkedInURL,
 	})
 	logger.SetRedactor(r)
-
-	return cfg, deps, nil
 }
 
 // errorResult wraps an error message as a JSON text tool result.
