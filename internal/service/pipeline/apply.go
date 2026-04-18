@@ -61,8 +61,10 @@ type ApplyConfig struct {
 	Presenter port.Presenter
 	Defaults  *config.AppDefaults
 	Tailor    port.Tailor
-	// Orchestrator is optional. When set, it is used for LLM decision points
-	// (keyword extraction) instead of the raw LLMClient. In MCP mode, leave nil.
+	// Orchestrator is optional. When non-nil, it drives LLM decision points
+	// (keyword extraction) instead of the raw LLMClient.
+	// In MCP mode leave nil — the pipeline nil-checks before each call and
+	// falls back to direct LLMClient calls, so this field is never dereferenced.
 	Orchestrator port.Orchestrator
 }
 
