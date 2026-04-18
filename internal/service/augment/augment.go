@@ -24,6 +24,24 @@ type retrievedChunk struct {
 	Text   string
 }
 
+// filterCandidates applies a similarity threshold and source-dedup to candidates,
+// returning matched chunks and the list of matched terms.
+func filterCandidates(candidates []model.ProfileEmbedding, threshold float64, seen map[string]bool) ([]retrievedChunk, []string) {
+	var chunks []retrievedChunk
+	var matched []string
+	for _, c := range candidates {
+		if c.Weight < threshold {
+			continue
+		}
+		matched = append(matched, c.Term)
+		if !seen[c.SourceDoc] {
+			seen[c.SourceDoc] = true
+			chunks = append(chunks, retrievedChunk{Source: c.SourceDoc, Text: c.Term})
+		}
+	}
+	return chunks, matched
+}
+
 // Service composes ProfileRepository, KeywordCacheRepository, EmbeddingClient, and LLMClient.
 // It retrieves relevant profile document chunks by vector similarity and incorporates
 // them into the resume text via LLM.
@@ -136,17 +154,8 @@ func (s *Service) retrieveByVector(ctx context.Context, keywords []string) ([]re
 			slog.Float64("threshold", threshold),
 		)
 
-		var matchedTerms []string
-		for _, c := range candidates {
-			if c.Weight < threshold {
-				continue
-			}
-			matchedTerms = append(matchedTerms, c.Term)
-			if !seen[c.SourceDoc] {
-				seen[c.SourceDoc] = true
-				chunks = append(chunks, retrievedChunk{Source: c.SourceDoc, Text: c.Term})
-			}
-		}
+		newChunks, matchedTerms := filterCandidates(candidates, threshold, seen)
+		chunks = append(chunks, newChunks...)
 
 		switch {
 		case len(matchedTerms) > 0:
