@@ -92,14 +92,12 @@ func loadDeps() (*config.Config, pipeline.ApplyConfig, error) {
 		Tailor:   nil,
 	}
 
-	if !cfg.Debug.DisableRedaction {
-		r := redact.New(&redact.Profile{
-			Name:        cfg.UserName,
-			Location:    cfg.Location,
-			LinkedInURL: cfg.LinkedInURL,
-		})
-		logger.SetRedactor(r)
-	}
+	r := redact.New(&redact.Profile{
+		Name:        cfg.UserName,
+		Location:    cfg.Location,
+		LinkedInURL: cfg.LinkedInURL,
+	})
+	logger.SetRedactor(r)
 
 	return cfg, deps, nil
 }
