@@ -405,8 +405,6 @@ func HandleSubmitTailorT1WithConfig(ctx context.Context, req *mcp.CallToolReques
 	logger.Banner(ctx, slog.Default(), "Tailor", "T1")
 	tailored, addedKeywords := tailor.AddKeywordsToSkillsSection(baseText, skillAdds)
 	slog.InfoContext(ctx, "tailor T1 complete", "added_keywords", len(addedKeywords), "keywords", addedKeywords)
-	sess.TailoredText = tailored
-	sess.State = stateT1Applied
 
 	logger.Banner(ctx, slog.Default(), "Score", "After T1")
 	newScore, err := pl.ScoreResume(ctx, tailored, sess.ScoreResult.BestLabel, &sess.JD, cfg)
@@ -414,6 +412,9 @@ func HandleSubmitTailorT1WithConfig(ctx context.Context, req *mcp.CallToolReques
 		slog.ErrorContext(ctx, "submit_tailor_t1: rescore failed", "session_id", sessionID, "error", err)
 		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t1", "rescore_failed", err.Error(), false))
 	}
+	// Commit to session only after successful rescore so a transient failure leaves the state retryable.
+	sess.TailoredText = tailored
+	sess.State = stateT1Applied
 
 	previousScore := sess.ScoreResult.BestScore
 	newScoreTotal := newScore.Breakdown.Total()
