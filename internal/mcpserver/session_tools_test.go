@@ -550,6 +550,32 @@ func TestHandleSubmitTailorT2_WrongState_ReturnsError(t *testing.T) {
 	}
 }
 
+func TestHandleSubmitTailorT2_WrongState_FromScored_ReturnsError(t *testing.T) {
+	cfg := stubApplyConfigForSession()
+
+	// load_jd + submit_keywords — state reaches stateScored, but T1 is skipped
+	loadReq := callToolRequest("load_jd", map[string]any{"jd_raw_text": "Go engineer role"})
+	loadText := extractText(t, mcpserver.HandleLoadJDWithConfig(context.Background(), &loadReq, &cfg))
+	var loadEnv map[string]any
+	_ = json.Unmarshal([]byte(loadText), &loadEnv)
+	sessionID, _ := loadEnv["session_id"].(string)
+
+	const jdJSON = `{"title":"Go Engineer","company":"Acme","required":["go"],"preferred":[],"location":"Remote","seniority":"senior","required_years":3}`
+	kwReq := callToolRequest("submit_keywords", map[string]any{"session_id": sessionID, "jd_json": jdJSON})
+	mcpserver.HandleSubmitKeywordsWithConfig(context.Background(), &kwReq, &cfg, &config.Config{})
+
+	// T2 directly after scored (T1 skipped) — must be rejected
+	req := callToolRequest("submit_tailor_t2", map[string]any{
+		"session_id":      sessionID,
+		"bullet_rewrites": `[{"original":"old","replacement":"new"}]`,
+	})
+	result := mcpserver.HandleSubmitTailorT2WithConfig(context.Background(), &req, &cfg, &config.Config{})
+	text := extractText(t, result)
+	if !strings.Contains(text, "invalid_state") {
+		t.Errorf("expected invalid_state error, got: %s", text)
+	}
+}
+
 func TestHandleSubmitTailorT2_MissingBulletRewrites_ReturnsError(t *testing.T) {
 	cfg := stubApplyConfigForSession()
 	req := callToolRequest("submit_tailor_t2", map[string]any{
@@ -604,7 +630,14 @@ func TestHandleSubmitTailorT2_HappyPath_ReturnsNewScore(t *testing.T) {
 	kwReq := callToolRequest("submit_keywords", map[string]any{"session_id": sessionID, "jd_json": jdJSON})
 	mcpserver.HandleSubmitKeywordsWithConfig(context.Background(), &kwReq, &cfg, &config.Config{})
 
-	// submit_tailor_t2 (directly after scored, skipping T1)
+	// submit_tailor_t1 (required before T2)
+	t1Req := callToolRequest("submit_tailor_t1", map[string]any{
+		"session_id": sessionID,
+		"skill_adds": `["Kubernetes"]`,
+	})
+	mcpserver.HandleSubmitTailorT1WithConfig(context.Background(), &t1Req, &cfg, &config.Config{})
+
+	// submit_tailor_t2 (after T1 — valid transition)
 	rewrites := `[{"original":"golang experience senior engineer 5 years","replacement":"golang experience senior engineer 5 years, Kubernetes"}]`
 	t2Req := callToolRequest("submit_tailor_t2", map[string]any{"session_id": sessionID, "bullet_rewrites": rewrites})
 	result := mcpserver.HandleSubmitTailorT2WithConfig(context.Background(), &t2Req, &cfg, &config.Config{})
