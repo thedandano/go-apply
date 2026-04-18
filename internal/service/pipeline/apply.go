@@ -163,11 +163,7 @@ func (p *ApplyPipeline) Run(ctx context.Context, req ApplyRequest) error {
 	emptyJD := len(jd.Required) == 0 && len(jd.Preferred) == 0 &&
 		strings.TrimSpace(jd.Title) == "" && strings.TrimSpace(jd.Company) == ""
 	if emptyJD {
-		slog.DebugContext(ctx, "decision",
-			slog.String("name", "pipeline.abort"),
-			slog.String("chosen", "empty_jd"),
-			slog.String("reason", "keyword extraction produced no usable JD fields"),
-		)
+		slog.DebugContext(ctx, "pipeline: aborting — keyword extraction produced no usable JD fields")
 		jdErr := fmt.Errorf("could not extract a job description from the provided input — " +
 			"the page may have expired, require a login, or failed to load. " +
 			"Please provide the job description text directly using --text \"<jd text>\" " +
@@ -215,22 +211,18 @@ func (p *ApplyPipeline) Run(ctx context.Context, req ApplyRequest) error {
 	// TODO (priority critical)
 
 	// Step 4 (optional): Tailor the best-matching resume when --accomplishments is set.
-	var tailorChosen, tailorReason string
+	var tailorChosen string
 	switch {
 	case p.tailor == nil:
-		tailorChosen, tailorReason = "skip", "tailor not configured"
+		tailorChosen = "skip"
 	case req.AccomplishmentsText == "":
-		tailorChosen, tailorReason = "skip", "no accomplishments"
+		tailorChosen = "skip"
 	case result.BestResume == "":
-		tailorChosen, tailorReason = "skip", "no best resume"
+		tailorChosen = "skip"
 	default:
-		tailorChosen, tailorReason = "run", "accomplishments present and best resume selected"
+		tailorChosen = "run"
 	}
-	slog.DebugContext(ctx, "decision",
-		slog.String("name", "pipeline.tailor"),
-		slog.String("chosen", tailorChosen),
-		slog.String("reason", tailorReason),
-	)
+	slog.DebugContext(ctx, "pipeline: tailor", slog.String("chosen", tailorChosen))
 	if req.AccomplishmentsText != "" && result.BestResume != "" && p.tailor != nil {
 		tailorStart := time.Now()
 		p.presenter.OnEvent(model.StepStartedEvent{StepID: "tailor", Label: "Tailoring resume"})
@@ -268,10 +260,9 @@ func (p *ApplyPipeline) Run(ctx context.Context, req ApplyRequest) error {
 	logger.Banner(ctx, slog.Default(), "Cover Letter", "")
 	switch {
 	case p.clGen != nil && result.BestScore >= p.defaults.Thresholds.ScorePass:
-		slog.DebugContext(ctx, "decision",
-			slog.String("name", "pipeline.cover_letter"),
-			slog.String("chosen", "generate"),
-			slog.String("reason", fmt.Sprintf("score %.2f >= threshold %.2f", result.BestScore, p.defaults.Thresholds.ScorePass)),
+		slog.DebugContext(ctx, "pipeline: generating cover letter — score meets threshold",
+			slog.Float64("score", result.BestScore),
+			slog.Float64("threshold", p.defaults.Thresholds.ScorePass),
 		)
 		clStart := time.Now()
 		p.presenter.OnEvent(model.StepStartedEvent{StepID: "05", Label: "Cover Letter"})
@@ -298,17 +289,12 @@ func (p *ApplyPipeline) Run(ctx context.Context, req ApplyRequest) error {
 			result.CoverLetter = clResult
 		}
 	case p.clGen == nil:
-		slog.DebugContext(ctx, "decision",
-			slog.String("name", "pipeline.cover_letter"),
-			slog.String("chosen", "skip_no_clgen"),
-			slog.String("reason", "CLGen not configured"),
-		)
+		slog.DebugContext(ctx, "pipeline: skipping cover letter — CLGen not configured")
 		slog.InfoContext(ctx, "cover letter skipped — CLGen not configured (MCP mode: Claude generates cover letters)")
 	default:
-		slog.DebugContext(ctx, "decision",
-			slog.String("name", "pipeline.cover_letter"),
-			slog.String("chosen", "skip_below_threshold"),
-			slog.String("reason", fmt.Sprintf("score %.2f < threshold %.2f", result.BestScore, p.defaults.Thresholds.ScorePass)),
+		slog.DebugContext(ctx, "pipeline: skipping cover letter — score below threshold",
+			slog.Float64("score", result.BestScore),
+			slog.Float64("threshold", p.defaults.Thresholds.ScorePass),
 		)
 		slog.InfoContext(ctx, "cover letter skipped — best score below threshold",
 			"best_score", result.BestScore,
@@ -385,21 +371,11 @@ func (p *ApplyPipeline) acquireJDText(ctx context.Context, req ApplyRequest) (st
 		slog.WarnContext(ctx, "cache lookup error — proceeding with fetch", "url", req.URLOrText, "error", err)
 	}
 	if found && rec != nil && rec.RawText != "" {
-		slog.DebugContext(ctx, "decision",
-			slog.String("name", "jd.source"),
-			slog.String("chosen", "cache"),
-			slog.String("reason", "cache hit"),
-			slog.String("url", req.URLOrText),
-		)
+		slog.DebugContext(ctx, "jd: serving from cache", slog.String("url", req.URLOrText))
 		p.presenter.OnEvent(model.StepCompletedEvent{StepID: "cache_lookup", Label: "Cache hit", ElapsedMS: 0})
 		return rec.RawText, nil
 	}
-	slog.DebugContext(ctx, "decision",
-		slog.String("name", "jd.source"),
-		slog.String("chosen", "fetch"),
-		slog.String("reason", "cache miss or text input"),
-		slog.String("url", req.URLOrText),
-	)
+	slog.DebugContext(ctx, "jd: fetching from network — cache miss", slog.String("url", req.URLOrText))
 	p.presenter.OnEvent(model.StepCompletedEvent{StepID: "cache_lookup", Label: "Cache miss — fetching", ElapsedMS: 0})
 
 	// Fetch from URL.

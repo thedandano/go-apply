@@ -189,19 +189,9 @@ func (c *HTTPClient) doWithRetry(ctx context.Context, url string, body []byte, o
 				"error", err,
 			)
 			if attempt+1 < maxAttempts {
-				c.log.DebugContext(ctx, "decision",
-					slog.String("name", "llm.retry"),
-					slog.String("chosen", "retry"),
-					slog.String("reason", "http error"),
-					slog.Int("attempt", attempt+1),
-				)
+				c.log.DebugContext(ctx, "llm: retrying after http error", slog.Int("attempt", attempt+1))
 			} else {
-				c.log.DebugContext(ctx, "decision",
-					slog.String("name", "llm.retry"),
-					slog.String("chosen", "abort"),
-					slog.String("reason", "http error"),
-					slog.Int("attempt", attempt+1),
-				)
+				c.log.DebugContext(ctx, "llm: aborting after http error — max attempts reached", slog.Int("attempt", attempt+1))
 			}
 			continue
 		}
@@ -219,18 +209,12 @@ func (c *HTTPClient) doWithRetry(ctx context.Context, url string, body []byte, o
 				"attempt", attempt+1,
 			)
 			if attempt+1 < maxAttempts {
-				c.log.DebugContext(ctx, "decision",
-					slog.String("name", "llm.retry"),
-					slog.String("chosen", "retry"),
-					slog.String("reason", "retryable status"),
+				c.log.DebugContext(ctx, "llm: retrying after retryable status",
 					slog.Int("attempt", attempt+1),
 					slog.Int("status", resp.StatusCode),
 				)
 			} else {
-				c.log.DebugContext(ctx, "decision",
-					slog.String("name", "llm.retry"),
-					slog.String("chosen", "abort"),
-					slog.String("reason", "max attempts exceeded"),
+				c.log.DebugContext(ctx, "llm: aborting — max attempts exceeded",
 					slog.Int("attempt", attempt+1),
 					slog.Int("status", resp.StatusCode),
 				)
@@ -241,12 +225,7 @@ func (c *HTTPClient) doWithRetry(ctx context.Context, url string, body []byte, o
 				bodySnippet = string(b)
 			}
 			_ = resp.Body.Close()
-			c.log.DebugContext(ctx, "decision",
-				slog.String("name", "llm.retry"),
-				slog.String("chosen", "abort"),
-				slog.String("reason", "non-retryable error"),
-				slog.Int("status", resp.StatusCode),
-			)
+			c.log.DebugContext(ctx, "llm: aborting — non-retryable status", slog.Int("status", resp.StatusCode))
 			c.log.ErrorContext(ctx, "llm: non-retryable error", "status", resp.StatusCode, "body", bodySnippet, "url", url)
 			return fmt.Errorf("llm: API returned status %d: %s", resp.StatusCode, bodySnippet)
 		}

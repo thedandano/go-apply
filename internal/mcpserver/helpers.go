@@ -62,11 +62,7 @@ func loadDeps() (*config.Config, pipeline.ApplyConfig, error) {
 	scorerSvc := scorer.New(defaults)
 	fetcherSvc := fetcher.NewFallback(defaults, log)
 
-	log.DebugContext(context.Background(), "decision",
-		slog.String("name", "keyword_extraction"),
-		slog.String("chosen", "mcp_host"),
-		slog.String("reason", "MCP host is the orchestrator"),
-	)
+	log.DebugContext(context.Background(), "mcp: keyword extraction delegated to MCP host")
 
 	var augmentSvc port.Augmenter
 	if cfg.Embedder.BaseURL != "" && cfg.Embedder.Model != "" {
@@ -80,11 +76,7 @@ func loadDeps() (*config.Config, pipeline.ApplyConfig, error) {
 			log.Info("augment: embedder wired for vector retrieval", "model", cfg.Embedder.Model)
 		}
 	} else {
-		log.DebugContext(context.Background(), "decision",
-			slog.String("name", "augment"),
-			slog.String("chosen", "disabled"),
-			slog.String("reason", "no embedder configured"),
-		)
+		log.DebugContext(context.Background(), "mcp: augment disabled — no embedder configured")
 	}
 
 	deps := pipeline.ApplyConfig{

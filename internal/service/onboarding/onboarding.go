@@ -52,10 +52,7 @@ func (s *Service) Run(ctx context.Context, input model.OnboardInput) (model.Onbo
 
 	for _, resume := range input.Resumes {
 		if err := validateLabel(resume.Label); err != nil {
-			s.log.DebugContext(ctx, "decision",
-				slog.String("name", "onboard.resume"),
-				slog.String("chosen", "skip"),
-				slog.String("reason", err.Error()),
+			s.log.DebugContext(ctx, "onboard: skipping resume — invalid label",
 				slog.String("label", resume.Label),
 			)
 			result.Warnings = append(result.Warnings, model.RiskWarning{
@@ -86,11 +83,7 @@ func (s *Service) Run(ctx context.Context, input model.OnboardInput) (model.Onbo
 			result.Stored = append(result.Stored, "ref:skills")
 		}
 	} else {
-		s.log.DebugContext(ctx, "decision",
-			slog.String("name", "onboard.skills"),
-			slog.String("chosen", "skip"),
-			slog.String("reason", "empty"),
-		)
+		s.log.DebugContext(ctx, "onboard: skipping skills — empty input")
 	}
 
 	if input.AccomplishmentsText != "" {
@@ -108,11 +101,7 @@ func (s *Service) Run(ctx context.Context, input model.OnboardInput) (model.Onbo
 		result.Summary.AccomplishmentsCount = len(sections)
 		s.log.DebugContext(ctx, "onboard: accomplishments stored", "chunks", result.Summary.AccomplishmentsCount)
 	} else {
-		s.log.DebugContext(ctx, "decision",
-			slog.String("name", "onboard.accomplishments"),
-			slog.String("chosen", "skip"),
-			slog.String("reason", "empty"),
-		)
+		s.log.DebugContext(ctx, "onboard: skipping accomplishments — empty input")
 	}
 
 	result.Summary.SkillsCount = countSkillItems(input.SkillsText)
