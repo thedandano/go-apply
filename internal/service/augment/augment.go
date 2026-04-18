@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/thedandano/go-apply/internal/config"
-	"github.com/thedandano/go-apply/internal/logger"
 	"github.com/thedandano/go-apply/internal/model"
 	"github.com/thedandano/go-apply/internal/port"
 )
@@ -66,13 +65,12 @@ func (s *Service) AugmentResumeText(ctx context.Context, input model.AugmentInpu
 		// In MCP mode no LLM is wired here — the MCP host (Claude Code) is the
 		// orchestrator that performs text incorporation. Retrieval still runs for
 		// cache warming; only the in-process incorporation step is skipped.
-		logger.Decision(ctx, s.log, "augment.incorporate", "skip", "no LLM — MCP host incorporates")
+		s.log.DebugContext(ctx, "augment: skipping incorporation — no LLM, MCP host incorporates")
 		return input.ResumeText, input.RefData, nil
 	}
 
 	if len(input.JDKeywords) == 0 {
-		logger.Decision(ctx, s.log, "augment.output", "original", "no keywords")
-		s.log.DebugContext(ctx, "augment skipped: no keywords")
+		s.log.DebugContext(ctx, "augment: output unchanged — no keywords")
 		return input.ResumeText, input.RefData, nil
 	}
 
@@ -81,7 +79,6 @@ func (s *Service) AugmentResumeText(ctx context.Context, input model.AugmentInpu
 		return "", nil, fmt.Errorf("augment: retrieve chunks: %w", err)
 	}
 	if len(chunks) == 0 {
-		logger.Decision(ctx, s.log, "augment.output", "original", "no relevant chunks")
 		s.log.WarnContext(ctx, "augment: no relevant chunks found — returning original resume")
 		return input.ResumeText, input.RefData, nil
 	}
@@ -108,7 +105,7 @@ func (s *Service) retrieveChunks(ctx context.Context, keywords []string) ([]retr
 		return nil, err
 	}
 	if len(chunks) == 0 {
-		logger.Decision(ctx, s.log, "augment.retrieval", "none", "no vector matches above threshold")
+		s.log.DebugContext(ctx, "augment: retrieval returned no matches above threshold")
 	}
 	return chunks, nil
 }
@@ -293,8 +290,9 @@ func (s *Service) SuggestForKeywords(ctx context.Context, keywords []string) (mo
 // for cache warming but incorporation is skipped; the original resume is returned.
 func (s *Service) incorporateChunks(ctx context.Context, resumeText string, chunks []retrievedChunk, keywords []string) (string, error) {
 	if s.llm == nil {
-		logger.Decision(ctx, s.log, "augment.incorporate", "skip", "no LLM — MCP host incorporates",
-			slog.Int("chunks_retrieved", len(chunks)))
+		s.log.DebugContext(ctx, "augment: skipping incorporation — no LLM, MCP host incorporates",
+			slog.Int("chunks_retrieved", len(chunks)),
+		)
 		return resumeText, nil
 	}
 	var sb strings.Builder

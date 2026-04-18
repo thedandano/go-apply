@@ -61,14 +61,12 @@ Outputs a JSON result to stdout when --headless is set.`,
 				return fmt.Errorf("no orchestrator configured — run:\n  go-apply config set llm.base_url <url>\n  go-apply config set llm.model <model>")
 			}
 
-			if !cfg.Debug.DisableRedaction {
-				r := redact.New(&redact.Profile{
-					Name:        cfg.UserName,
-					Location:    cfg.Location,
-					LinkedInURL: cfg.LinkedInURL,
-				})
-				logger.SetRedactor(r)
-			}
+			r := redact.New(&redact.Profile{
+				Name:        cfg.UserName,
+				Location:    cfg.Location,
+				LinkedInURL: cfg.LinkedInURL,
+			})
+			logger.SetRedactor(r)
 
 			defaults, err := config.LoadDefaults()
 			if err != nil {

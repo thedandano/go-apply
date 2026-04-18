@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"github.com/thedandano/go-apply/internal/config"
-	"github.com/thedandano/go-apply/internal/logger"
 	"github.com/thedandano/go-apply/internal/model"
 	"github.com/thedandano/go-apply/internal/port"
 )
@@ -53,7 +52,9 @@ func (s *Service) Run(ctx context.Context, input model.OnboardInput) (model.Onbo
 
 	for _, resume := range input.Resumes {
 		if err := validateLabel(resume.Label); err != nil {
-			logger.Decision(ctx, s.log, "onboard.resume", "skip", err.Error(), slog.String("label", resume.Label))
+			s.log.DebugContext(ctx, "onboard: skipping resume — invalid label",
+				slog.String("label", resume.Label),
+			)
 			result.Warnings = append(result.Warnings, model.RiskWarning{
 				Severity: model.SeverityError,
 				Message:  fmt.Sprintf("resume %q: %v", resume.Label, err),
@@ -82,7 +83,7 @@ func (s *Service) Run(ctx context.Context, input model.OnboardInput) (model.Onbo
 			result.Stored = append(result.Stored, "ref:skills")
 		}
 	} else {
-		logger.Decision(ctx, s.log, "onboard.skills", "skip", "empty")
+		s.log.DebugContext(ctx, "onboard: skipping skills — empty input")
 	}
 
 	if input.AccomplishmentsText != "" {
@@ -100,7 +101,7 @@ func (s *Service) Run(ctx context.Context, input model.OnboardInput) (model.Onbo
 		result.Summary.AccomplishmentsCount = len(sections)
 		s.log.DebugContext(ctx, "onboard: accomplishments stored", "chunks", result.Summary.AccomplishmentsCount)
 	} else {
-		logger.Decision(ctx, s.log, "onboard.accomplishments", "skip", "empty")
+		s.log.DebugContext(ctx, "onboard: skipping accomplishments — empty input")
 	}
 
 	result.Summary.SkillsCount = countSkillItems(input.SkillsText)

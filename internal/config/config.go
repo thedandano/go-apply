@@ -86,9 +86,6 @@ type Config struct {
 	Location          string            `yaml:"location"`
 	LinkedInURL       string            `yaml:"linkedin_url"`
 	YearsOfExperience float64           `yaml:"years_of_experience"`
-	Debug             struct {
-		DisableRedaction bool `yaml:"disable_redaction"`
-	} `yaml:"debug"`
 }
 
 func (c *Config) ResolveLogLevel() slog.Level {
@@ -253,12 +250,6 @@ func (c *Config) SetField(key, value string) error {
 			return fmt.Errorf("years_of_experience must be a number: %w", err)
 		}
 		c.YearsOfExperience = f
-	case "debug.disable_redaction":
-		b, err := strconv.ParseBool(value)
-		if err != nil {
-			return fmt.Errorf("debug.disable_redaction must be true or false: %w", err)
-		}
-		c.Debug.DisableRedaction = b
 	default:
 		return fmt.Errorf("unknown config key %q", key)
 	}
@@ -296,8 +287,6 @@ func (c *Config) GetField(key string) (string, error) {
 		return c.LinkedInURL, nil
 	case "years_of_experience":
 		return strconv.FormatFloat(c.YearsOfExperience, 'f', -1, 64), nil
-	case "debug.disable_redaction":
-		return strconv.FormatBool(c.Debug.DisableRedaction), nil
 	default:
 		return "", fmt.Errorf("unknown config key %q", key)
 	}
