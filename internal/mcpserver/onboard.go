@@ -240,6 +240,7 @@ func newOnboardSvc() (port.Onboarder, func(), error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("load defaults: %w", err)
 	}
+	cfg.ApplyOverrides(defaults)
 
 	if strings.TrimSpace(cfg.Embedder.BaseURL) == "" || strings.TrimSpace(cfg.Embedder.Model) == "" {
 		return nil, nil, fmt.Errorf("embedder not configured — use update_config to set embedder.base_url, embedder.model, and optionally embedder.api_key before onboarding")

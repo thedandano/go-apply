@@ -91,13 +91,56 @@ func NewApplyPipeline(cfg *ApplyConfig) *ApplyPipeline {
 // Degraded pipeline states (e.g. failed keyword extraction) are captured in
 // result.Status and result.Message rather than returned as errors.
 func (p *ApplyPipeline) Run(ctx context.Context, req ApplyRequest) error {
-	start := time.Now()
 	result := model.NewPipelineResult()
-	result.StartTime = start
-
+	result.StartTime = time.Now()
 	logger.Banner(ctx, slog.Default(), "Session", logger.ShortID())
 
-	// Step 1: Acquire JD text.
+	jdText, err := p.stageAcquireJD(ctx, req, result)
+	if err != nil {
+		return err
+	}
+	// TODO: (priority critical) MCP host needs to be able to return the keywords to the pipeline with provided structure
+
+	jd, err := p.stageExtractKeywords(ctx, req, jdText, result)
+	if err != nil {
+		return err
+	}
+
+	resumeFiles, err := p.stageScoreResumes(ctx, &jd, req, result)
+	if err != nil {
+		return err
+	}
+
+	// TODO (priority critical)
+
+	var tailorChosen string
+	switch {
+	case p.tailor == nil:
+		tailorChosen = "skip"
+	case req.AccomplishmentsText == "":
+		tailorChosen = "skip"
+	case result.BestResume == "":
+		tailorChosen = "skip"
+	default:
+		tailorChosen = "run"
+	}
+	slog.DebugContext(ctx, "pipeline: tailor", slog.String("chosen", tailorChosen))
+	if req.AccomplishmentsText != "" && result.BestResume != "" && p.tailor != nil {
+		p.stageTailor(ctx, &jd, req, result, resumeFiles)
+	}
+
+	p.stageCoverLetter(ctx, &jd, req, result)
+
+	if result.Status == "" {
+		result.Status = "success"
+	}
+	result.EndTime = time.Now()
+	return p.presenter.ShowResult(result)
+}
+
+// stageAcquireJD runs Step 1: fetches or reads the job description text.
+// On error it sets result fields, calls ShowError, and returns the error.
+func (p *ApplyPipeline) stageAcquireJD(ctx context.Context, req ApplyRequest, result *model.PipelineResult) (string, error) {
 	stageStart := time.Now()
 	slog.DebugContext(ctx, "stage start", "stage", "acquire_jd",
 		logger.PayloadAttr("input", req.URLOrText, logger.Verbose()),
@@ -109,17 +152,20 @@ func (p *ApplyPipeline) Run(ctx context.Context, req ApplyRequest) error {
 		result.Error = err.Error()
 		result.EndTime = time.Now()
 		p.presenter.ShowError(err)
-		return err
+		return "", err
 	}
 	slog.DebugContext(ctx, "stage end", "stage", "acquire_jd",
 		slog.Int("jd_bytes", len(jdText)),
 		slog.Int64("elapsed_ms", time.Since(stageStart).Milliseconds()),
 	)
 	result.JDText = jdText // returned so the MCP host can extract keywords and reason over it
-	// TODO: (priority critical) MCP host needs to be able to return the keywords to the pipeline with provided structure
+	return jdText, nil
+}
 
-	// Step 2: Extract keywords from JD text via LLM.
-	stageStart = time.Now()
+// stageExtractKeywords runs Step 2: extracts structured JD data from raw text via LLM.
+// On error it sets result fields, calls ShowResult (for MCP/headless), and returns the error.
+func (p *ApplyPipeline) stageExtractKeywords(ctx context.Context, req ApplyRequest, jdText string, result *model.PipelineResult) (model.JDData, error) {
+	stageStart := time.Now()
 	slog.DebugContext(ctx, "stage start", "stage", "extract_keywords", slog.Int("jd_bytes", len(jdText)))
 	jd, _, kwErr := p.extractKeywords(ctx, jdText)
 	if kwErr != nil {
@@ -132,7 +178,7 @@ func (p *ApplyPipeline) Run(ctx context.Context, req ApplyRequest) error {
 		result.Error = jdErr.Error()
 		result.EndTime = time.Now()
 		_ = p.presenter.ShowResult(result)
-		return jdErr
+		return model.JDData{}, jdErr
 	}
 	slog.DebugContext(ctx, "stage end", "stage", "extract_keywords",
 		slog.Int("required", len(jd.Required)),
@@ -157,7 +203,6 @@ func (p *ApplyPipeline) Run(ctx context.Context, req ApplyRequest) error {
 		}
 	}
 
-	// Step 3: List and score resumes.
 	// Refuse to score when the JD is empty — no keywords, title, or company
 	// means keyword extraction failed and there is nothing meaningful to score
 	// against. Return a clear error so the caller (user or MCP host) can supply
@@ -177,29 +222,36 @@ func (p *ApplyPipeline) Run(ctx context.Context, req ApplyRequest) error {
 		// ShowResult before returning so MCP/headless presenters capture the
 		// structured error payload (ShowError is a no-op in MCP mode).
 		_ = p.presenter.ShowResult(result)
-		return jdErr
+		return model.JDData{}, jdErr
 	}
 
+	return jd, nil
+}
+
+// stageScoreResumes runs Step 3: lists resumes and scores them against the JD.
+// On error it sets result fields, calls ShowError, and returns the error.
+// Returns the resumeFiles slice so stageTailor can reuse it without a redundant ListResumes call.
+func (p *ApplyPipeline) stageScoreResumes(ctx context.Context, jd *model.JDData, req ApplyRequest, result *model.PipelineResult) ([]model.ResumeFile, error) {
 	resumeFiles, err := p.resumes.ListResumes()
 	if err != nil {
 		result.Status = "error"
 		result.Error = fmt.Sprintf("list resumes: %v", err)
 		result.EndTime = time.Now()
 		p.presenter.ShowError(err)
-		return fmt.Errorf("list resumes: %w", err)
+		return nil, fmt.Errorf("list resumes: %w", err)
 	}
 
-	stageStart = time.Now()
+	stageStart := time.Now()
 	logger.Banner(ctx, slog.Default(), "Score", "Original")
 	slog.DebugContext(ctx, "stage start", "stage", "score_resumes", slog.Int("resume_count", len(resumeFiles)))
-	scores, bestLabel, bestScore, scoreWarnings, err := p.scoreResumes(ctx, resumeFiles, &jd, req.Config)
+	scores, bestLabel, bestScore, scoreWarnings, err := p.scoreResumes(ctx, resumeFiles, jd, req.Config)
 	result.Warnings = append(result.Warnings, scoreWarnings...)
 	if err != nil {
 		result.Status = "error"
 		result.Error = err.Error()
 		result.EndTime = time.Now()
 		p.presenter.ShowError(err)
-		return err
+		return nil, err
 	}
 	slog.DebugContext(ctx, "stage end", "stage", "score_resumes",
 		slog.String("best_resume", bestLabel),
@@ -209,56 +261,47 @@ func (p *ApplyPipeline) Run(ctx context.Context, req ApplyRequest) error {
 	result.Scores = scores
 	result.BestResume = bestLabel
 	result.BestScore = bestScore
+	return resumeFiles, nil
+}
 
-	// TODO (priority critical)
-
-	// Step 4 (optional): Tailor the best-matching resume when --accomplishments is set.
-	var tailorChosen string
-	switch {
-	case p.tailor == nil:
-		tailorChosen = "skip"
-	case req.AccomplishmentsText == "":
-		tailorChosen = "skip"
-	case result.BestResume == "":
-		tailorChosen = "skip"
-	default:
-		tailorChosen = "run"
-	}
-	slog.DebugContext(ctx, "pipeline: tailor", slog.String("chosen", tailorChosen))
-	if req.AccomplishmentsText != "" && result.BestResume != "" && p.tailor != nil {
-		tailorStart := time.Now()
-		p.presenter.OnEvent(model.StepStartedEvent{StepID: "tailor", Label: "Tailoring resume"})
-		tailorResult, tailorErr := p.runTailorStep(ctx, result, &jd, req, resumeFiles)
-		if tailorErr != nil {
-			slog.WarnContext(ctx, "tailor step failed — continuing", "error", tailorErr)
-			p.presenter.OnEvent(model.StepFailedEvent{StepID: "tailor", Label: "Tailor failed", Err: tailorErr.Error()})
+// stageTailor runs Step 4 (optional): tailors the best-matching resume when accomplishments are provided.
+// Never fatal — failures are captured as warnings in result.Warnings.
+func (p *ApplyPipeline) stageTailor(ctx context.Context, jd *model.JDData, req ApplyRequest, result *model.PipelineResult, resumeFiles []model.ResumeFile) {
+	tailorStart := time.Now()
+	p.presenter.OnEvent(model.StepStartedEvent{StepID: "tailor", Label: "Tailoring resume"})
+	tailorResult, tailorErr := p.runTailorStep(ctx, result, jd, req, resumeFiles)
+	if tailorErr != nil {
+		slog.WarnContext(ctx, "tailor step failed — continuing", "error", tailorErr)
+		p.presenter.OnEvent(model.StepFailedEvent{StepID: "tailor", Label: "Tailor failed", Err: tailorErr.Error()})
+		result.Warnings = append(result.Warnings, model.RiskWarning{
+			Severity: model.SeverityWarn,
+			Message:  fmt.Sprintf("tailor step failed: %v", tailorErr),
+		})
+	} else {
+		p.presenter.OnEvent(model.StepCompletedEvent{
+			StepID:    "tailor",
+			Label:     "Resume tailored",
+			ElapsedMS: time.Since(tailorStart).Milliseconds(),
+		})
+		result.Cascade = tailorResult
+		// Surface tier-2 all-fail as a structured warning: the user requested
+		// bullet rewrites but every LLM call failed; result is tier-1 only.
+		if tailorResult.BulletsAttempted > 0 && len(tailorResult.RewrittenBullets) == 0 {
 			result.Warnings = append(result.Warnings, model.RiskWarning{
 				Severity: model.SeverityWarn,
-				Message:  fmt.Sprintf("tailor step failed: %v", tailorErr),
+				Message:  fmt.Sprintf("tier-2 bullet rewriting attempted %d bullet(s) but all LLM calls failed — result is tier-1 only", tailorResult.BulletsAttempted),
 			})
-		} else {
-			p.presenter.OnEvent(model.StepCompletedEvent{
-				StepID:    "tailor",
-				Label:     "Resume tailored",
-				ElapsedMS: time.Since(tailorStart).Milliseconds(),
-			})
-			result.Cascade = tailorResult
-			// Surface tier-2 all-fail as a structured warning: the user requested
-			// bullet rewrites but every LLM call failed; result is tier-1 only.
-			if tailorResult.BulletsAttempted > 0 && len(tailorResult.RewrittenBullets) == 0 {
-				result.Warnings = append(result.Warnings, model.RiskWarning{
-					Severity: model.SeverityWarn,
-					Message:  fmt.Sprintf("tier-2 bullet rewriting attempted %d bullet(s) but all LLM calls failed — result is tier-1 only", tailorResult.BulletsAttempted),
-				})
-			}
-			// Update best score if tailored version scores higher.
-			if tailored := tailorResult.NewScore.Breakdown.Total(); tailored > result.BestScore {
-				result.BestScore = tailored
-			}
+		}
+		// Update best score if tailored version scores higher.
+		if tailored := tailorResult.NewScore.Breakdown.Total(); tailored > result.BestScore {
+			result.BestScore = tailored
 		}
 	}
+}
 
-	// Step 5: Generate cover letter — only when CLGen is configured and score meets threshold.
+// stageCoverLetter runs Step 5: generates a cover letter when CLGen is configured and score meets threshold.
+// Never fatal — failures are captured as warnings in result.Warnings.
+func (p *ApplyPipeline) stageCoverLetter(ctx context.Context, jd *model.JDData, req ApplyRequest, result *model.PipelineResult) {
 	logger.Banner(ctx, slog.Default(), "Cover Letter", "")
 	switch {
 	case p.clGen != nil && result.BestScore >= p.defaults.Thresholds.ScorePass:
@@ -269,9 +312,9 @@ func (p *ApplyPipeline) Run(ctx context.Context, req ApplyRequest) error {
 		clStart := time.Now()
 		p.presenter.OnEvent(model.StepStartedEvent{StepID: "05", Label: "Cover Letter"})
 		clResult, clErr := p.clGen.Generate(ctx, &model.CoverLetterInput{
-			JD:        jd,
-			JDRawText: jdText,
-			Scores:    scores,
+			JD:        *jd,
+			JDRawText: result.JDText,
+			Scores:    result.Scores,
 			Channel:   req.Channel,
 			Profile:   profileFromConfig(req.Config),
 		})
@@ -303,14 +346,6 @@ func (p *ApplyPipeline) Run(ctx context.Context, req ApplyRequest) error {
 			"threshold", p.defaults.Thresholds.ScorePass,
 		)
 	}
-
-	// Finalize result status.
-	if result.Status == "" {
-		result.Status = "success"
-	}
-	result.EndTime = time.Now()
-
-	return p.presenter.ShowResult(result)
 }
 
 // ScoreResumeResult holds the output of ScoreResumes.
