@@ -12,6 +12,7 @@ import (
 	"github.com/thedandano/go-apply/internal/config"
 	"github.com/thedandano/go-apply/internal/logger"
 	"github.com/thedandano/go-apply/internal/model"
+	"github.com/thedandano/go-apply/internal/port"
 	mcppres "github.com/thedandano/go-apply/internal/presenter/mcp"
 	"github.com/thedandano/go-apply/internal/service/pipeline"
 	"github.com/thedandano/go-apply/internal/service/tailor"
@@ -463,7 +464,7 @@ func HandleSubmitTailorT2WithConfig(ctx context.Context, req *mcp.CallToolReques
 	if bulletRewritesStr == "" {
 		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t2", "missing_bullet_rewrites", "bullet_rewrites is required", false))
 	}
-	var rewrites []tailor.BulletRewrite
+	var rewrites []port.BulletRewrite
 	if err := json.Unmarshal([]byte(bulletRewritesStr), &rewrites); err != nil {
 		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t2", "invalid_bullet_rewrites",
 			fmt.Sprintf("bullet_rewrites parse failed: %v", err), false))
