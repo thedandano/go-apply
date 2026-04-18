@@ -113,6 +113,18 @@ func (p *ApplyPipeline) Run(ctx context.Context, req ApplyRequest) error {
 
 	// TODO (priority critical)
 
+	var tailorChosen string
+	switch {
+	case p.tailor == nil:
+		tailorChosen = "skip"
+	case req.AccomplishmentsText == "":
+		tailorChosen = "skip"
+	case result.BestResume == "":
+		tailorChosen = "skip"
+	default:
+		tailorChosen = "run"
+	}
+	slog.DebugContext(ctx, "pipeline: tailor", slog.String("chosen", tailorChosen))
 	if req.AccomplishmentsText != "" && result.BestResume != "" && p.tailor != nil {
 		p.stageTailor(ctx, &jd, req, result, resumeFiles)
 	}
@@ -255,19 +267,6 @@ func (p *ApplyPipeline) stageScoreResumes(ctx context.Context, jd *model.JDData,
 // stageTailor runs Step 4 (optional): tailors the best-matching resume when accomplishments are provided.
 // Never fatal — failures are captured as warnings in result.Warnings.
 func (p *ApplyPipeline) stageTailor(ctx context.Context, jd *model.JDData, req ApplyRequest, result *model.PipelineResult, resumeFiles []model.ResumeFile) {
-	var tailorChosen string
-	switch {
-	case p.tailor == nil:
-		tailorChosen = "skip"
-	case req.AccomplishmentsText == "":
-		tailorChosen = "skip"
-	case result.BestResume == "":
-		tailorChosen = "skip"
-	default:
-		tailorChosen = "run"
-	}
-	slog.DebugContext(ctx, "pipeline: tailor", slog.String("chosen", tailorChosen))
-
 	tailorStart := time.Now()
 	p.presenter.OnEvent(model.StepStartedEvent{StepID: "tailor", Label: "Tailoring resume"})
 	tailorResult, tailorErr := p.runTailorStep(ctx, result, jd, req, resumeFiles)
