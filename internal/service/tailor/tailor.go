@@ -25,6 +25,9 @@ type Service struct {
 
 // New constructs a Service with the provided dependencies.
 func New(llm port.LLMClient, defaults *config.AppDefaults, log *slog.Logger) *Service {
+	if llm == nil {
+		panic("tailor.New: llm client is required")
+	}
 	return &Service{
 		llm:      llm,
 		defaults: defaults,

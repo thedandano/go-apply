@@ -131,6 +131,7 @@ func HandleUpdateConfig(ctx context.Context, req *mcp.CallToolRequest, cfg *conf
 	if err := cfg.Save(); err != nil {
 		return errorResult(fmt.Sprintf("save config: %v", err))
 	}
+	initRedactor()
 	data, _ := json.Marshal(map[string]string{"updated": key, "value": displayValue})
 	slog.DebugContext(ctx, "mcp tool result",
 		slog.String("tool", "update_config"),

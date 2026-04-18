@@ -369,9 +369,9 @@ func HandleSubmitTailorT1WithConfig(ctx context.Context, req *mcp.CallToolReques
 		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t1", "session_not_found",
 			"session not found — call load_jd first", false))
 	}
-	if sess.State != stateScored && sess.State != stateT1Applied {
+	if sess.State != stateScored {
 		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t1", "invalid_state",
-			fmt.Sprintf("expected state %q or %q, got %q", stateScored, stateT1Applied, sess.State), false))
+			fmt.Sprintf("expected state %q, got %q", stateScored, sess.State), false))
 	}
 
 	if deps == nil {
@@ -405,8 +405,6 @@ func HandleSubmitTailorT1WithConfig(ctx context.Context, req *mcp.CallToolReques
 	logger.Banner(ctx, slog.Default(), "Tailor", "T1")
 	tailored, addedKeywords := tailor.AddKeywordsToSkillsSection(baseText, skillAdds)
 	slog.InfoContext(ctx, "tailor T1 complete", "added_keywords", len(addedKeywords), "keywords", addedKeywords)
-	sess.TailoredText = tailored
-	sess.State = stateT1Applied
 
 	logger.Banner(ctx, slog.Default(), "Score", "After T1")
 	newScore, err := pl.ScoreResume(ctx, tailored, sess.ScoreResult.BestLabel, &sess.JD, cfg)
@@ -414,6 +412,9 @@ func HandleSubmitTailorT1WithConfig(ctx context.Context, req *mcp.CallToolReques
 		slog.ErrorContext(ctx, "submit_tailor_t1: rescore failed", "session_id", sessionID, "error", err)
 		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t1", "rescore_failed", err.Error(), false))
 	}
+	// Commit to session only after successful rescore so a transient failure leaves the state retryable.
+	sess.TailoredText = tailored
+	sess.State = stateT1Applied
 
 	previousScore := sess.ScoreResult.BestScore
 	newScoreTotal := newScore.Breakdown.Total()
@@ -479,9 +480,9 @@ func HandleSubmitTailorT2WithConfig(ctx context.Context, req *mcp.CallToolReques
 		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t2", "session_not_found",
 			"session not found — call load_jd first", false))
 	}
-	if sess.State != stateScored && sess.State != stateT1Applied {
+	if sess.State != stateT1Applied {
 		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t2", "invalid_state",
-			fmt.Sprintf("expected state %q or %q, got %q", stateScored, stateT1Applied, sess.State), false))
+			fmt.Sprintf("expected state %q, got %q", stateT1Applied, sess.State), false))
 	}
 
 	if deps == nil {

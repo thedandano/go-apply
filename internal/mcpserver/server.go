@@ -159,5 +159,6 @@ func NewServer() *server.MCPServer {
 
 // Serve starts the MCP stdio server.
 func Serve() error {
+	initRedactor()
 	return server.ServeStdio(NewServer())
 }
