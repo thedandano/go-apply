@@ -189,9 +189,19 @@ func (c *HTTPClient) doWithRetry(ctx context.Context, url string, body []byte, o
 				"error", err,
 			)
 			if attempt+1 < maxAttempts {
-				logger.Decision(ctx, c.log, "llm.retry", "retry", "http error", slog.Int("attempt", attempt+1))
+				c.log.DebugContext(ctx, "decision",
+					slog.String("name", "llm.retry"),
+					slog.String("chosen", "retry"),
+					slog.String("reason", "http error"),
+					slog.Int("attempt", attempt+1),
+				)
 			} else {
-				logger.Decision(ctx, c.log, "llm.retry", "abort", "http error", slog.Int("attempt", attempt+1))
+				c.log.DebugContext(ctx, "decision",
+					slog.String("name", "llm.retry"),
+					slog.String("chosen", "abort"),
+					slog.String("reason", "http error"),
+					slog.Int("attempt", attempt+1),
+				)
 			}
 			continue
 		}
@@ -209,12 +219,18 @@ func (c *HTTPClient) doWithRetry(ctx context.Context, url string, body []byte, o
 				"attempt", attempt+1,
 			)
 			if attempt+1 < maxAttempts {
-				logger.Decision(ctx, c.log, "llm.retry", "retry", "retryable status",
+				c.log.DebugContext(ctx, "decision",
+					slog.String("name", "llm.retry"),
+					slog.String("chosen", "retry"),
+					slog.String("reason", "retryable status"),
 					slog.Int("attempt", attempt+1),
 					slog.Int("status", resp.StatusCode),
 				)
 			} else {
-				logger.Decision(ctx, c.log, "llm.retry", "abort", "max attempts exceeded",
+				c.log.DebugContext(ctx, "decision",
+					slog.String("name", "llm.retry"),
+					slog.String("chosen", "abort"),
+					slog.String("reason", "max attempts exceeded"),
 					slog.Int("attempt", attempt+1),
 					slog.Int("status", resp.StatusCode),
 				)
@@ -225,7 +241,10 @@ func (c *HTTPClient) doWithRetry(ctx context.Context, url string, body []byte, o
 				bodySnippet = string(b)
 			}
 			_ = resp.Body.Close()
-			logger.Decision(ctx, c.log, "llm.retry", "abort", "non-retryable error",
+			c.log.DebugContext(ctx, "decision",
+				slog.String("name", "llm.retry"),
+				slog.String("chosen", "abort"),
+				slog.String("reason", "non-retryable error"),
 				slog.Int("status", resp.StatusCode),
 			)
 			c.log.ErrorContext(ctx, "llm: non-retryable error", "status", resp.StatusCode, "body", bodySnippet, "url", url)

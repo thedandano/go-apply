@@ -1,8 +1,6 @@
 package logger
 
 import (
-	"context"
-	"log/slog"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -243,93 +241,4 @@ func TestPayloadAttr(t *testing.T) {
 			t.Errorf("expected sk- secret to be redacted even when straddling truncation boundary, got: %q", result[:min(200, len(result))])
 		}
 	})
-}
-
-func TestDecision(t *testing.T) {
-	t.Parallel()
-
-	t.Run("logs debug record with expected fields", func(t *testing.T) {
-		t.Parallel()
-		records := make([]slog.Record, 0)
-		handler := &captureHandler{records: &records, level: slog.LevelDebug}
-		log := slog.New(handler)
-		ctx := context.Background()
-
-		Decision(ctx, log, "fetcher.source", "cache", "cache hit")
-
-		if len(records) != 1 {
-			t.Fatalf("expected 1 record, got %d", len(records))
-		}
-		r := records[0]
-		if r.Level != slog.LevelDebug {
-			t.Errorf("expected DEBUG level, got %v", r.Level)
-		}
-		if r.Message != "decision" {
-			t.Errorf("expected message 'decision', got %q", r.Message)
-		}
-		fields := recordAttrs(r)
-		if fields["name"] != "fetcher.source" {
-			t.Errorf("expected name='fetcher.source', got %q", fields["name"])
-		}
-		if fields["chosen"] != "cache" {
-			t.Errorf("expected chosen='cache', got %q", fields["chosen"])
-		}
-		if fields["reason"] != "cache hit" {
-			t.Errorf("expected reason='cache hit', got %q", fields["reason"])
-		}
-	})
-
-	t.Run("extra attrs are included", func(t *testing.T) {
-		t.Parallel()
-		records := make([]slog.Record, 0)
-		handler := &captureHandler{records: &records, level: slog.LevelDebug}
-		log := slog.New(handler)
-		ctx := context.Background()
-
-		Decision(ctx, log, "tailor.tier", "t1", "score below threshold",
-			slog.Int("score", 42),
-		)
-
-		if len(records) != 1 {
-			t.Fatalf("expected 1 record, got %d", len(records))
-		}
-		fields := recordAttrs(records[0])
-		if fields["score"] != "42" {
-			t.Errorf("expected score=42, got %q", fields["score"])
-		}
-	})
-
-	t.Run("smoke test does not panic", func(t *testing.T) {
-		t.Parallel()
-		log := slog.New(slog.NewTextHandler(&strings.Builder{}, nil))
-		Decision(context.Background(), log, "x", "y", "z")
-	})
-}
-
-// captureHandler captures slog.Records for inspection in tests.
-type captureHandler struct {
-	records *[]slog.Record
-	level   slog.Level
-}
-
-func (h *captureHandler) Enabled(_ context.Context, level slog.Level) bool {
-	return level >= h.level
-}
-
-func (h *captureHandler) Handle(_ context.Context, r slog.Record) error { //nolint:gocritic // hugeParam: slog.Handler interface requires slog.Record by value
-	*h.records = append(*h.records, r.Clone())
-	return nil
-}
-
-func (h *captureHandler) WithAttrs(_ []slog.Attr) slog.Handler { return h }
-func (h *captureHandler) WithGroup(_ string) slog.Handler      { return h }
-
-// recordAttrs converts a slog.Record's attrs to a string map for easy assertions.
-func recordAttrs(r slog.Record) map[string]string { //nolint:gocritic // hugeParam: slog.Handler interface requires slog.Record by value
-	m := make(map[string]string)
-	r.Attrs(func(a slog.Attr) bool {
-		m[a.Key] = a.Value.String()
-		return true
-	})
-	return m
 }
