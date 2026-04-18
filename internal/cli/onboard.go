@@ -106,6 +106,7 @@ Use --reset to clear the existing profile database and inputs/ directory.`,
 			if err != nil {
 				return fmt.Errorf("load defaults: %w", err)
 			}
+			cfg.ApplyOverrides(defaults)
 
 			log := slog.Default()
 			embedderClient := llm.New(cfg.Embedder.BaseURL, cfg.Embedder.Model, cfg.Embedder.APIKey, defaults, log)
