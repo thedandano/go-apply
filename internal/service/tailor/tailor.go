@@ -62,7 +62,7 @@ func (s *Service) TailorResume(ctx context.Context, input *model.TailorInput) (m
 	runTier2 := input.AccomplishmentsText != "" && input.Options.MaxTier2BulletRewrites > 0
 	if !runTier2 {
 		if input.AccomplishmentsText != "" {
-			s.log.DebugContext(ctx, "tailor: applying tier-1 only — budget is zero")
+			s.log.DebugContext(ctx, "tailor: tier-1 only — bullet rewrites disabled (MaxTier2BulletRewrites=0)")
 		} else {
 			s.log.DebugContext(ctx, "tailor: applying tier-1 only — no accomplishments text")
 		}

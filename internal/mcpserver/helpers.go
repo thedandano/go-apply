@@ -62,8 +62,6 @@ func loadDeps() (*config.Config, pipeline.ApplyConfig, error) {
 	scorerSvc := scorer.New(defaults)
 	fetcherSvc := fetcher.NewFallback(defaults, log)
 
-	log.DebugContext(context.Background(), "mcp: keyword extraction delegated to MCP host")
-
 	var augmentSvc port.Augmenter
 	if cfg.Embedder.BaseURL != "" && cfg.Embedder.Model != "" {
 		profileRepo, profileErr := newSQLiteProfile(cfg)
