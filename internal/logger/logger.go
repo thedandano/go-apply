@@ -3,6 +3,7 @@ package logger
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -28,6 +29,17 @@ type Options struct {
 	StderrLevel slog.Level // Level for stderr handler
 }
 
+func makeHandler(w io.Writer, level slog.Level, useJSON bool) slog.Handler {
+	if useJSON {
+		return slog.NewJSONHandler(w, &slog.HandlerOptions{Level: level})
+	}
+	return charmlog.NewWithOptions(w, charmlog.Options{
+		Level:           charmlogLevelFromSlog(level),
+		ReportTimestamp: true,
+		TimeFormat:      "2006-01-02 15:04:05",
+	})
+}
+
 // New creates a *slog.Logger writing JSON lines to a daily log file in opts.LogDir.
 //
 // File naming: go-apply-2006-01-02.log (one per day; multiple invocations append)
@@ -35,8 +47,17 @@ type Options struct {
 // Retention: keeps the last maxLogFiles files, prunes older ones on startup
 // Fallback: if LogDir is unwritable → stderr-only logger at WARN+, no error returned
 func New(opts Options) (*slog.Logger, func(), error) {
+	// Read env var overrides
+	useJSON := strings.EqualFold(os.Getenv("LOG_FORMAT"), "json")
+	fileLevel := opts.FileLevel
+	stderrLevel := opts.StderrLevel
+	if strings.EqualFold(os.Getenv("LOG_LEVEL"), "debug") {
+		fileLevel = slog.LevelDebug
+		stderrLevel = slog.LevelDebug
+	}
+
 	if err := os.MkdirAll(opts.LogDir, logDirPerm); err != nil {
-		log := stderrOnly(opts.StderrLevel)
+		log := stderrOnly(stderrLevel)
 		log.Warn("log dir unwritable, falling back to stderr only", "dir", opts.LogDir, "error", err)
 		return log, func() {}, nil
 	}
@@ -49,22 +70,14 @@ func New(opts Options) (*slog.Logger, func(), error) {
 
 	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, logFilePerm) // #nosec G304 -- logPath built from os.UserHomeDir() + fixed suffix, not user input
 	if err != nil {
-		log := stderrOnly(opts.StderrLevel)
+		log := stderrOnly(stderrLevel)
 		log.Warn("failed to open log file, falling back to stderr only", "path", logPath, "error", err)
 		return log, func() {}, nil
 	}
 
 	log := slog.New(&multiHandler{
-		file: charmlog.NewWithOptions(f, charmlog.Options{
-			Level:           charmlogLevelFromSlog(opts.FileLevel),
-			ReportTimestamp: true,
-			TimeFormat:      "2006-01-02 15:04:05",
-		}),
-		stderr: charmlog.NewWithOptions(os.Stderr, charmlog.Options{
-			Level:           charmlogLevelFromSlog(opts.StderrLevel),
-			ReportTimestamp: true,
-			TimeFormat:      "2006-01-02 15:04:05",
-		}),
+		file:   makeHandler(f, fileLevel, useJSON),
+		stderr: makeHandler(os.Stderr, stderrLevel, useJSON),
 	})
 
 	var once sync.Once
@@ -72,11 +85,8 @@ func New(opts Options) (*slog.Logger, func(), error) {
 }
 
 func stderrOnly(level slog.Level) *slog.Logger {
-	return slog.New(charmlog.NewWithOptions(os.Stderr, charmlog.Options{
-		Level:           charmlogLevelFromSlog(level),
-		ReportTimestamp: true,
-		TimeFormat:      "2006-01-02 15:04:05",
-	}))
+	useJSON := strings.EqualFold(os.Getenv("LOG_FORMAT"), "json")
+	return slog.New(makeHandler(os.Stderr, level, useJSON))
 }
 
 // charmlogLevelFromSlog converts slog.Level to charmlog.Level.

@@ -1,6 +1,8 @@
 package logger_test
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -246,5 +248,87 @@ func TestNew_StderrRespectsLevel(t *testing.T) {
 	}
 	if !strings.Contains(fileContent, "warn message to stderr") {
 		t.Error("WARN message must appear in file when FileLevel is DEBUG")
+	}
+}
+
+func TestNew_JSONFormat_ProducesJSONLines(t *testing.T) {
+	t.Setenv("LOG_FORMAT", "json")
+	dir := t.TempDir()
+	log, cleanup, err := logger.New(logger.Options{
+		LogDir:      dir,
+		FileLevel:   slog.LevelInfo,
+		StderrLevel: slog.LevelWarn,
+	})
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	defer cleanup()
+	log.Info("json test", "k", "v")
+	cleanup()
+
+	entries, _ := os.ReadDir(dir)
+	if len(entries) == 0 {
+		t.Fatal("no log file created")
+	}
+	data, _ := os.ReadFile(filepath.Join(dir, entries[0].Name()))
+	content := strings.TrimSpace(string(data))
+	if !strings.HasPrefix(content, "{") {
+		t.Errorf("expected JSON line, got: %s", content)
+	}
+	var record map[string]any
+	if err := json.Unmarshal([]byte(content), &record); err != nil {
+		t.Errorf("log line is not valid JSON: %v\nline: %s", err, content)
+	}
+	if record["msg"] != "json test" {
+		t.Errorf("expected msg='json test', got: %v", record["msg"])
+	}
+}
+
+func TestNew_JSONFormat_ContainsStructuredAttrs(t *testing.T) {
+	t.Setenv("LOG_FORMAT", "json")
+	dir := t.TempDir()
+	log, cleanup, _ := logger.New(logger.Options{
+		LogDir:      dir,
+		FileLevel:   slog.LevelInfo,
+		StderrLevel: slog.LevelWarn,
+	})
+	defer cleanup()
+	log.Info("attr test", "mykey", "myvalue")
+	cleanup()
+
+	entries, _ := os.ReadDir(dir)
+	if len(entries) == 0 {
+		t.Fatal("no log file created")
+	}
+	data, _ := os.ReadFile(filepath.Join(dir, entries[0].Name()))
+	var record map[string]any
+	if err := json.Unmarshal(bytes.TrimSpace(data), &record); err != nil {
+		t.Fatalf("not valid JSON: %v", err)
+	}
+	if record["mykey"] != "myvalue" {
+		t.Errorf("expected mykey=myvalue, got: %v", record["mykey"])
+	}
+}
+
+func TestNew_DebugLevel_EnvOverride(t *testing.T) {
+	t.Setenv("LOG_LEVEL", "debug")
+	dir := t.TempDir()
+	// Pass Info level via opts — env should override to Debug
+	log, cleanup, _ := logger.New(logger.Options{
+		LogDir:      dir,
+		FileLevel:   slog.LevelInfo,
+		StderrLevel: slog.LevelWarn,
+	})
+	defer cleanup()
+	log.Debug("should appear")
+	cleanup()
+
+	entries, _ := os.ReadDir(dir)
+	if len(entries) == 0 {
+		t.Fatal("no log file created")
+	}
+	data, _ := os.ReadFile(filepath.Join(dir, entries[0].Name()))
+	if !strings.Contains(string(data), "should appear") {
+		t.Error("DEBUG record must appear when LOG_LEVEL=debug, even if opts.FileLevel=Info")
 	}
 }
