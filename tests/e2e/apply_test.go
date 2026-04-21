@@ -3,6 +3,7 @@
 package e2e_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"os"
@@ -12,9 +13,10 @@ import (
 	"testing"
 )
 
-// TestApplyHeadless_GoldenPath is the permanent integration smoke test.
-// Written in Task 0 — stays RED until Epic 3 headless pipeline is complete.
+// TestApplyHeadless_GoldenPath was the original smoke test (Task 0, RED-by-design).
+// Superseded by TestRun_HappyPath which uses the M4 stub harness.
 func TestApplyHeadless_GoldenPath(t *testing.T) {
+	t.Skip("superseded by TestRun_HappyPath")
 	binary := buildBinary(t)
 
 	jdPath := filepath.Join("testdata", "jd_sample.txt")
@@ -72,6 +74,76 @@ func TestRun_GuardsUnonboarded(t *testing.T) {
 	// t.TempDir() paths that include the test name "TestRun_GuardsUnonboarded".
 	if !strings.Contains(strings.ToLower(string(out)), "no resumes found") {
 		t.Errorf("expected output to contain 'no resumes found' (onboard guard message), got:\n%s", out)
+	}
+}
+
+// TestRun_HappyPath is the regression baseline: onboard with all three fixture docs,
+// run against a JD, and assert the pipeline completes successfully.
+// Invariants captured:
+//   - exit code 0 and status == "success"
+//   - best_score > 0 (scoring ran and matched keywords)
+//   - keywords.required non-empty (keyword extraction ran)
+//   - stage banners present in log (acquire_jd, extract_keywords, score_resumes)
+//   - zero ERROR records in log
+func TestRun_HappyPath(t *testing.T) {
+	binary := buildBinary(t)
+
+	orchStub := newOrchestratorStub(t)
+	defer orchStub.Close()
+	embStub := newEmbedderStub(t)
+	defer embStub.Close()
+
+	env := seedXDGEnv(t, orchStub.URL, embStub.URL)
+
+	// Step 1: onboard with all three fixture docs.
+	onboardCmd := exec.Command(binary, "onboard",
+		"--resume", filepath.Join("testdata", "resume_backend.txt"),
+		"--skills", filepath.Join("testdata", "skills.md"),
+		"--accomplishments", filepath.Join("testdata", "accomplishments.md"),
+	)
+	onboardCmd.Env = env.Environ
+	if out, err := onboardCmd.CombinedOutput(); err != nil {
+		t.Fatalf("onboard failed: %v\noutput: %s", err, out)
+	}
+
+	// Step 2: run against a JD; capture stdout (JSON result) and stderr separately.
+	jdText := "Senior Backend Engineer at Acme Corp. Required: Go, Kubernetes, PostgreSQL, gRPC, Docker."
+	var stdout, stderr bytes.Buffer
+	runCmd := exec.Command(binary, "run", "--text", jdText)
+	runCmd.Env = env.Environ
+	runCmd.Stdout = &stdout
+	runCmd.Stderr = &stderr
+	if err := runCmd.Run(); err != nil {
+		t.Fatalf("run failed: %v\nstdout: %s\nstderr: %s", err, stdout.String(), stderr.String())
+	}
+
+	// Assert JSON result.
+	var result map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatalf("stdout is not valid JSON: %v\nstdout: %s", err, stdout.String())
+	}
+	if result["status"] != "success" {
+		t.Errorf("status = %v, want success", result["status"])
+	}
+	const wantBestScore = 71.5 // deterministic: 5/7 required keywords + experience years
+	const scoreTolerance = 0.5
+	bestScore, _ := result["best_score"].(float64)
+	if bestScore < wantBestScore-scoreTolerance || bestScore > wantBestScore+scoreTolerance {
+		t.Errorf("best_score = %.2f, want %.2f ± %.2f", bestScore, wantBestScore, scoreTolerance)
+	}
+	if kw, ok := result["keywords"].(map[string]any); !ok {
+		t.Error("keywords field missing from result")
+	} else if req, _ := kw["required"].([]any); len(req) == 0 {
+		t.Error("keywords.required is empty — keyword extraction did not run")
+	}
+
+	// Assert log records.
+	logs := readLogFile(t, env.StateDir)
+	requireNoErrors(t, logs)
+	for _, stage := range []string{"acquire_jd", "extract_keywords", "score_resumes"} {
+		if !hasLogRecord(logs, "stage", stage) {
+			t.Errorf("no log record with stage=%q found — stage banner missing", stage)
+		}
 	}
 }
 
