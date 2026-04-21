@@ -1,0 +1,10 @@
+Dear Hiring Manager,
+
+I am excited to apply for the Senior Backend Engineer position at Acme Corp. With seven years building distributed systems in Go, combined with extensive experience in Kubernetes orchestration, PostgreSQL, and gRPC API design, I am confident I will make an immediate impact on your platform.
+
+At previous roles I led a zero-downtime migration of a 500GB PostgreSQL database to a multi-region setup that improved availability to 99.97% and saved $200K annually. I also drove the adoption of OpenTelemetry-based distributed tracing across 20 Go microservices, cutting production incident detection time from 45 minutes to under 8 minutes.
+
+I look forward to bringing these observability and microservices skills to Acme Corp.
+
+Sincerely,
+John Doe

@@ -55,11 +55,14 @@ func TestResumeRepository_ListResumes_FiltersExtensions(t *testing.T) {
 	}
 }
 
-func TestResumeRepository_ListResumes_ErrorOnMissingDir(t *testing.T) {
+func TestResumeRepository_ListResumes_EmptyOnMissingDir(t *testing.T) {
 	repo := fs.NewResumeRepository("/nonexistent/path")
-	_, err := repo.ListResumes()
-	if err == nil {
-		t.Fatal("expected error for missing inputs dir, got nil")
+	files, err := repo.ListResumes()
+	if err != nil {
+		t.Fatalf("expected nil error for missing inputs dir (treated as no resumes), got: %v", err)
+	}
+	if len(files) != 0 {
+		t.Fatalf("expected empty list for missing inputs dir, got %d files", len(files))
 	}
 }
 
