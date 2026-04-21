@@ -6,43 +6,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 )
-
-// TestApplyHeadless_GoldenPath was the original smoke test (Task 0, RED-by-design).
-// Superseded by TestRun_HappyPath.
-func TestApplyHeadless_GoldenPath(t *testing.T) {
-	t.Skip("superseded by TestRun_HappyPath")
-	binary := buildBinary(t)
-
-	jdPath := filepath.Join("testdata", "jd_sample.txt")
-	jdBytes, err := os.ReadFile(jdPath)
-	if err != nil {
-		t.Fatalf("read jd fixture: %v", err)
-	}
-
-	cmd := exec.Command(binary, "run", "--text", string(jdBytes))
-	cmd.Env = append(os.Environ(), "GO_APPLY_API_KEY=test-key")
-	out, err := cmd.Output()
-	if err != nil {
-		t.Fatalf("go-apply run failed: %v\nstderr: %s", err, cmd.Stderr)
-	}
-
-	var result map[string]any
-	if err := json.Unmarshal(out, &result); err != nil {
-		t.Fatalf("output is not valid JSON: %v\nOutput: %s", err, out)
-	}
-	if result["status"] != "success" {
-		t.Errorf("status = %v, want success", result["status"])
-	}
-	if result["best_score"] == nil || result["best_score"].(float64) == 0 {
-		t.Error("best_score is 0 or missing — scoring did not run")
-	}
-}
 
 // TestRun_GuardsUnonboarded asserts that running go-apply run against an empty
 // profile (no prior onboard) exits non-zero and tells the user to onboard first.
