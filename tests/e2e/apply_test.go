@@ -14,7 +14,7 @@ import (
 )
 
 // TestApplyHeadless_GoldenPath was the original smoke test (Task 0, RED-by-design).
-// Superseded by TestRun_HappyPath which uses the M4 stub harness.
+// Superseded by TestRun_HappyPath.
 func TestApplyHeadless_GoldenPath(t *testing.T) {
 	t.Skip("superseded by TestRun_HappyPath")
 	binary := buildBinary(t)
