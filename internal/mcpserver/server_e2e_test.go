@@ -38,7 +38,7 @@ func setupTestEnv(t *testing.T) {
 		t.Fatalf("write config.yaml: %v", err)
 	}
 
-	// Pre-create data subdirectories so SQLite and the resume repository don't
+	// Pre-create data subdirectories so the resume repository doesn't
 	// fail on missing parent directories.
 	for _, sub := range []string{"go-apply", filepath.Join("go-apply", "inputs")} {
 		if err := os.MkdirAll(filepath.Join(dataBase, sub), 0o700); err != nil {

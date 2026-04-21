@@ -17,7 +17,6 @@ internal/service/fetcher/     JD web fetching (chromedp primary, goquery fallbac
 internal/service/tailor/      Resume tailoring (tier1 keywords, tier2 bullet rewrites)
 internal/service/coverletter/ Cover letter generation
 internal/repository/fs/       File system repos (resume files, JD cache)
-internal/repository/sqlite/   SQLite + sqlite-vec (profile embeddings)
 internal/presenter/headless/  JSON output (agent/headless mode)
 internal/presenter/mcp/       MCP tool result accumulator
 tui/                          bubbletea TUI (Epic 6)
@@ -36,7 +35,7 @@ To swap any external dependency (LLM provider, vector store, TUI framework):
 
 ```bash
 make test-unit        # fast, no I/O — run before every commit
-make test-integration # real SQLite + FS — run before every PR
+make test-integration # FS integration tests — run before every PR
 make test-e2e         # builds binary, runs full CLI — run before every PR
 ```
 

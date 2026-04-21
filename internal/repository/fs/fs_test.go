@@ -55,6 +55,34 @@ func TestResumeRepository_ListResumes_FiltersExtensions(t *testing.T) {
 	}
 }
 
+// TestResumeRepository_ListResumes_IgnoresDataDirRoot verifies the source-scoped
+// layout: skills.md and accomplishments-0.md placed in the data-dir root are NOT
+// returned by ListResumes, which reads only from the inputs/ subdirectory.
+func TestResumeRepository_ListResumes_IgnoresDataDirRoot(t *testing.T) {
+	dir := t.TempDir()
+	inputsDir := filepath.Join(dir, "inputs")
+	os.MkdirAll(inputsDir, config.DirPerm) //nolint:errcheck
+
+	// Place ancillary docs at data-dir root (not in inputs/).
+	os.WriteFile(filepath.Join(dir, "skills.md"), []byte("# Skills"), config.FilePerm)          //nolint:errcheck
+	os.WriteFile(filepath.Join(dir, "accomplishments-0.md"), []byte("# Wins"), config.FilePerm) //nolint:errcheck
+
+	// Place one real resume in inputs/.
+	os.WriteFile(filepath.Join(inputsDir, "resume.txt"), []byte("resume text"), config.FilePerm) //nolint:errcheck
+
+	repo := fs.NewResumeRepository(dir)
+	resumes, err := repo.ListResumes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resumes) != 1 {
+		t.Errorf("expected 1 resume, got %d — skills/accomplishments must not be returned", len(resumes))
+	}
+	if len(resumes) == 1 && resumes[0].Label != "resume" {
+		t.Errorf("expected label %q, got %q", "resume", resumes[0].Label)
+	}
+}
+
 func TestResumeRepository_ListResumes_EmptyOnMissingDir(t *testing.T) {
 	repo := fs.NewResumeRepository("/nonexistent/path")
 	files, err := repo.ListResumes()
