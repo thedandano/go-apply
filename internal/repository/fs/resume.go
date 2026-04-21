@@ -2,7 +2,9 @@
 package fs
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,6 +42,9 @@ var resumeExts = map[string]bool{
 func (r *ResumeRepository) ListResumes() ([]model.ResumeFile, error) {
 	entries, err := os.ReadDir(r.inputsDir)
 	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil // inputs dir not yet created — treat as no resumes
+		}
 		return nil, fmt.Errorf("read inputs dir %s: %w", r.inputsDir, err)
 	}
 	resumes := make([]model.ResumeFile, 0, len(entries))
