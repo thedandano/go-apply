@@ -10,6 +10,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/thedandano/go-apply/internal/config"
 )
 
 // testEnv holds XDG-sandboxed directory paths and the subprocess env slice
@@ -34,7 +36,7 @@ func seedXDGEnv(t *testing.T, orchestratorURL, embedderURL string) *testEnv {
 	stateDir := t.TempDir()
 
 	goApplyCfgDir := filepath.Join(configDir, "go-apply")
-	if err := os.MkdirAll(goApplyCfgDir, 0o700); err != nil {
+	if err := os.MkdirAll(goApplyCfgDir, config.DirPerm); err != nil {
 		t.Fatalf("create config dir: %v", err)
 	}
 
@@ -49,7 +51,7 @@ embedder:
 embedding_dim: 2048
 `, orchestratorURL, embedderURL)
 
-	if err := os.WriteFile(filepath.Join(goApplyCfgDir, "config.yaml"), []byte(cfgYAML), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(goApplyCfgDir, "config.yaml"), []byte(cfgYAML), config.FilePerm); err != nil {
 		t.Fatalf("write config.yaml: %v", err)
 	}
 
