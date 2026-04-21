@@ -141,6 +141,7 @@ func (s *Service) retrieveByVector(ctx context.Context, keywords []string) ([]re
 			if c.Weight < threshold {
 				continue
 			}
+			s.log.DebugContext(ctx, "vector match", "keyword", keyword, "source", c.SourceDoc, "similarity", c.Weight)
 			matchedTerms = append(matchedTerms, c.Term)
 			if !seen[c.SourceDoc] {
 				seen[c.SourceDoc] = true
