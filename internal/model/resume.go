@@ -27,10 +27,12 @@ type TailorResult struct {
 	// BulletsAttempted is the number of keyword-matching bullets sent to the LLM
 	// during a tier-2 pass. When > 0 and RewrittenBullets is empty, every LLM call
 	// failed (vs. simply no bullets matching keywords).
-	BulletsAttempted int         `json:"bullets_attempted,omitempty"`
-	OutputPath       string      `json:"output_path,omitempty"`
-	NewScore         ScoreResult `json:"new_score"`
-	TailoredText     string      `json:"-"` // post-cascade text for accurate re-score delta; not serialized
+	BulletsAttempted int          `json:"bullets_attempted,omitempty"`
+	OutputPath       string       `json:"output_path,omitempty"`
+	NewScore         ScoreResult  `json:"new_score"`
+	TailoredText     string       `json:"-"`                     // post-cascade text for accurate re-score delta; not serialized
+	Tier1Text        string       `json:"tier1_text,omitempty"`  // output of tier-1 keyword injection, always set when T1 runs
+	Tier1Score       *ScoreResult `json:"tier1_score,omitempty"` // score of tier-1 text; set by pipeline after TailorResume returns
 }
 
 // ResumeChanges describes the mutations the tailor service applied to a resume.

@@ -666,6 +666,24 @@ func (p *ApplyPipeline) runTailorStep(
 	}
 
 	tailorResult.NewScore = scoreAfter
+
+	// Rescore the tier-1 text when available so callers can measure T1→T2 improvement.
+	if tailorResult.Tier1Text != "" {
+		tier1Score, err := p.scorer.Score(&model.ScorerInput{
+			ResumeText:     tailorResult.Tier1Text,
+			ResumeLabel:    bestFile.Label,
+			ResumePath:     bestFile.Path,
+			JD:             *jd,
+			CandidateYears: req.Config.YearsOfExperience,
+			RequiredYears:  jd.RequiredYears,
+			SeniorityMatch: seniorityMatch,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("score tier-1 resume: %w", err)
+		}
+		tailorResult.Tier1Score = &tier1Score
+	}
+
 	return &tailorResult, nil
 }
 

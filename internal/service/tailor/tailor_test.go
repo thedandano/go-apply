@@ -118,6 +118,58 @@ Python
 	}
 }
 
+// TestTailorResume_Tier1Text_NonEmpty asserts that Tier1Text is set after T1 runs (M5.4a).
+func TestTailorResume_Tier1Text_NonEmpty(t *testing.T) {
+	defaults := defaultsForTest(t)
+	defaults.Tailor.MaxTier2BulletRewrites = 0 // T2 disabled
+
+	input := &model.TailorInput{
+		Resume:     model.ResumeFile{Label: "main"},
+		ResumeText: "## Skills\nPython\n\n## Experience\n\n- Built systems\n",
+		JD: model.JDData{
+			Required: []string{"Golang"},
+		},
+		Options: model.TailorOptions{MaxTier2BulletRewrites: 0},
+	}
+
+	svc := newTestService(&stubLLMClient{response: "no-op"}, defaults)
+	result, err := svc.TailorResume(context.Background(), input)
+	if err != nil {
+		t.Fatalf("TailorResume: %v", err)
+	}
+	if result.Tier1Text == "" {
+		t.Error("Tier1Text must be non-empty when T1 runs")
+	}
+	if !strings.Contains(result.Tier1Text, "Golang") {
+		t.Errorf("Tier1Text should contain the injected keyword 'Golang'; got:\n%s", result.Tier1Text)
+	}
+}
+
+// TestTailorResume_Tier1Score_NilFromTailor asserts that Tier1Score is nil when set
+// by the tailor service alone — only the pipeline sets it (M5.4b).
+func TestTailorResume_Tier1Score_NilFromTailor(t *testing.T) {
+	defaults := defaultsForTest(t)
+	defaults.Tailor.MaxTier2BulletRewrites = 0
+
+	input := &model.TailorInput{
+		Resume:     model.ResumeFile{Label: "main"},
+		ResumeText: "## Skills\nPython\n\n## Experience\n\n- Built systems\n",
+		JD: model.JDData{
+			Required: []string{"Golang"},
+		},
+		Options: model.TailorOptions{MaxTier2BulletRewrites: 0},
+	}
+
+	svc := newTestService(&stubLLMClient{response: "no-op"}, defaults)
+	result, err := svc.TailorResume(context.Background(), input)
+	if err != nil {
+		t.Fatalf("TailorResume: %v", err)
+	}
+	if result.Tier1Score != nil {
+		t.Error("Tier1Score must be nil when returned from the tailor service directly — only the pipeline sets it")
+	}
+}
+
 func TestTailorResume_Tier2RewritesBullets(t *testing.T) {
 	defaults := defaultsForTest(t)
 	defaults.Tailor.MaxTier2BulletRewrites = 5

@@ -75,6 +75,21 @@ func (s *stubTailorForApply) TailorResume(_ context.Context, _ *model.TailorInpu
 	}, nil
 }
 
+// stubTailorWithTier1Text satisfies port.Tailor and returns a non-empty Tier1Text so
+// the pipeline can rescore it and set Tier1Score (M5.4c).
+type stubTailorWithTier1Text struct{}
+
+var _ port.Tailor = (*stubTailorWithTier1Text)(nil)
+
+func (s *stubTailorWithTier1Text) TailorResume(_ context.Context, _ *model.TailorInput) (model.TailorResult, error) {
+	return model.TailorResult{
+		TierApplied:   model.TierKeyword,
+		AddedKeywords: []string{"golang"},
+		TailoredText:  "tailored resume text golang kubernetes docker python",
+		Tier1Text:     "tier1 resume text golang kubernetes docker python",
+	}, nil
+}
+
 // stubTailorError satisfies port.Tailor and always returns an error to exercise degradation.
 type stubTailorError struct{}
 
@@ -461,6 +476,66 @@ func TestApplyPipeline_OrchestratorError_ReturnsError(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error when orchestrator fails keyword extraction, got nil")
+	}
+}
+
+// TestApplyPipeline_TailorStep_Tier1ScoreSet asserts that Tier1Score is non-nil after
+// the pipeline rescores the tier-1 text returned by TailorResume (M5.4c).
+func TestApplyPipeline_TailorStep_Tier1ScoreSet(t *testing.T) {
+	llmSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
+			"choices": []map[string]any{
+				{"message": map[string]any{
+					"content": `{"title":"SWE","company":"Acme","required":["python","golang","kubernetes"],"preferred":["docker"],"location":"Remote","seniority":"senior","required_years":3}`,
+				}},
+			},
+		})
+	}))
+	defer llmSrv.Close()
+
+	pres := &capturingPresenter{}
+	cfg := &config.Config{
+		Orchestrator:      config.LLMProviderConfig{BaseURL: llmSrv.URL, Model: "test", APIKey: "test"},
+		YearsOfExperience: 5,
+		DefaultSeniority:  "senior",
+	}
+	defaults, err := config.LoadDefaults()
+	if err != nil {
+		t.Fatalf("LoadDefaults: %v", err)
+	}
+	llmClient := llm.New(llmSrv.URL, "test", "test", defaults, nil)
+
+	pl := pipeline.NewApplyPipeline(&pipeline.ApplyConfig{
+		Fetcher:   &stubJDFetcher{},
+		LLM:       llmClient,
+		Scorer:    scorer.New(defaults),
+		CLGen:     nil,
+		Resumes:   &stubResumeRepo{},
+		Loader:    &stubDocumentLoader{},
+		AppRepo:   &stubAppRepo{},
+		Presenter: pres,
+		Defaults:  defaults,
+		Tailor:    &stubTailorWithTier1Text{},
+	})
+
+	err = pl.Run(context.Background(), pipeline.ApplyRequest{
+		URLOrText:           `We are hiring a senior Go engineer. Required: python, golang, kubernetes. Preferred: docker.`,
+		IsText:              true,
+		Channel:             model.ChannelCold,
+		Config:              cfg,
+		AccomplishmentsText: "accomplishments text",
+	})
+	if err != nil {
+		t.Fatalf("pipeline error: %v", err)
+	}
+	if pres.result == nil {
+		t.Fatal("expected result, got nil")
+	}
+	if pres.result.Cascade == nil {
+		t.Fatal("Cascade is nil — tailor step did not run")
+	}
+	if pres.result.Cascade.Tier1Score == nil {
+		t.Error("Tier1Score must be non-nil after the pipeline rescores the tier-1 text")
 	}
 }
 
