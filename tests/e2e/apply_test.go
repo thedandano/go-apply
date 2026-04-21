@@ -6,43 +6,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 )
-
-// TestApplyHeadless_GoldenPath was the original smoke test (Task 0, RED-by-design).
-// Superseded by TestRun_HappyPath.
-func TestApplyHeadless_GoldenPath(t *testing.T) {
-	t.Skip("superseded by TestRun_HappyPath")
-	binary := buildBinary(t)
-
-	jdPath := filepath.Join("testdata", "jd_sample.txt")
-	jdBytes, err := os.ReadFile(jdPath)
-	if err != nil {
-		t.Fatalf("read jd fixture: %v", err)
-	}
-
-	cmd := exec.Command(binary, "run", "--text", string(jdBytes))
-	cmd.Env = append(os.Environ(), "GO_APPLY_API_KEY=test-key")
-	out, err := cmd.Output()
-	if err != nil {
-		t.Fatalf("go-apply run failed: %v\nstderr: %s", err, cmd.Stderr)
-	}
-
-	var result map[string]any
-	if err := json.Unmarshal(out, &result); err != nil {
-		t.Fatalf("output is not valid JSON: %v\nOutput: %s", err, out)
-	}
-	if result["status"] != "success" {
-		t.Errorf("status = %v, want success", result["status"])
-	}
-	if result["best_score"] == nil || result["best_score"].(float64) == 0 {
-		t.Error("best_score is 0 or missing — scoring did not run")
-	}
-}
 
 // TestRun_GuardsUnonboarded asserts that running go-apply run against an empty
 // profile (no prior onboard) exits non-zero and tells the user to onboard first.
@@ -144,6 +112,74 @@ func TestRun_HappyPath(t *testing.T) {
 		if !hasLogRecord(logs, "stage", stage) {
 			t.Errorf("no log record with stage=%q found — stage banner missing", stage)
 		}
+	}
+}
+
+// TestRun_VectorCacheBehavior asserts keyword-vector cache hit/miss semantics:
+//   - First run: each JD keyword produces a "keyword vector cache miss" log record.
+//   - Second run (same JD, same XDG env): each keyword produces a "keyword vector cache hit"
+//     record and zero cache-miss records.
+//
+// Invariant: the SQLite keyword-vector cache persists across process invocations.
+func TestRun_VectorCacheBehavior(t *testing.T) {
+	binary := buildBinary(t)
+
+	orchStub := newOrchestratorStub(t)
+	defer orchStub.Close()
+	embStub := newEmbedderStub(t)
+	defer embStub.Close()
+
+	env := seedXDGEnv(t, orchStub.URL, embStub.URL)
+
+	// Onboard so the pipeline can proceed past the guard.
+	onboardCmd := exec.Command(binary, "onboard",
+		"--resume", filepath.Join("testdata", "resume_backend.txt"),
+		"--skills", filepath.Join("testdata", "skills.md"),
+		"--accomplishments", filepath.Join("testdata", "accomplishments.md"),
+	)
+	onboardCmd.Env = env.Environ
+	if out, err := onboardCmd.CombinedOutput(); err != nil {
+		t.Fatalf("onboard failed: %v\noutput: %s", err, out)
+	}
+
+	// Augmentation only runs when --accomplishments is supplied.
+	// Both runs share the same XDG env so the vector cache persists between them.
+	jdText := "Senior Backend Engineer at Acme Corp. Required: Go, Kubernetes, PostgreSQL, gRPC, Docker."
+	accomplishmentsPath := filepath.Join("testdata", "accomplishments.md")
+
+	doRun := func() {
+		t.Helper()
+		cmd := exec.Command(binary, "run", "--text", jdText, "--accomplishments", accomplishmentsPath)
+		cmd.Env = env.Environ
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("run failed: %v\noutput: %s", err, out)
+		}
+	}
+
+	// Record log count after onboard so we can slice per-run records later.
+	onboardCount := len(readLogFile(t, env.StateDir))
+
+	// First run: cold cache — expect misses, no hits.
+	doRun()
+	allAfterRun1 := readLogFile(t, env.StateDir)
+	run1Logs := allAfterRun1[onboardCount:]
+	if !hasLogRecord(run1Logs, "msg", "keyword vector cache miss") {
+		t.Error("first run: expected at least one 'keyword vector cache miss' record")
+	}
+	if hasLogRecord(run1Logs, "msg", "keyword vector cache hit") {
+		t.Error("first run: unexpected 'keyword vector cache hit' — cache should be cold")
+	}
+
+	// Second run: warm cache — expect hits, no misses.
+	run1Count := len(allAfterRun1)
+	doRun()
+	allAfterRun2 := readLogFile(t, env.StateDir)
+	run2Logs := allAfterRun2[run1Count:]
+	if !hasLogRecord(run2Logs, "msg", "keyword vector cache hit") {
+		t.Error("second run: expected at least one 'keyword vector cache hit' record")
+	}
+	if hasLogRecord(run2Logs, "msg", "keyword vector cache miss") {
+		t.Error("second run: unexpected 'keyword vector cache miss' — vectors should be cached")
 	}
 }
 
