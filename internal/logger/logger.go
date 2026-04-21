@@ -29,8 +29,6 @@ type Options struct {
 	StderrLevel slog.Level // Level for stderr handler
 }
 
-// makeHandler creates a handler for the specified writer.
-// If useJSON is true, returns slog.JSONHandler; otherwise, returns charmbracelet/log handler.
 func makeHandler(w io.Writer, level slog.Level, useJSON bool) slog.Handler {
 	if useJSON {
 		return slog.NewJSONHandler(w, &slog.HandlerOptions{Level: level})
@@ -50,10 +48,10 @@ func makeHandler(w io.Writer, level slog.Level, useJSON bool) slog.Handler {
 // Fallback: if LogDir is unwritable → stderr-only logger at WARN+, no error returned
 func New(opts Options) (*slog.Logger, func(), error) {
 	// Read env var overrides
-	useJSON := os.Getenv("LOG_FORMAT") == "json"
+	useJSON := strings.EqualFold(os.Getenv("LOG_FORMAT"), "json")
 	fileLevel := opts.FileLevel
 	stderrLevel := opts.StderrLevel
-	if os.Getenv("LOG_LEVEL") == "debug" {
+	if strings.EqualFold(os.Getenv("LOG_LEVEL"), "debug") {
 		fileLevel = slog.LevelDebug
 		stderrLevel = slog.LevelDebug
 	}
@@ -87,7 +85,7 @@ func New(opts Options) (*slog.Logger, func(), error) {
 }
 
 func stderrOnly(level slog.Level) *slog.Logger {
-	useJSON := os.Getenv("LOG_FORMAT") == "json"
+	useJSON := strings.EqualFold(os.Getenv("LOG_FORMAT"), "json")
 	return slog.New(makeHandler(os.Stderr, level, useJSON))
 }
 
