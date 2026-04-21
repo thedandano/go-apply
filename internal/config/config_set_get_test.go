@@ -19,17 +19,17 @@ func TestSetField_StringField(t *testing.T) {
 	}
 }
 
-func TestSetField_IntField(t *testing.T) {
+func TestSetField_BoolField(t *testing.T) {
 	c := &Config{}
-	if err := c.SetField("embedding_dim", "1024"); err != nil {
+	if err := c.SetField("verbose", "true"); err != nil {
 		t.Fatalf("SetField: %v", err)
 	}
-	got, err := c.GetField("embedding_dim")
+	got, err := c.GetField("verbose")
 	if err != nil {
 		t.Fatalf("GetField: %v", err)
 	}
-	if got != "1024" {
-		t.Errorf("got %q, want %q", got, "1024")
+	if got != "true" {
+		t.Errorf("got %q, want %q", got, "true")
 	}
 }
 
@@ -83,11 +83,11 @@ func TestGetField_UnknownKey(t *testing.T) {
 	}
 }
 
-func TestSetField_IntField_InvalidValue(t *testing.T) {
+func TestSetField_BoolField_InvalidValue(t *testing.T) {
 	c := &Config{}
-	err := c.SetField("embedding_dim", "not-a-number")
+	err := c.SetField("verbose", "not-a-bool")
 	if err == nil {
-		t.Fatal("expected error for invalid int, got nil")
+		t.Fatal("expected error for invalid bool, got nil")
 	}
 }
 
@@ -101,8 +101,8 @@ func TestSetField_FloatField_InvalidValue(t *testing.T) {
 
 func TestAllKeys_CoversAllFields(t *testing.T) {
 	keys := AllKeys()
-	if len(keys) != 14 {
-		t.Errorf("AllKeys() returned %d keys, want 14", len(keys))
+	if len(keys) != 10 {
+		t.Errorf("AllKeys() returned %d keys, want 10", len(keys))
 	}
 
 	// Each key must be settable and gettable on a zero-value Config.

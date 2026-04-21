@@ -5,8 +5,6 @@ package mcpserver_test
 import (
 	"context"
 	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,29 +16,11 @@ import (
 	"github.com/thedandano/go-apply/internal/mcpserver"
 )
 
-// newEmbedderStub returns a stub HTTP server that serves a fixed 3-element
-// embedding vector at /embeddings. Used by onboard_user to avoid a real
-// embedding model dependency.
-func newEmbedderStub(t *testing.T) *httptest.Server {
-	t.Helper()
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/embeddings" {
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"data": []map[string]any{{"embedding": []float32{0.1, 0.2, 0.3}}},
-			})
-			return
-		}
-		http.NotFound(w, r)
-	}))
-}
-
 // setupTestEnv redirects all config and data I/O to isolated temp dirs by
-// setting XDG_CONFIG_HOME and XDG_DATA_HOME, then writes a config.yaml with
-// the given embedder base URL (no /v1 suffix — the LLM client appends
-// /embeddings directly to whatever base_url is set).
+// setting XDG_CONFIG_HOME and XDG_DATA_HOME, and writes an empty config.yaml.
 // It also pre-creates the data subdirectories (go-apply/ and inputs/) so that
-// both SQLite and the resume repository can operate without missing-dir errors.
-func setupTestEnv(t *testing.T, embedderURL string) {
+// the resume repository can operate without missing-dir errors.
+func setupTestEnv(t *testing.T) {
 	t.Helper()
 	tmp := t.TempDir()
 	cfgBase := filepath.Join(tmp, "config")
@@ -53,7 +33,7 @@ func setupTestEnv(t *testing.T, embedderURL string) {
 		t.Fatalf("mkdirall cfgDir: %v", err)
 	}
 
-	cfgContent := "embedder:\n  base_url: " + embedderURL + "\n  model: test-model\nembedding_dim: 3\n"
+	cfgContent := ""
 	if err := os.WriteFile(filepath.Join(cfgDir, "config.yaml"), []byte(cfgContent), 0o600); err != nil {
 		t.Fatalf("write config.yaml: %v", err)
 	}
@@ -124,9 +104,7 @@ const jdRawText = "We are looking for a Senior Go Engineer to join our platform 
 // TestServerDispatch_ToolsRegistered verifies that all five tools are
 // discoverable through the live MCP server.
 func TestServerDispatch_ToolsRegistered(t *testing.T) {
-	stub := newEmbedderStub(t)
-	defer stub.Close()
-	setupTestEnv(t, stub.URL)
+	setupTestEnv(t)
 	cl := newMCPClient(t)
 
 	result, err := cl.ListTools(context.Background(), mcp.ListToolsRequest{})
@@ -158,9 +136,7 @@ func TestServerDispatch_ToolsRegistered(t *testing.T) {
 // TestServerDispatch_PromptsRegistered verifies that the job_application_workflow
 // prompt is registered and returns non-empty content.
 func TestServerDispatch_PromptsRegistered(t *testing.T) {
-	stub := newEmbedderStub(t)
-	defer stub.Close()
-	setupTestEnv(t, stub.URL)
+	setupTestEnv(t)
 	cl := newMCPClient(t)
 
 	const wantPrompt = "job_application_workflow"
@@ -193,9 +169,7 @@ func TestServerDispatch_PromptsRegistered(t *testing.T) {
 // TestServerDispatch_LoadJD_BlockedUntilOnboarded verifies that the
 // requireOnboarded middleware rejects load_jd calls when no resumes exist.
 func TestServerDispatch_LoadJD_BlockedUntilOnboarded(t *testing.T) {
-	stub := newEmbedderStub(t)
-	defer stub.Close()
-	setupTestEnv(t, stub.URL)
+	setupTestEnv(t)
 	cl := newMCPClient(t)
 
 	raw := callTool(t, cl, "load_jd", map[string]any{
@@ -220,9 +194,7 @@ func TestServerDispatch_LoadJD_BlockedUntilOnboarded(t *testing.T) {
 // all MCP-relevant keys and excludes orchestrator keys (Claude is the orchestrator
 // in MCP mode).
 func TestServerDispatch_GetConfig_ReturnsMCPKeys(t *testing.T) {
-	stub := newEmbedderStub(t)
-	defer stub.Close()
-	setupTestEnv(t, stub.URL)
+	setupTestEnv(t)
 	cl := newMCPClient(t)
 
 	raw := callTool(t, cl, "get_config", nil)
@@ -231,7 +203,7 @@ func TestServerDispatch_GetConfig_ReturnsMCPKeys(t *testing.T) {
 	if err := json.Unmarshal([]byte(raw), &fields); err != nil {
 		t.Fatalf("unmarshal: %v — raw: %s", err, raw)
 	}
-	for _, key := range []string{"embedder.base_url", "embedder.model", "embedding_dim", "user_name"} {
+	for _, key := range []string{"user_name", "log_level", "verbose"} {
 		if _, ok := fields[key]; !ok {
 			t.Errorf("key %q missing from get_config response", key)
 		}
@@ -244,9 +216,7 @@ func TestServerDispatch_GetConfig_ReturnsMCPKeys(t *testing.T) {
 // TestServerDispatch_UpdateConfig_PersistsField verifies that update_config
 // writes the new value and that a subsequent get_config call returns it.
 func TestServerDispatch_UpdateConfig_PersistsField(t *testing.T) {
-	stub := newEmbedderStub(t)
-	defer stub.Close()
-	setupTestEnv(t, stub.URL)
+	setupTestEnv(t)
 	cl := newMCPClient(t)
 
 	updateRaw := callTool(t, cl, "update_config", map[string]any{
@@ -276,9 +246,7 @@ func TestServerDispatch_UpdateConfig_PersistsField(t *testing.T) {
 // load_jd starts a session, and submit_keywords (with host-extracted keywords)
 // scores the resume and returns an envelope with a positive best_score.
 func TestServerDispatch_OnboardThenScore(t *testing.T) {
-	embedder := newEmbedderStub(t)
-	defer embedder.Close()
-	setupTestEnv(t, embedder.URL)
+	setupTestEnv(t)
 	cl := newMCPClient(t)
 
 	// Step 1: onboard resume.

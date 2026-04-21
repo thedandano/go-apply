@@ -29,17 +29,6 @@ func chatOK(content string) *httptest.Server {
 	}))
 }
 
-// embedOK returns an httptest server that always responds with the given vector.
-func embedOK(vec []float32) *httptest.Server {
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		json.NewEncoder(w).Encode(map[string]any{
-			"data": []map[string]any{
-				{"embedding": vec},
-			},
-		})
-	}))
-}
-
 // --- ChatComplete tests ---
 
 func TestChatComplete_ReturnsAssistantContent(t *testing.T) {
@@ -178,83 +167,5 @@ func TestChatComplete_RespectsContextCancellation(t *testing.T) {
 	}, model.ChatOptions{})
 	if err == nil {
 		t.Fatal("expected error on cancelled context, got nil")
-	}
-}
-
-// --- Embed tests ---
-
-func TestEmbed_ReturnsVector(t *testing.T) {
-	want := []float32{0.1, 0.2, 0.3}
-	srv := embedOK(want)
-	defer srv.Close()
-
-	client := newTestClient(t, srv.URL)
-	got, err := client.Embed(context.Background(), "golang engineer")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != len(want) {
-		t.Fatalf("got len %d, want %d", len(got), len(want))
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Errorf("got[%d]=%v, want %v", i, got[i], want[i])
-		}
-	}
-}
-
-func TestEmbed_ErrorOnEmptyResponse(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		json.NewEncoder(w).Encode(map[string]any{"data": []any{}})
-	}))
-	defer srv.Close()
-
-	client := newTestClient(t, srv.URL)
-	_, err := client.Embed(context.Background(), "some text")
-	if err == nil {
-		t.Fatal("expected error on empty data, got nil")
-	}
-}
-
-func TestEmbed_ErrorOnNon200(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		http.Error(w, "internal error", http.StatusInternalServerError)
-	}))
-	defer srv.Close()
-
-	client := newTestClient(t, srv.URL)
-	_, err := client.Embed(context.Background(), "some text")
-	if err == nil {
-		t.Fatal("expected error on 500, got nil")
-	}
-}
-
-func TestEmbed_RetriesOn429(t *testing.T) {
-	attempts := 0
-	want := []float32{0.9, 0.8}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		attempts++
-		if attempts < 2 {
-			http.Error(w, "rate limited", http.StatusTooManyRequests)
-			return
-		}
-		json.NewEncoder(w).Encode(map[string]any{
-			"data": []map[string]any{
-				{"embedding": want},
-			},
-		})
-	}))
-	defer srv.Close()
-
-	client := newTestClient(t, srv.URL)
-	got, err := client.Embed(context.Background(), "golang")
-	if err != nil {
-		t.Fatalf("expected success after retry, got: %v", err)
-	}
-	if len(got) != len(want) {
-		t.Errorf("got len %d, want %d", len(got), len(want))
-	}
-	if attempts != 2 {
-		t.Errorf("expected 2 attempts, got %d", attempts)
 	}
 }

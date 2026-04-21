@@ -8,7 +8,7 @@ import (
 
 const workflowPromptText = `# go-apply MCP — Job Application Workflow
 
-You are the orchestrator. go-apply's tools handle the mechanical work (fetch, embed, score, tailor).
+You are the orchestrator. go-apply's tools handle the mechanical work (fetch, score, tailor).
 You handle reasoning: extract keywords from JD text, interpret scores, drive tailoring, write cover letters, give honest fit assessments.
 
 ## Tools
@@ -28,7 +28,7 @@ You handle reasoning: extract keywords from JD text, interpret scores, drive tai
 ## Standard Multi-Turn Workflow
 
 ### Step 1 — Verify profile
-Call get_config. Confirm embedder.base_url, embedder.model, and embedding_dim are set.
+Call get_config.
 Do NOT ask the user for orchestrator config — it is irrelevant in MCP mode.
 Check profile.onboarded: if true, the user is already onboarded — do NOT call onboard_user unless the user explicitly asks to add or update their resume, skills, or accomplishments.
 Only call onboard_user when profile.onboarded is false.
@@ -85,9 +85,7 @@ Tell the user: "Structural mismatch — tailoring cannot close this gap. Score: 
 Send session_id and optional cover_letter text.
 This persists the application record and closes the session.
 
-## Config — only embedder + profile needed in MCP mode
-- embedder.base_url, embedder.model, embedder.api_key: embedding service
-- embedding_dim: output dimension of the embedding model (e.g. 2048)
+## Config — profile fields used in MCP mode
 - user_name, occupation, location, linkedin_url, years_of_experience: used in cover letters
 
 Orchestrator config is NOT used in MCP mode — Claude is the orchestrator.

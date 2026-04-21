@@ -55,12 +55,6 @@ type FetcherDefaults struct {
 	MaxJDTextLengthChars int `json:"max_jd_text_length_chars"`
 }
 
-type VectorSearchDefaults struct {
-	SimilarityThreshold float64 `json:"similarity_threshold"`
-	TopK                int     `json:"top_k"`
-	DefaultEmbeddingDim int     `json:"default_embedding_dim"`
-}
-
 type LLMDefaults struct {
 	TimeoutMS                  int     `json:"timeout_ms"`
 	KeywordExtractionTemp      float64 `json:"keyword_extraction_temp"`
@@ -71,23 +65,15 @@ type LLMDefaults struct {
 	BulletRewriteMaxTokens     int     `json:"bullet_rewrite_max_tokens"`
 }
 
-type AugmentDefaults struct {
-	IncorporationTemp      float64 `json:"incorporation_temp"`
-	IncorporationMaxTokens int     `json:"incorporation_max_tokens"`
-	MaxChunksToIncorporate int     `json:"max_chunks_to_incorporate"`
-}
-
 // AppDefaults holds all tunable constants loaded from internal/config/defaults.json.
 // Injected into services — never read inline constants from source code.
 type AppDefaults struct {
-	Scoring      ScoringDefaults      `json:"scoring"`
-	Thresholds   ThresholdDefaults    `json:"thresholds"`
-	CoverLetter  CoverLetterDefaults  `json:"cover_letter"`
-	Tailor       TailorDefaults       `json:"tailor"`
-	Fetcher      FetcherDefaults      `json:"fetcher"`
-	VectorSearch VectorSearchDefaults `json:"vector_search"`
-	LLM          LLMDefaults          `json:"llm"`
-	Augment      AugmentDefaults      `json:"augment"`
+	Scoring     ScoringDefaults     `json:"scoring"`
+	Thresholds  ThresholdDefaults   `json:"thresholds"`
+	CoverLetter CoverLetterDefaults `json:"cover_letter"`
+	Tailor      TailorDefaults      `json:"tailor"`
+	Fetcher     FetcherDefaults     `json:"fetcher"`
+	LLM         LLMDefaults         `json:"llm"`
 }
 
 // defaultsJSON is the embedded defaults.json.

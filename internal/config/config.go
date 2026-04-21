@@ -57,27 +57,14 @@ type LLMProviderConfig struct {
 
 // Config is the top-level application configuration.
 //
-// Two independent LLM providers:
-//
-//	orchestrator: heavy reasoning model (keyword extraction, cover letter, bullet rewrites)
-//	embedder:     embedding model (vector search for semantic resume↔JD matching)
-//
 // Example config.yaml:
 //
 //	orchestrator:
 //	  base_url: https://api.anthropic.com/v1
 //	  model: claude-sonnet-4-6
 //	  api_key: sk-ant-...
-//	embedder:
-//	  base_url: http://localhost:11434/v1
-//	  model: nomic-embed-text
-//	  api_key: ""
-//	embedding_dim: 768
 type Config struct {
 	Orchestrator      LLMProviderConfig `yaml:"orchestrator"`
-	Embedder          LLMProviderConfig `yaml:"embedder"`
-	EmbeddingDim      int               `yaml:"embedding_dim"`
-	DBPath            string            `yaml:"db_path"`
 	LogLevel          string            `yaml:"log_level"`
 	Verbose           bool              `yaml:"verbose"`
 	DefaultSeniority  string            `yaml:"default_seniority"`
@@ -99,20 +86,6 @@ func (c *Config) ResolveLogLevel() slog.Level {
 	default:
 		return slog.LevelInfo
 	}
-}
-
-func (c *Config) ResolveEmbeddingDim() int {
-	if c.EmbeddingDim > 0 {
-		return c.EmbeddingDim
-	}
-	return EmbeddedDefaults().VectorSearch.DefaultEmbeddingDim
-}
-
-func (c *Config) ResolveDBPath() string {
-	if c.DBPath != "" {
-		return c.DBPath
-	}
-	return filepath.Join(DataDir(), "profile.db")
 }
 
 // Load reads config.yaml from the XDG config directory.
@@ -168,10 +141,6 @@ func AllKeys() []string {
 		"orchestrator.base_url",
 		"orchestrator.model",
 		"orchestrator.api_key",
-		"embedder.base_url",
-		"embedder.model",
-		"embedder.api_key",
-		"embedding_dim",
 		"log_level",
 		"verbose",
 		"user_name",
@@ -211,18 +180,6 @@ func (c *Config) SetField(key, value string) error {
 		c.Orchestrator.Model = value
 	case "orchestrator.api_key":
 		c.Orchestrator.APIKey = value
-	case "embedder.base_url":
-		c.Embedder.BaseURL = value
-	case "embedder.model":
-		c.Embedder.Model = value
-	case "embedder.api_key":
-		c.Embedder.APIKey = value
-	case "embedding_dim":
-		n, err := strconv.Atoi(value)
-		if err != nil {
-			return fmt.Errorf("embedding_dim must be an integer: %w", err)
-		}
-		c.EmbeddingDim = n
 	case "log_level":
 		switch strings.ToLower(value) {
 		case "debug", "info", "warn", "error", "":
@@ -265,14 +222,6 @@ func (c *Config) GetField(key string) (string, error) {
 		return c.Orchestrator.Model, nil
 	case "orchestrator.api_key":
 		return c.Orchestrator.APIKey, nil
-	case "embedder.base_url":
-		return c.Embedder.BaseURL, nil
-	case "embedder.model":
-		return c.Embedder.Model, nil
-	case "embedder.api_key":
-		return c.Embedder.APIKey, nil
-	case "embedding_dim":
-		return strconv.Itoa(c.EmbeddingDim), nil
 	case "log_level":
 		return c.LogLevel, nil
 	case "verbose":

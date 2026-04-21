@@ -90,7 +90,7 @@ Outputs a JSON result to stdout when --headless is set.`,
 			dataDir := config.DataDir()
 			appRepo := fs.NewApplicationRepository(dataDir)
 			resumeRepo := fs.NewResumeRepository(dataDir)
-			if err := onboardcheck.CheckOnboarded(cfg, resumeRepo); err != nil {
+			if err := onboardcheck.CheckOnboarded(resumeRepo); err != nil {
 				return err
 			}
 			docLoader := loader.New()

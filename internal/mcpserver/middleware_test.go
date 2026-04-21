@@ -8,7 +8,6 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 
-	"github.com/thedandano/go-apply/internal/config"
 	"github.com/thedandano/go-apply/internal/mcpserver"
 	"github.com/thedandano/go-apply/internal/model"
 )
@@ -22,36 +21,8 @@ func (s *stubEmptyResumeRepo) ListResumes() ([]model.ResumeFile, error) {
 
 // ── CheckOnboarded unit tests ─────────────────────────────────────────────────
 
-func TestCheckOnboarded_EmbedderNotConfigured_ReturnsError(t *testing.T) {
-	cfg := &config.Config{} // zero-value: embedder.base_url and embedder.model empty
-	err := mcpserver.CheckOnboarded(cfg, &stubResumeRepo{})
-	if err == nil {
-		t.Fatal("expected error when embedder is not configured, got nil")
-	}
-	if !strings.Contains(err.Error(), "embedder not configured") {
-		t.Errorf("error = %q, want to contain 'embedder not configured'", err.Error())
-	}
-}
-
-func TestCheckOnboarded_EmbedderMissingModel_ReturnsError(t *testing.T) {
-	cfg := &config.Config{}
-	cfg.Embedder.BaseURL = "http://localhost:11434/v1"
-	// model left empty
-	err := mcpserver.CheckOnboarded(cfg, &stubResumeRepo{})
-	if err == nil {
-		t.Fatal("expected error when embedder model is not configured, got nil")
-	}
-	if !strings.Contains(err.Error(), "embedder not configured") {
-		t.Errorf("error = %q, want to contain 'embedder not configured'", err.Error())
-	}
-}
-
 func TestCheckOnboarded_NoResumes_ReturnsError(t *testing.T) {
-	cfg := &config.Config{}
-	cfg.Embedder.BaseURL = "http://localhost:11434/v1"
-	cfg.Embedder.Model = "nomic-embed-text"
-
-	err := mcpserver.CheckOnboarded(cfg, &stubEmptyResumeRepo{})
+	err := mcpserver.CheckOnboarded(&stubEmptyResumeRepo{})
 	if err == nil {
 		t.Fatal("expected error when no resumes found, got nil")
 	}
@@ -61,11 +32,7 @@ func TestCheckOnboarded_NoResumes_ReturnsError(t *testing.T) {
 }
 
 func TestCheckOnboarded_Onboarded_ReturnsNil(t *testing.T) {
-	cfg := &config.Config{}
-	cfg.Embedder.BaseURL = "http://localhost:11434/v1"
-	cfg.Embedder.Model = "nomic-embed-text"
-
-	err := mcpserver.CheckOnboarded(cfg, &stubResumeRepo{}) // stubResumeRepo returns one resume
+	err := mcpserver.CheckOnboarded(&stubResumeRepo{}) // stubResumeRepo returns one resume
 	if err != nil {
 		t.Errorf("expected nil when onboarded, got: %v", err)
 	}
@@ -74,7 +41,6 @@ func TestCheckOnboarded_Onboarded_ReturnsNil(t *testing.T) {
 // ── RequireOnboarded integration tests ───────────────────────────────────────
 
 func TestRequireOnboarded_NotOnboarded_ReturnsErrorResult(t *testing.T) {
-	cfg := &config.Config{} // no embedder
 	req := callToolRequest("load_jd", map[string]any{"jd_url": "https://example.com/job"})
 
 	called := false
@@ -83,7 +49,7 @@ func TestRequireOnboarded_NotOnboarded_ReturnsErrorResult(t *testing.T) {
 		return mcp.NewToolResultText(`{"status":"ok"}`), nil
 	}
 
-	handler := mcpserver.RequireOnboarded(cfg, &stubEmptyResumeRepo{}, inner)
+	handler := mcpserver.RequireOnboarded(&stubEmptyResumeRepo{}, inner)
 	result, err := handler(context.Background(), req)
 	if err != nil {
 		t.Fatalf("handler returned unexpected error: %v", err)
@@ -103,10 +69,6 @@ func TestRequireOnboarded_NotOnboarded_ReturnsErrorResult(t *testing.T) {
 }
 
 func TestRequireOnboarded_Onboarded_DelegatesToInnerHandler(t *testing.T) {
-	cfg := &config.Config{}
-	cfg.Embedder.BaseURL = "http://localhost:11434/v1"
-	cfg.Embedder.Model = "nomic-embed-text"
-
 	req := callToolRequest("load_jd", map[string]any{"jd_url": "https://example.com/job"})
 
 	called := false
@@ -115,7 +77,7 @@ func TestRequireOnboarded_Onboarded_DelegatesToInnerHandler(t *testing.T) {
 		return mcp.NewToolResultText(`{"status":"ok"}`), nil
 	}
 
-	handler := mcpserver.RequireOnboarded(cfg, &stubResumeRepo{}, inner)
+	handler := mcpserver.RequireOnboarded(&stubResumeRepo{}, inner)
 	result, err := handler(context.Background(), req)
 	if err != nil {
 		t.Fatalf("handler returned unexpected error: %v", err)

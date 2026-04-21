@@ -278,11 +278,11 @@ func TestHandleUpdateConfig_UnknownKey_ReturnsError(t *testing.T) {
 	}
 }
 
-func TestHandleUpdateConfig_APIKey_ResponseRedacted(t *testing.T) {
+func TestHandleUpdateConfig_ValidKey_ReturnsSuccess(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	req := callToolRequest("update_config", map[string]any{
-		"key":   "embedder.api_key",
-		"value": "sk-super-secret",
+		"key":   "log_level",
+		"value": "debug",
 	})
 	cfg := &config.Config{}
 	result := mcpserver.HandleUpdateConfig(context.Background(), &req, cfg)
@@ -291,57 +291,12 @@ func TestHandleUpdateConfig_APIKey_ResponseRedacted(t *testing.T) {
 	if err := json.Unmarshal([]byte(text), &resp); err != nil {
 		t.Fatalf("response is not JSON: %v", err)
 	}
-	if resp["value"] == "sk-super-secret" {
-		t.Error("API key must be redacted in update_config response, got plaintext")
-	}
-	if resp["value"] != "***" {
-		t.Errorf("update_config response value = %q, want ***", resp["value"])
+	if resp["error"] != "" {
+		t.Errorf("unexpected error: %s", resp["error"])
 	}
 }
 
 // ── handleGetConfigWith tests ─────────────────────────────────────────────────
-
-func TestHandleGetConfigWith_RedactsAPIKeys(t *testing.T) {
-	cfg := &config.Config{}
-	cfg.Orchestrator.APIKey = "sk-super-secret"
-	cfg.Embedder.APIKey = "another-key"
-
-	result := mcpserver.HandleGetConfigWith(cfg)
-
-	text := extractText(t, result)
-	var response map[string]interface{}
-	if err := json.Unmarshal([]byte(text), &response); err != nil {
-		t.Fatalf("response is not JSON: %v", err)
-	}
-	// orchestrator keys are not exposed in MCP mode — only check embedder
-	apiKey, ok := response["embedder.api_key"].(string)
-	if !ok {
-		t.Fatalf("embedder.api_key is not a string: %T", response["embedder.api_key"])
-	}
-	if apiKey != "***" {
-		t.Errorf("embedder.api_key = %q, want ***", apiKey)
-	}
-}
-
-func TestHandleGetConfigWith_EmptyAPIKey_NotRedacted(t *testing.T) {
-	cfg := &config.Config{}
-	// API keys left empty
-
-	result := mcpserver.HandleGetConfigWith(cfg)
-
-	text := extractText(t, result)
-	var response map[string]interface{}
-	if err := json.Unmarshal([]byte(text), &response); err != nil {
-		t.Fatalf("response is not JSON: %v", err)
-	}
-	apiKey, ok := response["embedder.api_key"].(string)
-	if !ok {
-		t.Fatalf("embedder.api_key is not a string: %T", response["embedder.api_key"])
-	}
-	if apiKey == "***" {
-		t.Error("empty API key should not be redacted")
-	}
-}
 
 func TestHandleGetConfigWith_ExcludesOrchestratorKeys(t *testing.T) {
 	result := mcpserver.HandleGetConfigWith(&config.Config{})
@@ -379,8 +334,6 @@ func TestHandleUpdateConfig_RejectsOrchestratorKey(t *testing.T) {
 
 func TestHandleGetConfigWithProfile_OnboardedTrue_WhenResumesExist(t *testing.T) {
 	cfg := &config.Config{}
-	cfg.Embedder.BaseURL = "http://localhost:11434/v1"
-	cfg.Embedder.Model = "nomic-embed-text"
 
 	// Create temp directory structure for test
 	tmpDir := t.TempDir()
@@ -468,8 +421,6 @@ func TestHandleGetConfigWithProfile_OnboardedTrue_WhenResumesExist(t *testing.T)
 
 func TestHandleGetConfigWithProfile_OnboardedFalse_WhenNoResumes(t *testing.T) {
 	cfg := &config.Config{}
-	cfg.Embedder.BaseURL = "http://localhost:11434/v1"
-	cfg.Embedder.Model = "nomic-embed-text"
 
 	// Create temp directory with no resumes
 	tmpDir := t.TempDir()
@@ -515,9 +466,8 @@ func TestHandleGetConfigWithProfile_OnboardedFalse_WhenNoResumes(t *testing.T) {
 
 func TestHandleGetConfigWithProfile_PreservesConfigFields(t *testing.T) {
 	cfg := &config.Config{}
-	cfg.Embedder.BaseURL = "http://localhost:11434/v1"
-	cfg.Embedder.Model = "nomic-embed-text"
-	cfg.Embedder.APIKey = "secret-key"
+	cfg.Orchestrator.BaseURL = "https://api.example.com/v1"
+	cfg.Orchestrator.Model = "claude-sonnet-4-6"
 
 	tmpDir := t.TempDir()
 	inputsDir := filepath.Join(tmpDir, "inputs")
@@ -533,20 +483,15 @@ func TestHandleGetConfigWithProfile_PreservesConfigFields(t *testing.T) {
 		t.Fatalf("response is not JSON: %v", err)
 	}
 
-	// Check config fields still exist
-	if _, ok := response["embedder.base_url"]; !ok {
-		t.Error("response missing 'embedder.base_url' key")
-	}
-	if _, ok := response["embedder.model"]; !ok {
-		t.Error("response missing 'embedder.model' key")
+	// Orchestrator keys are excluded from MCP mode — verify they are absent.
+	for _, key := range []string{"orchestrator.base_url", "orchestrator.model", "orchestrator.api_key"} {
+		if _, found := response[key]; found {
+			t.Errorf("get_config must not expose %q in MCP mode", key)
+		}
 	}
 
-	// API key should be redacted
-	apiKey, ok := response["embedder.api_key"].(string)
-	if !ok {
-		t.Errorf("embedder.api_key is not a string: %T", response["embedder.api_key"])
-	}
-	if apiKey != "***" {
-		t.Errorf("embedder.api_key = %q, want ***", apiKey)
+	// log_level should be present (it is in MCPKeys).
+	if _, ok := response["log_level"]; !ok {
+		t.Error("response missing 'log_level' key")
 	}
 }

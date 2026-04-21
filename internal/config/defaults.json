@@ -57,11 +57,6 @@
     "min_jd_text_length_chars": 100,
     "max_jd_text_length_chars": 8000
   },
-  "vector_search": {
-    "similarity_threshold": 0.6,
-    "top_k":                10,
-    "default_embedding_dim": 1536
-  },
   "llm": {
     "timeout_ms":                    60000,
     "keyword_extraction_temp":       0.1,
@@ -70,11 +65,5 @@
     "cover_letter_max_tokens":       200,
     "bullet_rewrite_temp":           0.2,
     "bullet_rewrite_max_tokens":     800
-  },
-  "augment": {
-    "incorporation_temp": 0.2,
-    "incorporation_max_tokens": 2000,
-    "keyword_match_min_count": 1,
-    "max_chunks_to_incorporate": 5
   }
 }
