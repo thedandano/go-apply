@@ -22,8 +22,8 @@ type KeywordResult struct {
 }
 
 // ReferenceGap describes a mismatch between a skill the JD requires and the closest
-// matching skill in the user's profile. Used by the augment service to decide what
-// to emphasise or reframe in tailored output.
+// matching skill in the user's profile. Used to decide what to emphasise or reframe
+// in tailored output.
 // Example: JDSkill="Kubernetes", RefSkill="Docker", Priority="high".
 type ReferenceGap struct {
 	JDSkill  string `json:"jd_skill"`
@@ -44,7 +44,7 @@ type ScoreResult struct {
 }
 
 // ReferenceData carries the scorer's computed skill inventory and gap analysis,
-// threaded through the pipeline so downstream services (augment, tailor) can
+// threaded through the pipeline so downstream services (tailor) can
 // prioritise what to emphasise without re-deriving it.
 type ReferenceData struct {
 	AllSkills   []string

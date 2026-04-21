@@ -154,7 +154,7 @@ Run `go-apply config set log_level debug` once and every invocation — CLI and 
 
 ### `go-apply run`
 
-Run the full pipeline against a job description. Fetches (or accepts) the JD, scores all resumes in `~/.local/share/go-apply/inputs/`, augments resume text with profile context, and generates a cover letter.
+Run the full pipeline against a job description. Fetches (or accepts) the JD, scores all resumes in `~/.local/share/go-apply/inputs/`, tailors resumes with a two-tier cascade (T1 keyword injection + T2 bullet rewriting), and generates a cover letter.
 
 ```bash
 # From a URL (fetches and caches the JD)

@@ -10,7 +10,6 @@ import (
 // All embedding vectors are stored as float32 blobs in the vec0 virtual table.
 // Swap the implementation to use any other vector store (pgvector, chromem-go, etc.)
 // by providing a new struct that satisfies this interface.
-// CRUD only — augmentation logic lives in service/augment/AugmentService.
 type ProfileRepository interface {
 	// UpsertDocument stores or replaces the embedding vector for a named document chunk.
 	// sourceDoc examples: "resume:backend", "ref:skills", "accomplishments"
