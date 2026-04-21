@@ -1,7 +1,6 @@
 package mcpserver
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -11,13 +10,10 @@ import (
 	"github.com/thedandano/go-apply/internal/config"
 	"github.com/thedandano/go-apply/internal/loader"
 	"github.com/thedandano/go-apply/internal/logger"
-	"github.com/thedandano/go-apply/internal/port"
 	"github.com/thedandano/go-apply/internal/redact"
 	"github.com/thedandano/go-apply/internal/repository/fs"
 	"github.com/thedandano/go-apply/internal/repository/sqlite"
-	"github.com/thedandano/go-apply/internal/service/augment"
 	"github.com/thedandano/go-apply/internal/service/fetcher"
-	"github.com/thedandano/go-apply/internal/service/llm"
 	"github.com/thedandano/go-apply/internal/service/pipeline"
 	"github.com/thedandano/go-apply/internal/service/scorer"
 )
@@ -38,9 +34,6 @@ func newSQLiteProfile(cfg *config.Config) (*sqlite.ProfileRepository, error) {
 // Config is loaded fresh per invocation so changes take effect immediately.
 // The MCP host is the orchestrator — LLM, CLGen, and Tailor are nil so the host
 // handles keyword extraction, cover letters, and tailoring.
-// When the embedder section is configured (base_url + model), an augment service
-// is wired for vector retrieval and embedding cache — but LLM incorporation is
-// skipped since the host is the orchestrator.
 func loadDeps() (*config.Config, pipeline.ApplyConfig, error) {
 	log := slog.Default()
 
@@ -62,21 +55,6 @@ func loadDeps() (*config.Config, pipeline.ApplyConfig, error) {
 	scorerSvc := scorer.New(defaults)
 	fetcherSvc := fetcher.NewFallback(defaults, log)
 
-	var augmentSvc port.Augmenter
-	if cfg.Embedder.BaseURL != "" && cfg.Embedder.Model != "" {
-		profileRepo, profileErr := newSQLiteProfile(cfg)
-		if profileErr != nil {
-			log.Warn("augment: could not open profile db — vector retrieval disabled", "error", profileErr)
-		} else {
-			embedderClient := llm.New(cfg.Embedder.BaseURL, cfg.Embedder.Model, cfg.Embedder.APIKey, defaults, log)
-			// nil LLM: retrieval + cache runs, but incorporation is skipped (MCP host incorporates).
-			augmentSvc = augment.New(profileRepo, profileRepo, embedderClient, nil, defaults, log)
-			log.Info("augment: embedder wired for vector retrieval", "model", cfg.Embedder.Model)
-		}
-	} else {
-		log.DebugContext(context.Background(), "mcp: augment disabled — no embedder configured")
-	}
-
 	deps := pipeline.ApplyConfig{
 		Fetcher:  fetcherSvc,
 		LLM:      nil,
@@ -85,7 +63,6 @@ func loadDeps() (*config.Config, pipeline.ApplyConfig, error) {
 		Resumes:  resumeRepo,
 		Loader:   docLoader,
 		AppRepo:  appRepo,
-		Augment:  augmentSvc,
 		Defaults: defaults,
 		Tailor:   nil,
 	}

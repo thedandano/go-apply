@@ -102,18 +102,6 @@ func (s *stubApplicationRepository) List() ([]*model.ApplicationRecord, error) {
 	return nil, nil
 }
 
-type stubAugmenter struct{}
-
-var _ port.Augmenter = (*stubAugmenter)(nil)
-
-func (s *stubAugmenter) AugmentResumeText(_ context.Context, input model.AugmentInput) (string, *model.ReferenceData, error) {
-	return input.ResumeText, input.RefData, nil
-}
-
-func (s *stubAugmenter) SuggestForKeywords(_ context.Context, _ []string) (model.TailorSuggestions, error) {
-	return nil, nil
-}
-
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 // callToolRequest builds an mcp.CallToolRequest with the given arguments map.
@@ -393,7 +381,6 @@ func TestHandleGetConfigWithProfile_OnboardedTrue_WhenResumesExist(t *testing.T)
 	cfg := &config.Config{}
 	cfg.Embedder.BaseURL = "http://localhost:11434/v1"
 	cfg.Embedder.Model = "nomic-embed-text"
-	cfg.EmbeddingDim = 768
 
 	// Create temp directory structure for test
 	tmpDir := t.TempDir()
@@ -534,7 +521,6 @@ func TestHandleGetConfigWithProfile_PreservesConfigFields(t *testing.T) {
 	cfg.Embedder.BaseURL = "http://localhost:11434/v1"
 	cfg.Embedder.Model = "nomic-embed-text"
 	cfg.Embedder.APIKey = "secret-key"
-	cfg.EmbeddingDim = 768
 
 	tmpDir := t.TempDir()
 	inputsDir := filepath.Join(tmpDir, "inputs")

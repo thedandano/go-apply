@@ -1,5 +1,5 @@
 // Package pipeline orchestrates the full apply pipeline: fetch → extract keywords →
-// score resumes → augment → tailor (optional) → generate cover letter → emit result.
+// score resumes → tailor (optional) → generate cover letter → emit result.
 package pipeline
 
 import (
@@ -41,7 +41,6 @@ type ApplyPipeline struct {
 	resumes      port.ResumeRepository
 	loader       port.DocumentLoader
 	appRepo      port.ApplicationRepository
-	augment      port.Augmenter
 	presenter    port.Presenter
 	defaults     *config.AppDefaults
 	tailor       port.Tailor
@@ -57,7 +56,6 @@ type ApplyConfig struct {
 	Resumes   port.ResumeRepository
 	Loader    port.DocumentLoader
 	AppRepo   port.ApplicationRepository
-	Augment   port.Augmenter
 	Presenter port.Presenter
 	Defaults  *config.AppDefaults
 	Tailor    port.Tailor
@@ -76,7 +74,6 @@ func NewApplyPipeline(cfg *ApplyConfig) *ApplyPipeline {
 		resumes:      cfg.Resumes,
 		loader:       cfg.Loader,
 		appRepo:      cfg.AppRepo,
-		augment:      cfg.Augment,
 		presenter:    cfg.Presenter,
 		defaults:     cfg.Defaults,
 		tailor:       cfg.Tailor,
@@ -637,9 +634,6 @@ func (p *ApplyPipeline) runTailorStep(
 
 	scoreBefore := result.Scores[result.BestResume]
 
-	logger.Banner(ctx, slog.Default(), "Augment", "Profile Retrieval")
-	suggestions := p.retrieveSuggestions(ctx, jd, result)
-
 	logger.Banner(ctx, slog.Default(), "Tailor", "T1+T2")
 	tailorResult, err := p.tailor.TailorResume(ctx, &model.TailorInput{
 		Resume:              bestFile,
@@ -647,7 +641,6 @@ func (p *ApplyPipeline) runTailorStep(
 		JD:                  *jd,
 		ScoreBefore:         scoreBefore,
 		AccomplishmentsText: req.AccomplishmentsText,
-		Suggestions:         suggestions,
 		Options: model.TailorOptions{
 			MaxTier2BulletRewrites: p.defaults.Tailor.MaxTier2BulletRewrites,
 		},
@@ -694,24 +687,4 @@ func (p *ApplyPipeline) loadBestResumeText(path string) (string, error) {
 		return "", fmt.Errorf("load best resume for tailor: %w", err)
 	}
 	return text, nil
-}
-
-// retrieveSuggestions calls the augment service for keyword-based profile suggestions.
-// If the augment service is nil or returns an error, it degrades gracefully: a warning
-// is appended to result.Warnings and an empty suggestions map is returned.
-func (p *ApplyPipeline) retrieveSuggestions(ctx context.Context, jd *model.JDData, result *model.PipelineResult) model.TailorSuggestions {
-	if p.augment == nil {
-		return nil
-	}
-	allKeywords := append(jd.Required, jd.Preferred...) //nolint:gocritic // fresh slice intentional
-	suggestions, err := p.augment.SuggestForKeywords(ctx, allKeywords)
-	if err != nil {
-		slog.WarnContext(ctx, "runTailorStep: SuggestForKeywords failed — tailoring without suggestions", "error", err)
-		result.Warnings = append(result.Warnings, model.RiskWarning{
-			Severity: model.SeverityWarn,
-			Message:  fmt.Sprintf("profile bank retrieval failed — tailoring without suggestions: %v", err),
-		})
-		return nil
-	}
-	return suggestions
 }

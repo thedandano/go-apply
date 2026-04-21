@@ -98,7 +98,6 @@ func TestOnboardThenScore(t *testing.T) {
 		Resumes:   resumeRepo,
 		Loader:    docLoader,
 		AppRepo:   appRepo,
-		Augment:   nil,
 		Defaults:  defaults,
 		Tailor:    nil,
 		Presenter: nil,

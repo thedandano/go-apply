@@ -44,19 +44,6 @@ func (s *stubAppRepo) List() ([]*model.ApplicationRecord, error)            { re
 
 var _ port.ApplicationRepository = (*stubAppRepo)(nil)
 
-// stubAugmentService — pass-through.
-type stubAugmentService struct{}
-
-var _ port.Augmenter = (*stubAugmentService)(nil)
-
-func (s *stubAugmentService) AugmentResumeText(_ context.Context, input model.AugmentInput) (string, *model.ReferenceData, error) {
-	return input.ResumeText, input.RefData, nil
-}
-
-func (s *stubAugmentService) SuggestForKeywords(_ context.Context, _ []string) (model.TailorSuggestions, error) {
-	return nil, nil
-}
-
 // stubCoverLetter — fixed cover letter.
 type stubCoverLetter struct{}
 
@@ -132,7 +119,6 @@ func TestApplyPipeline_HeadlessE2E(t *testing.T) {
 		Resumes:   &stubResumeRepo{},
 		Loader:    &stubDocumentLoader{},
 		AppRepo:   &stubAppRepo{},
-		Augment:   &stubAugmentService{},
 		Presenter: pres,
 		Defaults:  defaults,
 		Tailor:    nil,
@@ -199,7 +185,6 @@ func TestApplyPipeline_TailorStep(t *testing.T) {
 		Resumes:   &stubResumeRepo{},
 		Loader:    &stubDocumentLoader{},
 		AppRepo:   &stubAppRepo{},
-		Augment:   &stubAugmentService{},
 		Presenter: pres,
 		Defaults:  defaults,
 		Tailor:    &stubTailorForApply{},
@@ -261,7 +246,6 @@ func minimalApplyConfig(pres *capturingPresenter) *pipeline.ApplyConfig {
 		Resumes:   &stubResumeRepo{},
 		Loader:    &stubDocumentLoader{},
 		AppRepo:   &stubAppRepo{},
-		Augment:   &stubAugmentService{},
 		Presenter: pres,
 		Defaults:  defaults,
 		Tailor:    nil,
@@ -286,41 +270,6 @@ func TestApplyPipeline_NilLLM_ErrorsOnEmptyJD(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "could not extract a job description") {
 		t.Errorf("expected actionable error message, got: %v", err)
-	}
-}
-
-func TestApplyPipeline_NilAugment_ScoresWithoutAugmentation(t *testing.T) {
-	// This test requires a real LLM response so the JD is populated before scoring.
-	// minimalApplyConfig uses nil LLM; wire a stub that returns a minimal valid JD.
-	llmSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
-			"choices": []map[string]any{
-				{"message": map[string]any{
-					"content": `{"title":"SWE","company":"Acme","required":["go"],"preferred":[],"location":"Remote","seniority":"mid","required_years":2}`,
-				}},
-			},
-		})
-	}))
-	defer llmSrv.Close()
-
-	pres := &capturingPresenter{}
-	cfg := minimalApplyConfig(pres)
-	cfg.Augment = nil
-	defaults, _ := config.LoadDefaults()
-	cfg.LLM = llm.New(llmSrv.URL, "test-model", "test-key", defaults, nil)
-
-	pl := pipeline.NewApplyPipeline(cfg)
-	err := pl.Run(context.Background(), pipeline.ApplyRequest{
-		URLOrText: "Software Engineer at Acme requiring Go",
-		IsText:    true,
-		Channel:   model.ChannelCold,
-		Config:    &config.Config{DefaultSeniority: "mid", YearsOfExperience: 3},
-	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if pres.result == nil {
-		t.Fatal("expected result, got nil")
 	}
 }
 
@@ -359,7 +308,6 @@ func TestApplyPipeline_TailorStep_TailorError(t *testing.T) {
 		Resumes:   &stubResumeRepo{},
 		Loader:    &stubDocumentLoader{},
 		AppRepo:   &stubAppRepo{},
-		Augment:   &stubAugmentService{},
 		Presenter: pres,
 		Defaults:  defaults,
 		Tailor:    &stubTailorError{},
@@ -460,7 +408,6 @@ func TestApplyPipeline_WithOrchestrator(t *testing.T) {
 		Resumes:      &stubResumeRepo{},
 		Loader:       &stubDocumentLoader{},
 		AppRepo:      &stubAppRepo{},
-		Augment:      &stubAugmentService{},
 		Presenter:    pres,
 		Defaults:     defaults,
 		Tailor:       nil,
@@ -500,7 +447,6 @@ func TestApplyPipeline_OrchestratorError_ReturnsError(t *testing.T) {
 		Resumes:      &stubResumeRepo{},
 		Loader:       &stubDocumentLoader{},
 		AppRepo:      &stubAppRepo{},
-		Augment:      nil,
 		Presenter:    pres,
 		Defaults:     defaults,
 		Tailor:       nil,
