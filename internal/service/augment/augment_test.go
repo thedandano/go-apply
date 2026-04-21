@@ -653,13 +653,13 @@ func TestRetrieveByVector_EmitsPerMatchAttributes(t *testing.T) {
 
 	var matchRecord *slog.Record
 	for i := range capture.records {
-		if capture.records[i].Message == "augment: vector match" {
+		if capture.records[i].Message == "vector match" {
 			matchRecord = &capture.records[i]
 			break
 		}
 	}
 	if matchRecord == nil {
-		t.Fatal("expected 'augment: vector match' log record, none found")
+		t.Fatal("expected 'vector match' log record, none found")
 	}
 
 	attrs := make(map[string]any)
