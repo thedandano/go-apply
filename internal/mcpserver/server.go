@@ -27,12 +27,7 @@ func NewServer() *server.MCPServer {
 			mcp.WithString("accomplishments", mcp.Description("Accomplishments text (optional)")),
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			svc, cleanup, err := newOnboardSvc()
-			if err != nil {
-				return errorResult(fmt.Sprintf("setup: %v", err)), nil
-			}
-			defer cleanup()
-			return HandleOnboardUser(ctx, &req, svc), nil
+			return HandleOnboardUser(ctx, &req, newOnboardSvc()), nil
 		},
 	)
 
@@ -43,12 +38,7 @@ func NewServer() *server.MCPServer {
 			mcp.WithString("resume_label", mcp.Description("Short identifier, e.g. 'backend'"), mcp.Required()),
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			svc, cleanup, err := newOnboardSvc()
-			if err != nil {
-				return errorResult(fmt.Sprintf("setup: %v", err)), nil
-			}
-			defer cleanup()
-			return HandleAddResume(ctx, &req, svc), nil
+			return HandleAddResume(ctx, &req, newOnboardSvc()), nil
 		},
 	)
 

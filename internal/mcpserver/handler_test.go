@@ -397,16 +397,14 @@ func TestHandleGetConfigWithProfile_OnboardedTrue_WhenResumesExist(t *testing.T)
 		t.Fatalf("write resume: %v", err)
 	}
 
-	// Create skills file (in the dedicated location expected by buildProfileStatus)
-	// Note: we must create this at the exact path buildProfileStatus expects
-	skillsPath := filepath.Join(inputsDir, "skills.md")
+	// Create skills file at dataDir root (source-scoped layout: skills go to dataDir, not inputs/).
+	skillsPath := filepath.Join(tmpDir, "skills.md")
 	if err := os.WriteFile(skillsPath, []byte("Go, Rust"), 0o644); err != nil {
 		t.Fatalf("write skills: %v", err)
 	}
 
-	// Create accomplishments file (in the dedicated location expected by buildProfileStatus)
-	// Note: we must create this at the exact path buildProfileStatus expects
-	accomplishmentsPath := filepath.Join(inputsDir, "accomplishments.md")
+	// Create accomplishments file at dataDir root using the accomplishments-N.md naming convention.
+	accomplishmentsPath := filepath.Join(tmpDir, "accomplishments-0.md")
 	if err := os.WriteFile(accomplishmentsPath, []byte("accomplished things"), 0o644); err != nil {
 		t.Fatalf("write accomplishments: %v", err)
 	}
@@ -439,15 +437,14 @@ func TestHandleGetConfigWithProfile_OnboardedTrue_WhenResumesExist(t *testing.T)
 		t.Error("profile.onboarded = false, want true when resumes exist")
 	}
 
-	// Check resumes list
-	// Note: ResumeRepository includes all .md/.txt files in the inputs directory,
-	// which will include skills.md and accomplishments.md. So we expect 4 items.
+	// Check resumes list — only the 2 actual resume files in inputs/ (skills/accomplishments
+	// are now in the dataDir root, not inputs/, so they are not counted as resumes).
 	resumesList, ok := profile["resumes"].([]interface{})
 	if !ok {
 		t.Errorf("profile.resumes is not a list: %T", profile["resumes"])
 	}
-	if len(resumesList) != 4 {
-		t.Errorf("profile.resumes has %d items, want 4; got: %v", len(resumesList), resumesList)
+	if len(resumesList) != 2 {
+		t.Errorf("profile.resumes has %d items, want 2; got: %v", len(resumesList), resumesList)
 	}
 
 	// Check has_skills is true
@@ -465,7 +462,7 @@ func TestHandleGetConfigWithProfile_OnboardedTrue_WhenResumesExist(t *testing.T)
 		t.Errorf("profile.has_accomplishments is not a bool: %T", profile["has_accomplishments"])
 	}
 	if !hasAccomplishments {
-		t.Error("profile.has_accomplishments = false, want true when accomplishments.md exists and is non-empty")
+		t.Error("profile.has_accomplishments = false, want true when accomplishments-*.md exists and is non-empty")
 	}
 }
 
