@@ -40,6 +40,14 @@ func seedXDGEnv(t *testing.T, orchestratorURL, embedderURL string) *testEnv {
 		t.Fatalf("create config dir: %v", err)
 	}
 
+	// Pre-create data subdirectories so SQLite (go-apply/) and the resume
+	// repository (go-apply/inputs/) don't fail on missing parent directories.
+	for _, sub := range []string{"go-apply", filepath.Join("go-apply", "inputs")} {
+		if err := os.MkdirAll(filepath.Join(dataDir, sub), 0o700); err != nil {
+			t.Fatalf("create data subdir %s: %v", sub, err)
+		}
+	}
+
 	cfgYAML := fmt.Sprintf(`orchestrator:
   base_url: %s
   model: test-model
@@ -129,6 +137,16 @@ func requireJSONEq(t *testing.T, expected, actual map[string]any) {
 		a, _ := json.MarshalIndent(actual, "", "  ")
 		t.Errorf("JSON mismatch:\nwant: %s\ngot:  %s", e, a)
 	}
+}
+
+// hasLogRecord reports whether any log record has the given key set to value.
+func hasLogRecord(logs []map[string]any, key, value string) bool {
+	for _, r := range logs {
+		if v, ok := r[key].(string); ok && v == value {
+			return true
+		}
+	}
+	return false
 }
 
 // requireNoErrors fails the test for every log record whose level is "ERROR".
