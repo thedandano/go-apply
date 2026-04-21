@@ -614,3 +614,66 @@ func TestSuggestForKeywords_NoLLMCalled(t *testing.T) {
 		t.Errorf("SuggestForKeywords must never call LLM, got %d calls", llm.calls)
 	}
 }
+
+// recordCapture is a slog.Handler that captures all log records for assertion.
+type recordCapture struct {
+	records []slog.Record
+}
+
+func (r *recordCapture) Enabled(_ context.Context, _ slog.Level) bool { return true }
+func (r *recordCapture) Handle(_ context.Context, rec slog.Record) error { //nolint:gocritic // slog.Handler interface requires value receiver
+	r.records = append(r.records, rec.Clone())
+	return nil
+}
+func (r *recordCapture) WithAttrs(_ []slog.Attr) slog.Handler { return r }
+func (r *recordCapture) WithGroup(_ string) slog.Handler      { return r }
+
+func TestRetrieveByVector_EmitsPerMatchAttributes(t *testing.T) {
+	t.Parallel()
+
+	capture := &recordCapture{}
+	log := slog.New(capture)
+
+	svc := augment.New(
+		&stubProfileRepository{results: []model.ProfileEmbedding{aboveThresholdEmbedding()}},
+		newStubCache(),
+		&stubEmbeddingClient{vector: fakeVector()},
+		&stubLLMClient{response: "augmented"},
+		testDefaults(),
+		log,
+	)
+
+	_, _, err := svc.AugmentResumeText(context.Background(), model.AugmentInput{
+		ResumeText: "engineer",
+		JDKeywords: []string{"distributed"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var matchRecord *slog.Record
+	for i := range capture.records {
+		if capture.records[i].Message == "vector match" {
+			matchRecord = &capture.records[i]
+			break
+		}
+	}
+	if matchRecord == nil {
+		t.Fatal("expected 'vector match' log record, none found")
+	}
+
+	attrs := make(map[string]any)
+	matchRecord.Attrs(func(a slog.Attr) bool {
+		attrs[a.Key] = a.Value.Any()
+		return true
+	})
+	if attrs["keyword"] == nil {
+		t.Error("expected 'keyword' attribute in match log record")
+	}
+	if attrs["source"] == nil {
+		t.Error("expected 'source' attribute in match log record")
+	}
+	if attrs["similarity"] == nil {
+		t.Error("expected 'similarity' attribute in match log record")
+	}
+}
