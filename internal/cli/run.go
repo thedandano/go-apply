@@ -19,6 +19,7 @@ import (
 	"github.com/thedandano/go-apply/internal/service/coverletter"
 	"github.com/thedandano/go-apply/internal/service/fetcher"
 	"github.com/thedandano/go-apply/internal/service/llm"
+	"github.com/thedandano/go-apply/internal/service/onboardcheck"
 	"github.com/thedandano/go-apply/internal/service/orchestrator"
 	"github.com/thedandano/go-apply/internal/service/pipeline"
 	"github.com/thedandano/go-apply/internal/service/scorer"
@@ -91,6 +92,9 @@ Outputs a JSON result to stdout when --headless is set.`,
 			dataDir := config.DataDir()
 			appRepo := fs.NewApplicationRepository(dataDir)
 			resumeRepo := fs.NewResumeRepository(dataDir)
+			if err := onboardcheck.CheckOnboarded(cfg, resumeRepo); err != nil {
+				return err
+			}
 			docLoader := loader.New()
 
 			// Wire profile DB (implements both port.ProfileRepository and port.KeywordCacheRepository).
