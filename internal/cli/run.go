@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 
@@ -80,6 +81,14 @@ Outputs a JSON result to stdout when --headless is set.`,
 
 			log := slog.Default()
 
+			dataDir := config.DataDir()
+			// filepath.Glob errors only on malformed patterns; literal patterns here cannot fail.
+			accomplishmentsMatches, _ := filepath.Glob(filepath.Join(dataDir, "inputs", "accomplishments-*.md"))
+			skillsMatches, _ := filepath.Glob(filepath.Join(dataDir, "inputs", "skills*.md"))
+			if len(accomplishmentsMatches) > 0 || len(skillsMatches) > 0 {
+				log.WarnContext(cmd.Context(), "legacy profile files detected in inputs/; re-run 'go-apply onboard' to move them")
+			}
+
 			// Wire LLM clients.
 			llmClient := llm.New(cfg.Orchestrator.BaseURL, cfg.Orchestrator.Model, cfg.Orchestrator.APIKey, defaults, log)
 
@@ -87,7 +96,6 @@ Outputs a JSON result to stdout when --headless is set.`,
 			orch := orchestrator.NewLLMOrchestrator(llmClient)
 
 			// Wire repositories.
-			dataDir := config.DataDir()
 			appRepo := fs.NewApplicationRepository(dataDir)
 			resumeRepo := fs.NewResumeRepository(dataDir)
 			if err := onboardcheck.CheckOnboarded(resumeRepo); err != nil {
