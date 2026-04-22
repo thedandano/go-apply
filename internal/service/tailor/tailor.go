@@ -42,8 +42,15 @@ func (s *Service) TailorResume(ctx context.Context, input *model.TailorInput) (m
 
 	// Tier-1: inject missing keywords into Skills section.
 	s.log.DebugContext(ctx, "tailor tier-1 start", "input_bytes", len(input.ResumeText), "keywords", len(allKeywords))
-	tier1Text, addedKeywords := AddKeywordsToSkillsSection(input.ResumeText, allKeywords)
-	s.log.DebugContext(ctx, "tailor tier-1 end", "output_bytes", len(tier1Text), "added_keywords", len(addedKeywords))
+	tier1Text, addedKeywords, skillsSectionFound := AddKeywordsToSkillsSection(input.ResumeText, allKeywords)
+	if !skillsSectionFound {
+		s.log.WarnContext(ctx, "tailor tier-1: no skills section header found in resume — T1 was a no-op",
+			"input_bytes", len(input.ResumeText))
+	}
+	s.log.DebugContext(ctx, "tailor tier-1 end",
+		"output_bytes", len(tier1Text),
+		"added_keywords", len(addedKeywords),
+		"skills_section_found", skillsSectionFound)
 
 	if logger.Verbose() {
 		if diff := debugdump.DiffSection("tailor.t1.skills", "Skills", input.ResumeText, tier1Text); diff != "" {

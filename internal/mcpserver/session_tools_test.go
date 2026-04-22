@@ -465,6 +465,17 @@ func TestHandleSubmitTailorT1_HappyPath_ReturnsNewScore(t *testing.T) {
 	if _, ok := data["added_keywords"]; !ok {
 		t.Errorf("expected added_keywords key in data, got: %s", text)
 	}
+	// skills_section_found must always be present so the orchestrator can distinguish
+	// "T1 was a no-op because no skills header exists" from "T1 ran successfully".
+	found, ok := data["skills_section_found"].(bool)
+	if !ok {
+		t.Errorf("expected skills_section_found bool in data, got: %s", text)
+	}
+	// The stub resume has no skills header, so this must be false — confirms the
+	// orchestrator-visible signal matches the internal state.
+	if found {
+		t.Errorf("expected skills_section_found=false for stub resume without skills header, got true — full: %s", text)
+	}
 }
 
 func TestHandleSubmitTailorT1_MissingSkillAdds_ReturnsError(t *testing.T) {

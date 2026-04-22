@@ -403,8 +403,15 @@ func HandleSubmitTailorT1WithConfig(ctx context.Context, req *mcp.CallToolReques
 	pl := pipeline.NewApplyPipeline(deps)
 
 	logger.Banner(ctx, slog.Default(), "Tailor", "T1")
-	tailored, addedKeywords := tailor.AddKeywordsToSkillsSection(baseText, skillAdds)
-	slog.InfoContext(ctx, "tailor T1 complete", "added_keywords", len(addedKeywords), "keywords", addedKeywords)
+	tailored, addedKeywords, skillsSectionFound := tailor.AddKeywordsToSkillsSection(baseText, skillAdds)
+	if !skillsSectionFound {
+		slog.WarnContext(ctx, "tailor T1: no skills section header found in resume — T1 was a no-op",
+			"session_id", sessionID, "skill_adds", len(skillAdds))
+	}
+	slog.InfoContext(ctx, "tailor T1 complete",
+		"added_keywords", len(addedKeywords),
+		"keywords", addedKeywords,
+		"skills_section_found", skillsSectionFound)
 	sess.TailoredText = tailored
 	sess.State = stateT1Applied
 
@@ -424,14 +431,16 @@ func HandleSubmitTailorT1WithConfig(ctx context.Context, req *mcp.CallToolReques
 	sess.ScoreResult.BestScore = newScoreTotal
 
 	type t1Data struct {
-		PreviousScore float64           `json:"previous_score"`
-		NewScore      model.ScoreResult `json:"new_score"`
-		AddedKeywords []string          `json:"added_keywords"`
+		PreviousScore      float64           `json:"previous_score"`
+		NewScore           model.ScoreResult `json:"new_score"`
+		AddedKeywords      []string          `json:"added_keywords"`
+		SkillsSectionFound bool              `json:"skills_section_found"`
 	}
 	resultData := t1Data{
-		PreviousScore: previousScore,
-		NewScore:      newScore,
-		AddedKeywords: addedKeywords,
+		PreviousScore:      previousScore,
+		NewScore:           newScore,
+		AddedKeywords:      addedKeywords,
+		SkillsSectionFound: skillsSectionFound,
 	}
 	resultBytes, _ := json.Marshal(resultData)
 	slog.DebugContext(ctx, "mcp tool result",

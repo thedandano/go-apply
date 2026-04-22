@@ -2,38 +2,46 @@
 package tailor
 
 import (
-	"regexp"
 	"strings"
 )
 
-// skillsHeaderRe matches common Skills section headers:
-// "## Skills", "Skills:", "SKILLS", "## Technical Skills", "Core Skills:", etc.
-var skillsHeaderRe = regexp.MustCompile(`(?im)^(#{0,3}\s*)((technical|core|key|professional|additional)?\s*skills[:\s]*)$`)
+// isSkillsHeaderLine returns true when a trimmed line is a section header that
+// mentions "skills". Delegates to isHeaderLine for header-shape detection, then
+// filters to skills-specific headers. Handles variants like "SKILLS & ABILITIES",
+// "Key Skills:", "## Technical Skills", "SKILLS AND ABILITIES".
+func isSkillsHeaderLine(trimmed string) bool {
+	if !isHeaderLine(trimmed) {
+		return false
+	}
+	return strings.Contains(strings.ToLower(trimmed), "skills")
+}
 
 // AddKeywordsToSkillsSection injects missing keywords into the Skills section of resumeText.
 // Deduplication is case-insensitive — keywords already present anywhere in the Skills section
-// are not re-added. Returns the modified resume text and the list of keywords that were added.
-// When no Skills section is found, the original text is returned unchanged with an empty slice.
-func AddKeywordsToSkillsSection(resumeText string, keywords []string) (string, []string) {
+// are not re-added. Returns the modified resume text, the list of keywords that were added,
+// and a boolean indicating whether a Skills section header was found. The boolean lets callers
+// distinguish "no section found" (blocker — nothing was attempted) from "section found but
+// every keyword already present" (success — nothing to do).
+func AddKeywordsToSkillsSection(resumeText string, keywords []string) (string, []string, bool) {
 	lines := strings.Split(resumeText, "\n")
 
 	skillsStart := -1
 	for i, line := range lines {
-		if skillsHeaderRe.MatchString(strings.TrimSpace(line)) {
+		if isSkillsHeaderLine(strings.TrimSpace(line)) {
 			skillsStart = i
 			break
 		}
 	}
 
 	if skillsStart == -1 {
-		return resumeText, nil
+		return resumeText, nil, false
 	}
 
 	// Find the end of the Skills section: next header or end of file.
 	skillsEnd := len(lines)
 	for i := skillsStart + 1; i < len(lines); i++ {
 		trimmed := strings.TrimSpace(lines[i])
-		if isHeaderLine(trimmed) && !skillsHeaderRe.MatchString(trimmed) {
+		if isHeaderLine(trimmed) && !isSkillsHeaderLine(trimmed) {
 			skillsEnd = i
 			break
 		}
@@ -51,7 +59,7 @@ func AddKeywordsToSkillsSection(resumeText string, keywords []string) (string, [
 	}
 
 	if len(toAdd) == 0 {
-		return resumeText, nil
+		return resumeText, nil, true
 	}
 
 	// Insert the new keywords on a line just before the end of the Skills section.
@@ -67,7 +75,7 @@ func AddKeywordsToSkillsSection(resumeText string, keywords []string) (string, [
 	newLines = append(newLines, injection)
 	newLines = append(newLines, lines[insertAt:]...)
 
-	return strings.Join(newLines, "\n"), toAdd
+	return strings.Join(newLines, "\n"), toAdd, true
 }
 
 // knownSectionKeywords is the set of lowercase first-words recognized as resume section headers.
@@ -90,6 +98,7 @@ var knownSectionKeywords = map[string]bool{
 	"technical":      true,
 	"core":           true,
 	"additional":     true,
+	"key":            true,
 }
 
 // knownCompoundHeaders is the set of lowercase full-line strings recognized as compound section headers.
