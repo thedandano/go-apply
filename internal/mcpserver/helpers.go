@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 
@@ -62,6 +63,15 @@ func loadDeps() (*config.Config, pipeline.ApplyConfig, error) {
 	logger.SetRedactor(r)
 
 	return cfg, deps, nil
+}
+
+// lineCount returns the number of lines in s. Returns 0 for an empty string,
+// otherwise strings.Count(s, "\n") + 1.
+func lineCount(s string) int {
+	if s == "" {
+		return 0
+	}
+	return strings.Count(s, "\n") + 1
 }
 
 // errorResult wraps an error message as a JSON text tool result.

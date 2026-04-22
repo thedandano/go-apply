@@ -1,13 +1,20 @@
 package mcpserver_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/thedandano/go-apply/internal/config"
+	"github.com/thedandano/go-apply/internal/logger"
 	"github.com/thedandano/go-apply/internal/mcpserver"
+	"github.com/thedandano/go-apply/internal/model"
+	"github.com/thedandano/go-apply/internal/port"
 	"github.com/thedandano/go-apply/internal/service/pipeline"
 )
 
@@ -514,6 +521,341 @@ func TestHandleSubmitTailorT1_EmptySkillAdds_ReturnsError(t *testing.T) {
 	text := extractText(t, result)
 	if !strings.Contains(text, "empty_skill_adds") {
 		t.Errorf("expected empty_skill_adds error, got: %s", text)
+	}
+}
+
+// stubScorerFailAfter succeeds on the first N calls then returns an error.
+type stubScorerFailAfter struct {
+	callsLeft atomic.Int32
+}
+
+var _ port.Scorer = (*stubScorerFailAfter)(nil)
+
+func newScorerFailAfter(n int) *stubScorerFailAfter {
+	s := &stubScorerFailAfter{}
+	s.callsLeft.Store(int32(n)) //nolint:gosec // n is small test constant
+	return s
+}
+
+func (s *stubScorerFailAfter) Score(_ *model.ScorerInput) (model.ScoreResult, error) {
+	if s.callsLeft.Add(-1) >= 0 {
+		return model.ScoreResult{
+			Breakdown: model.ScoreBreakdown{
+				KeywordMatch:   0.9,
+				ExperienceFit:  0.9,
+				ImpactEvidence: 0.9,
+				ATSFormat:      0.9,
+				Readability:    0.9,
+			},
+		}, nil
+	}
+	return model.ScoreResult{}, errors.New("rescore: injected failure")
+}
+
+// stubDocumentLoaderLong returns a resume text that is longer than 2048 bytes
+// so that PayloadAttr truncation is observable when verbose=false.
+type stubDocumentLoaderLong struct{}
+
+var _ port.DocumentLoader = (*stubDocumentLoaderLong)(nil)
+
+// longResumePrefix is a substring unique to the long stub resume.
+// It must not contain a newline so it matches inside the JSON-encoded result payload.
+const longResumePrefix = "golang experience senior engineer 5 years"
+
+func longResumeText() string {
+	// Build a string well over 2048 bytes so truncation triggers at verbose=false.
+	var b strings.Builder
+	b.WriteString(longResumePrefix)
+	line := "Go developer with extensive backend systems experience and cloud infrastructure expertise.\n"
+	for b.Len() < 3000 {
+		b.WriteString(line)
+	}
+	return b.String()
+}
+
+func (s *stubDocumentLoaderLong) Load(_ string) (string, error) { return longResumeText(), nil }
+func (s *stubDocumentLoaderLong) Supports(_ string) bool        { return true }
+
+// stubApplyConfigForSessionLong returns a config that uses the long-text loader.
+func stubApplyConfigForSessionLong() pipeline.ApplyConfig {
+	return pipeline.ApplyConfig{
+		Fetcher:   &stubJDFetcher{},
+		LLM:       &stubLLMClient{},
+		Scorer:    &stubScorer{},
+		CLGen:     nil,
+		Resumes:   &stubResumeRepo{},
+		Loader:    &stubDocumentLoaderLong{},
+		AppRepo:   &stubApplicationRepository{},
+		Defaults:  &config.AppDefaults{},
+		Presenter: nil,
+	}
+}
+
+// captureDefaultLogger installs a JSON slog handler writing to buf as the default
+// logger and returns a cleanup function that restores the previous default.
+func captureDefaultLogger(buf *bytes.Buffer) func() {
+	prev := slog.Default()
+	h := slog.NewJSONHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug})
+	slog.SetDefault(slog.New(h))
+	return func() { slog.SetDefault(prev) }
+}
+
+// fullT1Flow runs load_jd → submit_keywords → submit_tailor_t1 and returns the T1 response text.
+func fullT1Flow(t *testing.T, cfg *pipeline.ApplyConfig, skillAdds string) string {
+	t.Helper()
+
+	loadReq := callToolRequest("load_jd", map[string]any{"jd_raw_text": "Senior Go engineer. Skills: go."})
+	loadText := extractText(t, mcpserver.HandleLoadJDWithConfig(context.Background(), &loadReq, cfg))
+	var loadEnv map[string]any
+	if err := json.Unmarshal([]byte(loadText), &loadEnv); err != nil {
+		t.Fatalf("load_jd not JSON: %v", err)
+	}
+	sessionID, _ := loadEnv["session_id"].(string)
+	if sessionID == "" {
+		t.Fatal("load_jd returned no session_id")
+	}
+
+	const jdJSON = `{"title":"Go Engineer","company":"Acme","required":["go"],"preferred":[],"location":"Remote","seniority":"senior","required_years":3}`
+	kwReq := callToolRequest("submit_keywords", map[string]any{"session_id": sessionID, "jd_json": jdJSON})
+	mcpserver.HandleSubmitKeywordsWithConfig(context.Background(), &kwReq, cfg, &config.Config{})
+
+	t1Req := callToolRequest("submit_tailor_t1", map[string]any{
+		"session_id": sessionID,
+		"skill_adds": skillAdds,
+	})
+	result := mcpserver.HandleSubmitTailorT1WithConfig(context.Background(), &t1Req, cfg, &config.Config{})
+	return extractText(t, result)
+}
+
+// ── Task 2.4: tailored_text in response data ──────────────────────────────────
+
+func TestHandleSubmitTailorT1_HappyPath_ResponseContainsTailoredText(t *testing.T) {
+	cfg := stubApplyConfigForSession()
+	text := fullT1Flow(t, &cfg, `["Terraform","gRPC"]`)
+
+	var env map[string]any
+	if err := json.Unmarshal([]byte(text), &env); err != nil {
+		t.Fatalf("not JSON: %v — raw: %s", err, text)
+	}
+	if env["status"] != "ok" {
+		t.Fatalf("status = %v, want ok — full: %s", env["status"], text)
+	}
+	data, _ := env["data"].(map[string]any)
+	if data == nil {
+		t.Fatal("expected data in response")
+	}
+
+	// The stub resume has no skills header, so T1 is a no-op and tailored_text ==
+	// the original resume text returned by stubDocumentLoader.
+	tailoredText, ok := data["tailored_text"].(string)
+	if !ok {
+		t.Fatalf("expected tailored_text string in data, got: %s", text)
+	}
+	const wantText = "golang experience senior engineer 5 years"
+	if tailoredText != wantText {
+		t.Errorf("tailored_text = %q, want %q", tailoredText, wantText)
+	}
+}
+
+// ── Task 2.3: verbose-gated debug log ─────────────────────────────────────────
+
+func TestHandleSubmitTailorT1_VerboseLog_ResultPayloadGated(t *testing.T) {
+	// Use a long resume so truncation is observable at verbose=false.
+	longText := longResumeText()
+	// Sanity: long resume must exceed the 2048-byte payload limit.
+	if len(longText) <= 2048 {
+		t.Fatalf("longResumeText() is only %d bytes — must exceed 2048 for truncation test", len(longText))
+	}
+
+	tests := []struct {
+		name          string
+		verbose       bool
+		wantTruncated bool
+	}{
+		{"verbose=true keeps full payload", true, false},
+		{"verbose=false truncates payload", false, true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := stubApplyConfigForSessionLong()
+
+			var buf bytes.Buffer
+			restore := captureDefaultLogger(&buf)
+			t.Cleanup(restore)
+
+			logger.SetVerbose(tc.verbose)
+			t.Cleanup(func() { logger.SetVerbose(false) })
+
+			text := fullT1Flow(t, &cfg, `["Terraform"]`)
+
+			var env map[string]any
+			if err := json.Unmarshal([]byte(text), &env); err != nil {
+				t.Fatalf("not JSON: %v", err)
+			}
+			if env["status"] != "ok" {
+				t.Fatalf("status = %v, want ok — full: %s", env["status"], text)
+			}
+
+			// Parse captured slog output: find the "mcp tool result" line for submit_tailor_t1.
+			logOutput := buf.String()
+			foundResultLine := false
+			for _, line := range strings.Split(logOutput, "\n") {
+				if line == "" {
+					continue
+				}
+				var entry map[string]any
+				if err := json.Unmarshal([]byte(line), &entry); err != nil {
+					continue
+				}
+				if entry["msg"] != "mcp tool result" || entry["tool"] != "submit_tailor_t1" {
+					continue
+				}
+				foundResultLine = true
+				resultPayload, _ := entry["result"].(string)
+				// Truncate produces " … [N bytes omitted] … " — search for the
+				// number-agnostic substring so we don't hard-code the byte count.
+				truncationMarker := "bytes omitted"
+				if tc.wantTruncated {
+					if !strings.Contains(resultPayload, truncationMarker) {
+						t.Errorf("verbose=false: expected truncation marker in result payload (len=%d), prefix: %q",
+							len(resultPayload), resultPayload[:min(len(resultPayload), 200)])
+					}
+				} else {
+					if strings.Contains(resultPayload, truncationMarker) {
+						t.Errorf("verbose=true: unexpected truncation marker in result payload")
+					}
+					// Verify the tailored text is transitively visible in the payload.
+					if !strings.Contains(resultPayload, longResumePrefix) {
+						t.Errorf("verbose=true: expected resume prefix %q in result payload (len=%d)",
+							longResumePrefix, len(resultPayload))
+					}
+				}
+				break
+			}
+			if !foundResultLine {
+				t.Error("'mcp tool result' debug log line not found in captured output")
+			}
+		})
+	}
+}
+
+// ── Task 2.4: info log carries tailored_text_bytes / tailored_text_lines ──────
+
+func TestHandleSubmitTailorT1_InfoLog_ContainsTextBytesAndLines(t *testing.T) {
+	cfg := stubApplyConfigForSession()
+
+	var buf bytes.Buffer
+	restore := captureDefaultLogger(&buf)
+	t.Cleanup(restore)
+
+	text := fullT1Flow(t, &cfg, `["Terraform"]`)
+	var env map[string]any
+	if err := json.Unmarshal([]byte(text), &env); err != nil {
+		t.Fatalf("not JSON: %v", err)
+	}
+	if env["status"] != "ok" {
+		t.Fatalf("status = %v, want ok", env["status"])
+	}
+
+	logOutput := buf.String()
+	foundInfoLine := false
+	for _, line := range strings.Split(logOutput, "\n") {
+		if line == "" {
+			continue
+		}
+		var entry map[string]any
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			continue
+		}
+		if entry["msg"] != "tailor T1 complete" {
+			continue
+		}
+		foundInfoLine = true
+		if _, ok := entry["tailored_text_bytes"]; !ok {
+			t.Error("info log missing tailored_text_bytes")
+		}
+		if _, ok := entry["tailored_text_lines"]; !ok {
+			t.Error("info log missing tailored_text_lines")
+		}
+		break
+	}
+	if !foundInfoLine {
+		t.Error("'tailor T1 complete' info log line not found in captured output")
+	}
+}
+
+// ── Task 2.5: error paths do not contain tailored_text ────────────────────────
+
+func TestHandleSubmitTailorT1_BadInput_ErrorEnvelopeHasNoTailoredText(t *testing.T) {
+	cfg := stubApplyConfigForSession()
+	req := callToolRequest("submit_tailor_t1", map[string]any{
+		"session_id": "any-id",
+		"skill_adds": `not-valid-json`,
+	})
+	result := mcpserver.HandleSubmitTailorT1WithConfig(context.Background(), &req, &cfg, &config.Config{})
+	text := extractText(t, result)
+
+	var env map[string]any
+	if err := json.Unmarshal([]byte(text), &env); err != nil {
+		t.Fatalf("not JSON: %v", err)
+	}
+	if env["status"] != "error" {
+		t.Fatalf("status = %v, want error", env["status"])
+	}
+	if strings.Contains(text, "tailored_text") {
+		t.Errorf("error envelope must not contain tailored_text, got: %s", text)
+	}
+}
+
+func TestHandleSubmitTailorT1_RescoreFailure_ErrorEnvelopeHasNoTailoredText(t *testing.T) {
+	// Use a scorer that succeeds on the first N calls (one per resume in stubResumeRepo)
+	// during submit_keywords, then fails on the rescore call in submit_tailor_t1.
+	failingScorer := newScorerFailAfter(1)
+	cfg := pipeline.ApplyConfig{
+		Fetcher:   &stubJDFetcher{},
+		LLM:       &stubLLMClient{},
+		Scorer:    failingScorer,
+		CLGen:     nil,
+		Resumes:   &stubResumeRepo{},
+		Loader:    &stubDocumentLoader{},
+		AppRepo:   &stubApplicationRepository{},
+		Defaults:  &config.AppDefaults{},
+		Presenter: nil,
+	}
+
+	loadReq := callToolRequest("load_jd", map[string]any{"jd_raw_text": "Senior Go engineer."})
+	loadText := extractText(t, mcpserver.HandleLoadJDWithConfig(context.Background(), &loadReq, &cfg))
+	var loadEnv map[string]any
+	if err := json.Unmarshal([]byte(loadText), &loadEnv); err != nil {
+		t.Fatalf("load_jd not JSON: %v", err)
+	}
+	sessionID, _ := loadEnv["session_id"].(string)
+
+	const jdJSON = `{"title":"Go Engineer","company":"Acme","required":["go"],"preferred":[],"location":"Remote","seniority":"senior","required_years":3}`
+	kwReq := callToolRequest("submit_keywords", map[string]any{"session_id": sessionID, "jd_json": jdJSON})
+	mcpserver.HandleSubmitKeywordsWithConfig(context.Background(), &kwReq, &cfg, &config.Config{})
+
+	t1Req := callToolRequest("submit_tailor_t1", map[string]any{
+		"session_id": sessionID,
+		"skill_adds": `["Terraform"]`,
+	})
+	result := mcpserver.HandleSubmitTailorT1WithConfig(context.Background(), &t1Req, &cfg, &config.Config{})
+	text := extractText(t, result)
+
+	var env map[string]any
+	if err := json.Unmarshal([]byte(text), &env); err != nil {
+		t.Fatalf("not JSON: %v", err)
+	}
+	if env["status"] != "error" {
+		t.Fatalf("status = %v, want error (rescore should fail) — full: %s", env["status"], text)
+	}
+	errObj, _ := env["error"].(map[string]any)
+	if errObj == nil || errObj["code"] != "rescore_failed" {
+		t.Errorf("expected code rescore_failed, got: %v", errObj)
+	}
+	if strings.Contains(text, "tailored_text") {
+		t.Errorf("error envelope must not contain tailored_text, got: %s", text)
 	}
 }
 

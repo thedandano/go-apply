@@ -411,7 +411,10 @@ func HandleSubmitTailorT1WithConfig(ctx context.Context, req *mcp.CallToolReques
 	slog.InfoContext(ctx, "tailor T1 complete",
 		"added_keywords", len(addedKeywords),
 		"keywords", addedKeywords,
-		"skills_section_found", skillsSectionFound)
+		"skills_section_found", skillsSectionFound,
+		slog.Int("tailored_text_bytes", len(tailored)),
+		slog.Int("tailored_text_lines", lineCount(tailored)),
+	)
 	sess.TailoredText = tailored
 	sess.State = stateT1Applied
 
@@ -435,12 +438,14 @@ func HandleSubmitTailorT1WithConfig(ctx context.Context, req *mcp.CallToolReques
 		NewScore           model.ScoreResult `json:"new_score"`
 		AddedKeywords      []string          `json:"added_keywords"`
 		SkillsSectionFound bool              `json:"skills_section_found"`
+		TailoredText       string            `json:"tailored_text,omitempty"`
 	}
 	resultData := t1Data{
 		PreviousScore:      previousScore,
 		NewScore:           newScore,
 		AddedKeywords:      addedKeywords,
 		SkillsSectionFound: skillsSectionFound,
+		TailoredText:       sess.TailoredText,
 	}
 	resultBytes, _ := json.Marshal(resultData)
 	slog.DebugContext(ctx, "mcp tool result",
