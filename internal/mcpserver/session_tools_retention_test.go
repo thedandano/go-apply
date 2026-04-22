@@ -219,6 +219,60 @@ func TestHandleSubmitTailorT2_RescoreFailure_SessionRetained(t *testing.T) {
 	}
 }
 
+// TestHandleSubmitTailorT2_RetryFromT2Applied verifies that after a T2 rescore
+// failure leaves the session at stateT2Applied, a subsequent T2 call on the same
+// session succeeds — i.e. the retained session state is recoverable, not terminal.
+// This mirrors T1's retry-from-T1Applied semantics.
+func TestHandleSubmitTailorT2_RetryFromT2Applied(t *testing.T) {
+	// First T2 call: allow 1 score (for submit_keywords), then fail rescore.
+	failingScorer := newRetentionScorerFailAfter(1)
+	failingCfg := pipeline.ApplyConfig{
+		Fetcher:   &retentionJDFetcher{},
+		LLM:       &retentionLLMClient{},
+		Scorer:    failingScorer,
+		Resumes:   &retentionResumeRepo{},
+		Loader:    &retentionDocumentLoader{},
+		AppRepo:   &retentionAppRepo{},
+		Defaults:  &config.AppDefaults{},
+		Presenter: nil,
+	}
+
+	sessionID := retentionFullSetup(t, &failingCfg)
+
+	// First T2 — rescore fails, session advances to stateT2Applied.
+	t2Req1 := callToolRequestInternal("submit_tailor_t2", map[string]any{
+		"session_id":      sessionID,
+		"bullet_rewrites": `[{"original":"golang experience senior engineer 5 years","replacement":"golang experience senior engineer 5 years, Kubernetes"}]`,
+	})
+	result1 := HandleSubmitTailorT2WithConfig(context.Background(), &t2Req1, &failingCfg, &config.Config{})
+	var env1 map[string]any
+	if err := json.Unmarshal([]byte(extractTextInternal(t, result1)), &env1); err != nil {
+		t.Fatalf("first T2 not JSON: %v", err)
+	}
+	if env1["status"] != "error" {
+		t.Fatalf("first T2 status = %v, want error", env1["status"])
+	}
+	if sess := sessions.Get(sessionID); sess == nil || sess.State != stateT2Applied {
+		t.Fatalf("expected session at stateT2Applied after first T2 failure, got %v", sess)
+	}
+
+	// Second T2 — passing scorer; retry must succeed (not return invalid_state).
+	passingCfg := retentionPassingCfg()
+	t2Req2 := callToolRequestInternal("submit_tailor_t2", map[string]any{
+		"session_id":      sessionID,
+		"bullet_rewrites": `[{"original":"golang experience senior engineer 5 years","replacement":"golang experience senior engineer 5 years, Docker"}]`,
+	})
+	result2 := HandleSubmitTailorT2WithConfig(context.Background(), &t2Req2, &passingCfg, &config.Config{})
+	text2 := extractTextInternal(t, result2)
+	var env2 map[string]any
+	if err := json.Unmarshal([]byte(text2), &env2); err != nil {
+		t.Fatalf("retry T2 not JSON: %v", err)
+	}
+	if env2["status"] != "ok" {
+		t.Fatalf("retry T2 status = %v, want ok — full: %s", env2["status"], text2)
+	}
+}
+
 // extractTextInternal is a package-level copy of extractText for internal tests.
 func extractTextInternal(t *testing.T, result *mcp.CallToolResult) string {
 	t.Helper()

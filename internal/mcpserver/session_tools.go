@@ -493,9 +493,9 @@ func HandleSubmitTailorT2WithConfig(ctx context.Context, req *mcp.CallToolReques
 		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t2", "session_not_found",
 			"session not found — call load_jd first", false))
 	}
-	if sess.State != stateScored && sess.State != stateT1Applied {
+	if sess.State != stateScored && sess.State != stateT1Applied && sess.State != stateT2Applied {
 		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t2", "invalid_state",
-			fmt.Sprintf("expected state %q or %q, got %q", stateScored, stateT1Applied, sess.State), false))
+			fmt.Sprintf("expected state %q, %q, or %q, got %q", stateScored, stateT1Applied, stateT2Applied, sess.State), false))
 	}
 
 	if deps == nil {
