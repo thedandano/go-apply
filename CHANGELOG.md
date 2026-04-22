@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.2](https://github.com/thedandano/go-apply/compare/v0.2.1...v0.2.2) (2026-04-22)
+
+
+### Bug Fixes
+
+* **ci:** release pipeline fixes and README accuracy pass for v0.2.x ([8d8f1fd](https://github.com/thedandano/go-apply/commit/8d8f1fd0f65bce01757b4b16cc3bcfdfaf9e3b4b))
+
 ## [0.2.0](https://github.com/thedandano/go-apply/compare/v0.1.8...v0.2.0) (2026-04-22)
 
 
