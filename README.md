@@ -16,11 +16,28 @@ AI-powered job application CLI. Scores your resume against job postings, tailors
 
 | Mode | Command | Use case |
 |------|---------|----------|
-| Headless / Agent | `go-apply run --url <url>` | Scripts, openclaw, hermes |
-| MCP Server | `go-apply serve` | Claude Code, openclaw, hermes |
-| Interactive TUI | _(coming soon)_ | Human at terminal |
+| MCP Server | `go-apply serve` | Claude Code, Hermes, Openclaw — full orchestrated experience with automatic profile use |
+| Headless CLI | `go-apply run --url <url>` | For agents without MCP support |
 
-After installing, run `go-apply setup mcp --agent claude` to register with Claude Code.
+MCP is the recommended path. The host agent drives the full tool flow and your onboarded profile is used automatically. For agents without MCP, use `go-apply run` directly — see [Commands](#commands).
+
+## Quick Start
+
+1. **Install**
+   ```bash
+   curl -sSfL https://raw.githubusercontent.com/thedandano/go-apply/main/scripts/install.sh | bash
+   ```
+
+2. **Register with your MCP agent**
+   ```bash
+   go-apply setup mcp --agent claude    # Claude Code
+   go-apply setup mcp --agent hermes    # Hermes
+   go-apply setup mcp --agent openclaw  # Openclaw
+   ```
+
+3. **Ask your agent to onboard and apply** — the agent drives the full flow via MCP tools:
+   - *"Onboard my resume at ~/docs/resume.md"*
+   - *"Score my resume against this job posting and tailor it"*
 
 ## Installation
 
@@ -51,28 +68,6 @@ curl -sSfL https://raw.githubusercontent.com/thedandano/go-apply/main/scripts/in
 curl -sSfL https://raw.githubusercontent.com/thedandano/go-apply/main/scripts/install.sh | bash -s -- --uninstall --purge
 ```
 
-### Homebrew (macOS/Linux)
-
-```bash
-brew install thedandano/tap/go-apply
-```
-
-### Go install
-
-```bash
-go install github.com/thedandano/go-apply/cmd/go-apply@latest
-```
-
-> Note: `go install` does not embed version info — `go-apply version` will show `dev`.
-
-### From source
-
-```bash
-git clone https://github.com/thedandano/go-apply.git
-cd go-apply
-make build   # binary at bin/go-apply
-```
-
 ## Configuration
 
 Config file: `~/.config/go-apply/config.yaml`
@@ -83,12 +78,6 @@ orchestrator:
   base_url: https://api.anthropic.com/v1
   model: claude-sonnet-4-6
   api_key: sk-ant-...        # or set GO_APPLY_API_KEY env var
-
-embedder:
-  base_url: http://localhost:11434/v1
-  model: nomic-embed-text
-  api_key: ""
-embedding_dim: 768
 
 years_of_experience: 7
 default_seniority: senior
@@ -189,11 +178,11 @@ Pipeline events (step-started/completed/failed) are written as JSON lines to std
 |------|---------|-------------|
 | `--url` | — | URL of the job posting |
 | `--text` | — | Raw JD text (mutually exclusive with `--url`) |
-| `--headless` | `true` | JSON output mode (default; TUI coming in future) |
+| `--headless` | `true` | JSON output mode |
 | `--channel` | `COLD` | Application channel: `COLD`, `REFERRAL`, `RECRUITER` |
-| `--accomplishments` | — | Path to accomplishments doc for tier-2 bullet rewriting (optional) |
+| `--accomplishments` | — | Path to accomplishments doc; **required for tailoring** — omitting it skips T1 and T2 entirely |
 
-## MCP Server (Claude Code)
+## MCP Server (Claude Code, Hermes, Openclaw)
 
 Add to Claude Code `settings.json`:
 ```json
@@ -253,9 +242,9 @@ Run the full apply pipeline against a job description.
 |------|---------|-------------|
 | `--url <url>` | — | URL of the job posting to fetch |
 | `--text <jd>` | — | Raw job description text (mutually exclusive with `--url`) |
-| `--headless` | `true` | JSON output mode (default; TUI coming in future) |
+| `--headless` | `true` | JSON output mode |
 | `--channel <channel>` | `COLD` | Application channel: `COLD`, `REFERRAL`, `RECRUITER` |
-| `--accomplishments <path>` | — | Path to accomplishments doc for tier-2 bullet rewriting (optional) |
+| `--accomplishments <path>` | — | Path to accomplishments doc; **required for tailoring** — omitting it skips T1 and T2 entirely |
 
 ### `go-apply serve`
 
@@ -309,8 +298,6 @@ View recent go-apply log entries.
 
 Update go-apply to the latest GitHub release. No flags.
 
-> Note: cannot self-update a development build (`go install` builds).
-
 ### `go-apply version`
 
 Print the go-apply version. No flags.
@@ -319,8 +306,7 @@ Print the go-apply version. No flags.
 
 | Feature | Status |
 |---------|--------|
-| Interactive TUI | Coming soon |
-| Resume tailoring (keyword injection + bullet rewriting) | Coming soon |
-| Multi-resume scoring with full breakdown | Available via `get_score` |
-| MCP integration (Claude Code) | Available |
-| Headless agent support (openclaw, hermes) | Available |
+| Resume tailoring (keyword injection + bullet rewriting) | Shipped |
+| Multi-resume scoring with full breakdown | Shipped |
+| MCP integration (Claude Code, Hermes, Openclaw) | Shipped |
+| Headless CLI (agents without MCP) | Shipped |
