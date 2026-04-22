@@ -539,6 +539,90 @@ func TestApplyPipeline_TailorStep_Tier1ScoreSet(t *testing.T) {
 	}
 }
 
+// TestApplyPipeline_PipelineResultContainsCascadeTailoredText asserts that
+// TailoredText set by the tailor stub flows into PipelineResult.Cascade and
+// round-trips through json.Marshal as cascade.tailored_text.
+func TestApplyPipeline_PipelineResultContainsCascadeTailoredText(t *testing.T) {
+	llmSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
+			"choices": []map[string]any{
+				{"message": map[string]any{
+					"content": `{"title":"SWE","company":"Acme","required":["python","golang","kubernetes"],"preferred":["docker"],"location":"Remote","seniority":"senior","required_years":3}`,
+				}},
+			},
+		})
+	}))
+	defer llmSrv.Close()
+
+	pres := &capturingPresenter{}
+	cfg := &config.Config{
+		Orchestrator:      config.LLMProviderConfig{BaseURL: llmSrv.URL, Model: "test", APIKey: "test"},
+		YearsOfExperience: 5,
+		DefaultSeniority:  "senior",
+	}
+	defaults, err := config.LoadDefaults()
+	if err != nil {
+		t.Fatalf("LoadDefaults: %v", err)
+	}
+	llmClient := llm.New(llmSrv.URL, "test", "test", defaults, nil)
+
+	pl := pipeline.NewApplyPipeline(&pipeline.ApplyConfig{
+		Fetcher:   &stubJDFetcher{},
+		LLM:       llmClient,
+		Scorer:    scorer.New(defaults),
+		CLGen:     nil,
+		Resumes:   &stubResumeRepo{},
+		Loader:    &stubDocumentLoader{},
+		AppRepo:   &stubAppRepo{},
+		Presenter: pres,
+		Defaults:  defaults,
+		Tailor:    &stubTailorWithTier1Text{},
+	})
+
+	err = pl.Run(context.Background(), pipeline.ApplyRequest{
+		URLOrText:           `We are hiring a senior Go engineer. Required: python, golang, kubernetes. Preferred: docker.`,
+		IsText:              true,
+		Channel:             model.ChannelCold,
+		Config:              cfg,
+		AccomplishmentsText: "accomplishments text",
+	})
+	if err != nil {
+		t.Fatalf("pipeline error: %v", err)
+	}
+	if pres.result == nil {
+		t.Fatal("expected result, got nil")
+	}
+	if pres.result.Cascade == nil {
+		t.Fatal("Cascade is nil — tailor step did not run")
+	}
+
+	const wantTailoredText = "tailored resume text golang kubernetes docker python"
+	if pres.result.Cascade.TailoredText != wantTailoredText {
+		t.Errorf("Cascade.TailoredText = %q, want %q", pres.result.Cascade.TailoredText, wantTailoredText)
+	}
+
+	// Verify round-trip through JSON: cascade.tailored_text must be present and correct.
+	out, err := json.Marshal(pres.result)
+	if err != nil {
+		t.Fatalf("json.Marshal(result): %v", err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(out, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	cascade, ok := decoded["cascade"].(map[string]any)
+	if !ok {
+		t.Fatalf("cascade key missing or wrong type in JSON: %s", string(out))
+	}
+	gotTailored, ok := cascade["tailored_text"].(string)
+	if !ok {
+		t.Fatalf("cascade.tailored_text missing or wrong type in JSON: %s", string(out))
+	}
+	if gotTailored != wantTailoredText {
+		t.Errorf("cascade.tailored_text = %q, want %q", gotTailored, wantTailoredText)
+	}
+}
+
 func TestScoreResumes_ReturnsScoresAndBest(t *testing.T) {
 	pres := &capturingPresenter{}
 	cfg := minimalApplyConfig(pres)
