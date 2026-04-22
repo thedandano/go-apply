@@ -16,7 +16,6 @@ import (
 	"github.com/thedandano/go-apply/internal/model"
 	"github.com/thedandano/go-apply/internal/port"
 	"github.com/thedandano/go-apply/internal/repository/fs"
-	"github.com/thedandano/go-apply/internal/service/llm"
 	"github.com/thedandano/go-apply/internal/service/onboarding"
 )
 
@@ -212,46 +211,23 @@ func buildProfileStatus(dataDir string) map[string]interface{} {
 		profileObj["resumes"] = resumeLabels
 	}
 
-	// Check for skills.md
-	skillsPath := filepath.Join(dataDir, "inputs", "skills.md")
+	// Check for skills.md (written to dataDir root by onboarding).
+	skillsPath := filepath.Join(dataDir, "skills.md")
 	if info, err := os.Stat(skillsPath); err == nil && info.Size() > 0 {
 		profileObj["has_skills"] = true
 	}
 
-	// Check for accomplishments.md
-	accomplishmentsPath := filepath.Join(dataDir, "inputs", "accomplishments.md")
-	if info, err := os.Stat(accomplishmentsPath); err == nil && info.Size() > 0 {
+	// Check for any accomplishments-N.md file (written to dataDir root by onboarding).
+	accomplishmentsMatches, _ := filepath.Glob(filepath.Join(dataDir, "accomplishments-*.md"))
+	if len(accomplishmentsMatches) > 0 {
 		profileObj["has_accomplishments"] = true
 	}
 
 	return profileObj
 }
 
-// newOnboardSvc opens a fresh SQLite profile repository and constructs an
-// onboarding.Service. The returned cleanup function must be called when the
-// service is no longer needed to release the database connection.
-func newOnboardSvc() (port.Onboarder, func(), error) {
-	cfg, err := config.Load()
-	if err != nil {
-		return nil, nil, fmt.Errorf("load config: %w", err)
-	}
-	defaults, err := config.LoadDefaults()
-	if err != nil {
-		return nil, nil, fmt.Errorf("load defaults: %w", err)
-	}
-
-	if strings.TrimSpace(cfg.Embedder.BaseURL) == "" || strings.TrimSpace(cfg.Embedder.Model) == "" {
-		return nil, nil, fmt.Errorf("embedder not configured — use update_config to set embedder.base_url, embedder.model, and optionally embedder.api_key before onboarding")
-	}
-
-	log := slog.Default()
-	embedderClient := llm.New(cfg.Embedder.BaseURL, cfg.Embedder.Model, cfg.Embedder.APIKey, defaults, log)
-	profileRepo, err := newSQLiteProfile(cfg)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	svc := onboarding.New(profileRepo, embedderClient, config.DataDir(), log)
-	cleanup := func() { _ = profileRepo.Close() }
-	return svc, cleanup, nil
+// newOnboardSvc constructs an onboarding.Service backed by the data directory.
+// It is a simple constructor with no external dependencies to wire.
+func newOnboardSvc() port.Onboarder {
+	return onboarding.New(config.DataDir(), slog.Default())
 }

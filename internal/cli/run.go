@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 
@@ -15,7 +16,6 @@ import (
 	"github.com/thedandano/go-apply/internal/presenter/headless"
 	"github.com/thedandano/go-apply/internal/redact"
 	"github.com/thedandano/go-apply/internal/repository/fs"
-	"github.com/thedandano/go-apply/internal/service/augment"
 	"github.com/thedandano/go-apply/internal/service/coverletter"
 	"github.com/thedandano/go-apply/internal/service/fetcher"
 	"github.com/thedandano/go-apply/internal/service/llm"
@@ -81,30 +81,29 @@ Outputs a JSON result to stdout when --headless is set.`,
 
 			log := slog.Default()
 
+			dataDir := config.DataDir()
+			// filepath.Glob errors only on malformed patterns; literal patterns here cannot fail.
+			accomplishmentsMatches, _ := filepath.Glob(filepath.Join(dataDir, "inputs", "accomplishments-*.md"))
+			skillsMatches, _ := filepath.Glob(filepath.Join(dataDir, "inputs", "skills*.md"))
+			if len(accomplishmentsMatches) > 0 || len(skillsMatches) > 0 {
+				log.WarnContext(cmd.Context(), "legacy profile files detected in inputs/; re-run 'go-apply onboard' to move them")
+			}
+
 			// Wire LLM clients.
 			llmClient := llm.New(cfg.Orchestrator.BaseURL, cfg.Orchestrator.Model, cfg.Orchestrator.APIKey, defaults, log)
-			embedderClient := llm.New(cfg.Embedder.BaseURL, cfg.Embedder.Model, cfg.Embedder.APIKey, defaults, log)
 
 			// Wire orchestrator for CLI/TUI mode.
 			orch := orchestrator.NewLLMOrchestrator(llmClient)
 
 			// Wire repositories.
-			dataDir := config.DataDir()
 			appRepo := fs.NewApplicationRepository(dataDir)
 			resumeRepo := fs.NewResumeRepository(dataDir)
-			if err := onboardcheck.CheckOnboarded(cfg, resumeRepo); err != nil {
+			if err := onboardcheck.CheckOnboarded(resumeRepo); err != nil {
 				return err
 			}
 			docLoader := loader.New()
 
-			// Wire profile DB (implements both port.ProfileRepository and port.KeywordCacheRepository).
-			profileRepo, err := newSQLiteProfile(cfg)
-			if err != nil {
-				return err
-			}
-
 			// Wire services.
-			augmentSvc := augment.New(profileRepo, profileRepo, embedderClient, llmClient, defaults, log)
 			scorerSvc := scorer.New(defaults)
 			clGen := coverletter.New(llmClient, defaults, log)
 			fetcherSvc := fetcher.NewFallback(defaults, log)
@@ -123,7 +122,6 @@ Outputs a JSON result to stdout when --headless is set.`,
 				Resumes:      resumeRepo,
 				Loader:       docLoader,
 				AppRepo:      appRepo,
-				Augment:      augmentSvc,
 				Presenter:    pres,
 				Defaults:     defaults,
 				Tailor:       tailorSvc,

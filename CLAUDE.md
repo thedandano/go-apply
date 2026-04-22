@@ -31,4 +31,4 @@ A Go CLI that scores resumes against job postings, tailors them via a two-tier c
 ## Configuration
 - Config loaded from `~/.config/go-apply/config.yaml`
 - API key from `GO_APPLY_API_KEY` env var takes precedence over config file
-- Data (profile.db, jd_cache/) stored in `~/.local/share/go-apply/`
+- Data (resumes in `inputs/`, jd_cache/) stored in `~/.local/share/go-apply/`

@@ -1,5 +1,5 @@
-// Package onboarding stores resume, skills, and accomplishments text into the
-// profile repository, embedding each document for later vector retrieval.
+// Package onboarding stores resume, skills, and accomplishments text as files
+// on disk. It no longer embeds documents into a vector store.
 package onboarding
 
 import (
@@ -19,28 +19,25 @@ import (
 var _ port.Onboarder = (*Service)(nil)
 
 // Service implements port.Onboarder.
-// It writes text files to DataDir/inputs/, then embeds and upserts each into
-// the profile repository. Individual embed/upsert failures degrade to Warnings.
+// It writes text files to disk:
+//   - Resumes → dataDir/inputs/<label>.txt
+//   - Skills  → dataDir/skills.md
+//   - Accomplishments → dataDir/accomplishments-<n>.md
 type Service struct {
-	profile  port.ProfileRepository
-	embedder port.EmbeddingClient
-	dataDir  string
-	log      *slog.Logger
+	dataDir string
+	log     *slog.Logger
 }
 
-// New constructs a Service with the provided dependencies.
+// New constructs a Service that writes profile documents to dataDir.
 // dataDir should be config.DataDir().
-func New(profile port.ProfileRepository, embedder port.EmbeddingClient, dataDir string, log *slog.Logger) *Service {
+func New(dataDir string, log *slog.Logger) *Service {
 	return &Service{
-		profile:  profile,
-		embedder: embedder,
-		dataDir:  dataDir,
-		log:      log,
+		dataDir: dataDir,
+		log:     log,
 	}
 }
 
-// Run stores all provided resumes, skills, and accomplishments into the profile
-// repository. Each document is written to disk and embedded for vector retrieval.
+// Run stores all provided resumes, skills, and accomplishments as files on disk.
 // Failures for individual documents are collected as Warnings; Run always returns nil error.
 func (s *Service) Run(ctx context.Context, input model.OnboardInput) (model.OnboardResult, error) {
 	var result model.OnboardResult
@@ -64,7 +61,7 @@ func (s *Service) Run(ctx context.Context, input model.OnboardInput) (model.Onbo
 		sourceDoc := "resume:" + resume.Label
 		path := filepath.Join(inputsDir, resume.Label+".txt")
 		s.log.DebugContext(ctx, "onboard: storing resume", "source", sourceDoc, "input_bytes", len(resume.Text))
-		if warn := s.storeDocument(ctx, sourceDoc, resume.Text, path); warn != "" {
+		if warn := s.writeDocument(ctx, sourceDoc, resume.Text, path); warn != "" {
 			result.Warnings = append(result.Warnings, model.RiskWarning{Severity: model.SeverityWarn, Message: warn})
 			continue
 		}
@@ -74,9 +71,9 @@ func (s *Service) Run(ctx context.Context, input model.OnboardInput) (model.Onbo
 	}
 
 	if input.SkillsText != "" {
-		path := filepath.Join(inputsDir, "skills.md")
+		path := filepath.Join(s.dataDir, "skills.md")
 		s.log.DebugContext(ctx, "onboard: storing skills", "input_bytes", len(input.SkillsText))
-		if warn := s.storeDocument(ctx, "ref:skills", input.SkillsText, path); warn != "" {
+		if warn := s.writeDocument(ctx, "ref:skills", input.SkillsText, path); warn != "" {
 			result.Warnings = append(result.Warnings, model.RiskWarning{Severity: model.SeverityWarn, Message: warn})
 		} else {
 			s.log.DebugContext(ctx, "onboard: skills stored")
@@ -91,8 +88,8 @@ func (s *Service) Run(ctx context.Context, input model.OnboardInput) (model.Onbo
 		s.log.DebugContext(ctx, "onboard: storing accomplishments", "sections", len(sections))
 		for i, section := range sections {
 			sourceDoc := fmt.Sprintf("accomplishments:%d", i)
-			path := filepath.Join(inputsDir, fmt.Sprintf("accomplishments-%d.md", i))
-			if warn := s.storeDocument(ctx, sourceDoc, section, path); warn != "" {
+			path := filepath.Join(s.dataDir, fmt.Sprintf("accomplishments-%d.md", i))
+			if warn := s.writeDocument(ctx, sourceDoc, section, path); warn != "" {
 				result.Warnings = append(result.Warnings, model.RiskWarning{Severity: model.SeverityWarn, Message: warn})
 				continue
 			}
@@ -110,34 +107,15 @@ func (s *Service) Run(ctx context.Context, input model.OnboardInput) (model.Onbo
 	return result, nil
 }
 
-// storeDocument writes text to path and upserts it into the profile repository.
+// writeDocument writes text to path.
 // Returns a non-empty warning string on failure so the caller can degrade gracefully.
-func (s *Service) storeDocument(ctx context.Context, sourceDoc, text, path string) string {
+func (s *Service) writeDocument(ctx context.Context, sourceDoc, text, path string) string {
 	s.log.DebugContext(ctx, "onboard: write start", "source", sourceDoc, "path", path, "bytes", len(text))
 	if err := os.WriteFile(path, []byte(text), config.FilePerm); err != nil { // #nosec G306 -- user-owned data file
 		msg := fmt.Sprintf("write %s: %v", path, err)
 		s.log.WarnContext(ctx, "onboard: write failed", "source", sourceDoc, "error", err)
 		return msg
 	}
-	s.log.DebugContext(ctx, "onboard: write end", "source", sourceDoc)
-
-	s.log.DebugContext(ctx, "onboard: embed start", "source", sourceDoc, "bytes", len(text))
-	vector, err := s.embedder.Embed(ctx, text)
-	if err != nil {
-		msg := fmt.Sprintf("embed %s: %v", sourceDoc, err)
-		s.log.WarnContext(ctx, "onboard: embed failed", "source", sourceDoc, "error", err)
-		return msg
-	}
-	s.log.DebugContext(ctx, "onboard: embed end", "source", sourceDoc, "vector_dim", len(vector))
-
-	s.log.DebugContext(ctx, "onboard: upsert start", "source", sourceDoc)
-	if err := s.profile.UpsertDocument(ctx, sourceDoc, text, vector); err != nil {
-		msg := fmt.Sprintf("upsert %s: %v", sourceDoc, err)
-		s.log.WarnContext(ctx, "onboard: upsert failed", "source", sourceDoc, "error", err)
-		return msg
-	}
-	s.log.DebugContext(ctx, "onboard: upsert end", "source", sourceDoc)
-
 	s.log.InfoContext(ctx, "onboard: stored document", "source", sourceDoc, "path", path)
 	return ""
 }

@@ -102,18 +102,6 @@ func (s *stubApplicationRepository) List() ([]*model.ApplicationRecord, error) {
 	return nil, nil
 }
 
-type stubAugmenter struct{}
-
-var _ port.Augmenter = (*stubAugmenter)(nil)
-
-func (s *stubAugmenter) AugmentResumeText(_ context.Context, input model.AugmentInput) (string, *model.ReferenceData, error) {
-	return input.ResumeText, input.RefData, nil
-}
-
-func (s *stubAugmenter) SuggestForKeywords(_ context.Context, _ []string) (model.TailorSuggestions, error) {
-	return nil, nil
-}
-
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 // callToolRequest builds an mcp.CallToolRequest with the given arguments map.
@@ -290,11 +278,11 @@ func TestHandleUpdateConfig_UnknownKey_ReturnsError(t *testing.T) {
 	}
 }
 
-func TestHandleUpdateConfig_APIKey_ResponseRedacted(t *testing.T) {
+func TestHandleUpdateConfig_ValidKey_ReturnsSuccess(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	req := callToolRequest("update_config", map[string]any{
-		"key":   "embedder.api_key",
-		"value": "sk-super-secret",
+		"key":   "log_level",
+		"value": "debug",
 	})
 	cfg := &config.Config{}
 	result := mcpserver.HandleUpdateConfig(context.Background(), &req, cfg)
@@ -303,57 +291,12 @@ func TestHandleUpdateConfig_APIKey_ResponseRedacted(t *testing.T) {
 	if err := json.Unmarshal([]byte(text), &resp); err != nil {
 		t.Fatalf("response is not JSON: %v", err)
 	}
-	if resp["value"] == "sk-super-secret" {
-		t.Error("API key must be redacted in update_config response, got plaintext")
-	}
-	if resp["value"] != "***" {
-		t.Errorf("update_config response value = %q, want ***", resp["value"])
+	if resp["error"] != "" {
+		t.Errorf("unexpected error: %s", resp["error"])
 	}
 }
 
 // ── handleGetConfigWith tests ─────────────────────────────────────────────────
-
-func TestHandleGetConfigWith_RedactsAPIKeys(t *testing.T) {
-	cfg := &config.Config{}
-	cfg.Orchestrator.APIKey = "sk-super-secret"
-	cfg.Embedder.APIKey = "another-key"
-
-	result := mcpserver.HandleGetConfigWith(cfg)
-
-	text := extractText(t, result)
-	var response map[string]interface{}
-	if err := json.Unmarshal([]byte(text), &response); err != nil {
-		t.Fatalf("response is not JSON: %v", err)
-	}
-	// orchestrator keys are not exposed in MCP mode — only check embedder
-	apiKey, ok := response["embedder.api_key"].(string)
-	if !ok {
-		t.Fatalf("embedder.api_key is not a string: %T", response["embedder.api_key"])
-	}
-	if apiKey != "***" {
-		t.Errorf("embedder.api_key = %q, want ***", apiKey)
-	}
-}
-
-func TestHandleGetConfigWith_EmptyAPIKey_NotRedacted(t *testing.T) {
-	cfg := &config.Config{}
-	// API keys left empty
-
-	result := mcpserver.HandleGetConfigWith(cfg)
-
-	text := extractText(t, result)
-	var response map[string]interface{}
-	if err := json.Unmarshal([]byte(text), &response); err != nil {
-		t.Fatalf("response is not JSON: %v", err)
-	}
-	apiKey, ok := response["embedder.api_key"].(string)
-	if !ok {
-		t.Fatalf("embedder.api_key is not a string: %T", response["embedder.api_key"])
-	}
-	if apiKey == "***" {
-		t.Error("empty API key should not be redacted")
-	}
-}
 
 func TestHandleGetConfigWith_ExcludesOrchestratorKeys(t *testing.T) {
 	result := mcpserver.HandleGetConfigWith(&config.Config{})
@@ -391,9 +334,6 @@ func TestHandleUpdateConfig_RejectsOrchestratorKey(t *testing.T) {
 
 func TestHandleGetConfigWithProfile_OnboardedTrue_WhenResumesExist(t *testing.T) {
 	cfg := &config.Config{}
-	cfg.Embedder.BaseURL = "http://localhost:11434/v1"
-	cfg.Embedder.Model = "nomic-embed-text"
-	cfg.EmbeddingDim = 768
 
 	// Create temp directory structure for test
 	tmpDir := t.TempDir()
@@ -410,16 +350,14 @@ func TestHandleGetConfigWithProfile_OnboardedTrue_WhenResumesExist(t *testing.T)
 		t.Fatalf("write resume: %v", err)
 	}
 
-	// Create skills file (in the dedicated location expected by buildProfileStatus)
-	// Note: we must create this at the exact path buildProfileStatus expects
-	skillsPath := filepath.Join(inputsDir, "skills.md")
+	// Create skills file at dataDir root (source-scoped layout: skills go to dataDir, not inputs/).
+	skillsPath := filepath.Join(tmpDir, "skills.md")
 	if err := os.WriteFile(skillsPath, []byte("Go, Rust"), 0o644); err != nil {
 		t.Fatalf("write skills: %v", err)
 	}
 
-	// Create accomplishments file (in the dedicated location expected by buildProfileStatus)
-	// Note: we must create this at the exact path buildProfileStatus expects
-	accomplishmentsPath := filepath.Join(inputsDir, "accomplishments.md")
+	// Create accomplishments file at dataDir root using the accomplishments-N.md naming convention.
+	accomplishmentsPath := filepath.Join(tmpDir, "accomplishments-0.md")
 	if err := os.WriteFile(accomplishmentsPath, []byte("accomplished things"), 0o644); err != nil {
 		t.Fatalf("write accomplishments: %v", err)
 	}
@@ -452,15 +390,14 @@ func TestHandleGetConfigWithProfile_OnboardedTrue_WhenResumesExist(t *testing.T)
 		t.Error("profile.onboarded = false, want true when resumes exist")
 	}
 
-	// Check resumes list
-	// Note: ResumeRepository includes all .md/.txt files in the inputs directory,
-	// which will include skills.md and accomplishments.md. So we expect 4 items.
+	// Check resumes list — only the 2 actual resume files in inputs/ (skills/accomplishments
+	// are now in the dataDir root, not inputs/, so they are not counted as resumes).
 	resumesList, ok := profile["resumes"].([]interface{})
 	if !ok {
 		t.Errorf("profile.resumes is not a list: %T", profile["resumes"])
 	}
-	if len(resumesList) != 4 {
-		t.Errorf("profile.resumes has %d items, want 4; got: %v", len(resumesList), resumesList)
+	if len(resumesList) != 2 {
+		t.Errorf("profile.resumes has %d items, want 2; got: %v", len(resumesList), resumesList)
 	}
 
 	// Check has_skills is true
@@ -478,14 +415,12 @@ func TestHandleGetConfigWithProfile_OnboardedTrue_WhenResumesExist(t *testing.T)
 		t.Errorf("profile.has_accomplishments is not a bool: %T", profile["has_accomplishments"])
 	}
 	if !hasAccomplishments {
-		t.Error("profile.has_accomplishments = false, want true when accomplishments.md exists and is non-empty")
+		t.Error("profile.has_accomplishments = false, want true when accomplishments-*.md exists and is non-empty")
 	}
 }
 
 func TestHandleGetConfigWithProfile_OnboardedFalse_WhenNoResumes(t *testing.T) {
 	cfg := &config.Config{}
-	cfg.Embedder.BaseURL = "http://localhost:11434/v1"
-	cfg.Embedder.Model = "nomic-embed-text"
 
 	// Create temp directory with no resumes
 	tmpDir := t.TempDir()
@@ -531,10 +466,8 @@ func TestHandleGetConfigWithProfile_OnboardedFalse_WhenNoResumes(t *testing.T) {
 
 func TestHandleGetConfigWithProfile_PreservesConfigFields(t *testing.T) {
 	cfg := &config.Config{}
-	cfg.Embedder.BaseURL = "http://localhost:11434/v1"
-	cfg.Embedder.Model = "nomic-embed-text"
-	cfg.Embedder.APIKey = "secret-key"
-	cfg.EmbeddingDim = 768
+	cfg.Orchestrator.BaseURL = "https://api.example.com/v1"
+	cfg.Orchestrator.Model = "claude-sonnet-4-6"
 
 	tmpDir := t.TempDir()
 	inputsDir := filepath.Join(tmpDir, "inputs")
@@ -550,20 +483,15 @@ func TestHandleGetConfigWithProfile_PreservesConfigFields(t *testing.T) {
 		t.Fatalf("response is not JSON: %v", err)
 	}
 
-	// Check config fields still exist
-	if _, ok := response["embedder.base_url"]; !ok {
-		t.Error("response missing 'embedder.base_url' key")
-	}
-	if _, ok := response["embedder.model"]; !ok {
-		t.Error("response missing 'embedder.model' key")
+	// Orchestrator keys are excluded from MCP mode — verify they are absent.
+	for _, key := range []string{"orchestrator.base_url", "orchestrator.model", "orchestrator.api_key"} {
+		if _, found := response[key]; found {
+			t.Errorf("get_config must not expose %q in MCP mode", key)
+		}
 	}
 
-	// API key should be redacted
-	apiKey, ok := response["embedder.api_key"].(string)
-	if !ok {
-		t.Errorf("embedder.api_key is not a string: %T", response["embedder.api_key"])
-	}
-	if apiKey != "***" {
-		t.Errorf("embedder.api_key = %q, want ***", apiKey)
+	// log_level should be present (it is in MCPKeys).
+	if _, ok := response["log_level"]; !ok {
+		t.Error("response missing 'log_level' key")
 	}
 }

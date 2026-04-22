@@ -27,12 +27,7 @@ func NewServer() *server.MCPServer {
 			mcp.WithString("accomplishments", mcp.Description("Accomplishments text (optional)")),
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			svc, cleanup, err := newOnboardSvc()
-			if err != nil {
-				return errorResult(fmt.Sprintf("setup: %v", err)), nil
-			}
-			defer cleanup()
-			return HandleOnboardUser(ctx, &req, svc), nil
+			return HandleOnboardUser(ctx, &req, newOnboardSvc()), nil
 		},
 	)
 
@@ -43,12 +38,7 @@ func NewServer() *server.MCPServer {
 			mcp.WithString("resume_label", mcp.Description("Short identifier, e.g. 'backend'"), mcp.Required()),
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			svc, cleanup, err := newOnboardSvc()
-			if err != nil {
-				return errorResult(fmt.Sprintf("setup: %v", err)), nil
-			}
-			defer cleanup()
-			return HandleAddResume(ctx, &req, svc), nil
+			return HandleAddResume(ctx, &req, newOnboardSvc()), nil
 		},
 	)
 
@@ -67,7 +57,7 @@ func NewServer() *server.MCPServer {
 
 	srv.AddTool(
 		mcp.NewTool("update_config",
-			mcp.WithDescription("Set a go-apply config field by dot-notation key (e.g. embedder.model, embedding_dim, user_name). Orchestrator keys are not used in MCP mode."),
+			mcp.WithDescription("Set a go-apply config field by dot-notation key (e.g. user_name, log_level, verbose). Orchestrator keys are not used in MCP mode."),
 			mcp.WithString("key", mcp.Description("Dot-notation config key"), mcp.Required()),
 			mcp.WithString("value", mcp.Description("New value for the key"), mcp.Required()),
 		),
@@ -102,16 +92,6 @@ func NewServer() *server.MCPServer {
 		requireOnboarded(func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			return HandleSubmitKeywords(ctx, &req), nil
 		}),
-	)
-
-	srv.AddTool(
-		mcp.NewTool("suggest_tailoring",
-			mcp.WithDescription("Optional diagnostic: inspect what the profile bank found for missing JD keywords. Call after submit_keywords to see retrieval matches before tailoring. T1 and T2 retrieve internally — this result is for transparency only."),
-			mcp.WithString("session_id", mcp.Description("Session ID from load_jd"), mcp.Required()),
-		),
-		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			return HandleSuggestTailoring(ctx, &req), nil
-		},
 	)
 
 	srv.AddTool(

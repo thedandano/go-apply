@@ -22,7 +22,6 @@ func stubApplyConfigForSession() pipeline.ApplyConfig {
 		Resumes:   &stubResumeRepo{},
 		Loader:    &stubDocumentLoader{},
 		AppRepo:   &stubApplicationRepository{},
-		Augment:   &stubAugmenter{},
 		Defaults:  &config.AppDefaults{},
 		Presenter: nil,
 	}

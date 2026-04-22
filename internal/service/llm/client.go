@@ -1,7 +1,4 @@
-// Package llm provides an OpenAI-compatible HTTP client implementing both
-// port.LLMClient (chat completions) and port.EmbeddingClient (embeddings).
-// Two independent instances are used at runtime: one for the orchestrator
-// provider, one for the embedder provider — each with their own base URL and model.
+// Package llm provides an OpenAI-compatible HTTP client implementing port.LLMClient.
 package llm
 
 import (
@@ -21,17 +18,15 @@ import (
 	"github.com/thedandano/go-apply/internal/port"
 )
 
-// Compile-time interface satisfaction checks.
+// Compile-time interface satisfaction check.
 var _ port.LLMClient = (*HTTPClient)(nil)
-var _ port.EmbeddingClient = (*HTTPClient)(nil)
 
 const (
 	maxAttempts = 3
 	baseBackoff = 500 * time.Millisecond
 )
 
-// HTTPClient implements port.LLMClient and port.EmbeddingClient using the
-// OpenAI-compatible chat completions and embeddings endpoints.
+// HTTPClient implements port.LLMClient using the OpenAI-compatible chat completions endpoint.
 type HTTPClient struct {
 	baseURL string
 	model   string
@@ -73,19 +68,6 @@ type chatResponse struct {
 	} `json:"choices"`
 }
 
-// embedRequest is the OpenAI-compatible embeddings request body.
-type embedRequest struct {
-	Model string `json:"model"`
-	Input string `json:"input"`
-}
-
-// embedResponse is the subset of the OpenAI embeddings response we use.
-type embedResponse struct {
-	Data []struct {
-		Embedding []float32 `json:"embedding"`
-	} `json:"data"`
-}
-
 // ChatComplete implements port.LLMClient using the /chat/completions endpoint.
 // Retries on 429 and 503 with exponential backoff + full jitter.
 func (c *HTTPClient) ChatComplete(ctx context.Context, messages []model.ChatMessage, opts model.ChatOptions) (string, error) {
@@ -120,36 +102,6 @@ func (c *HTTPClient) ChatComplete(ctx context.Context, messages []model.ChatMess
 		logger.PayloadAttr("completion", completion, logger.Verbose()),
 	)
 	return completion, nil
-}
-
-// Embed implements port.EmbeddingClient using the /embeddings endpoint.
-// Retries on 429 and 503 with exponential backoff + full jitter.
-func (c *HTTPClient) Embed(ctx context.Context, text string) ([]float32, error) {
-	body, err := json.Marshal(embedRequest{Model: c.model, Input: text})
-	if err != nil {
-		return nil, fmt.Errorf("llm: marshal embed request: %w", err)
-	}
-
-	c.log.DebugContext(ctx, "llm request",
-		slog.String("model", c.model),
-		slog.Int("prompt_bytes", len(body)),
-		logger.PayloadAttr("prompt", string(body), logger.Verbose()),
-	)
-
-	start := time.Now()
-	var result embedResponse
-	if err := c.doWithRetry(ctx, c.baseURL+"/embeddings", body, &result); err != nil {
-		return nil, err
-	}
-	if len(result.Data) == 0 {
-		return nil, fmt.Errorf("llm: no embedding in response")
-	}
-	embedding := result.Data[0].Embedding
-	c.log.DebugContext(ctx, "llm response",
-		slog.Int("response_bytes", len(embedding)),
-		slog.Int64("elapsed_ms", time.Since(start).Milliseconds()),
-	)
-	return embedding, nil
 }
 
 // doWithRetry executes a POST request, retrying on 429 and 503 with exponential

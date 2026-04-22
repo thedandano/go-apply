@@ -154,6 +154,14 @@ func rewriteBullets(input *BulletRewriteInput) (string, []model.BulletChange, in
 	rewroteCount := 0
 	attempted := 0
 
+	accomplishmentsSource := "none"
+	accomplishmentsLen := 0
+	if input.AccomplishmentsText != "" {
+		accomplishmentsSource = "accomplishments_text"
+		accomplishmentsLen = len(input.AccomplishmentsText)
+	}
+	input.Log.DebugContext(input.Ctx, "tailor tier-2 bullet rewrite request", "source", accomplishmentsSource, "len", accomplishmentsLen)
+
 	for _, b := range bullets {
 		if maxRewrites > 0 && rewroteCount >= maxRewrites {
 			break

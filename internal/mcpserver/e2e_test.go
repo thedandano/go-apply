@@ -6,8 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -17,55 +15,27 @@ import (
 	"github.com/thedandano/go-apply/internal/mcpserver"
 	"github.com/thedandano/go-apply/internal/model"
 	fsrepo "github.com/thedandano/go-apply/internal/repository/fs"
-	"github.com/thedandano/go-apply/internal/repository/sqlite"
-	"github.com/thedandano/go-apply/internal/service/llm"
 	"github.com/thedandano/go-apply/internal/service/onboarding"
 	"github.com/thedandano/go-apply/internal/service/pipeline"
 	"github.com/thedandano/go-apply/internal/service/scorer"
 )
 
 // TestOnboardThenScore exercises the full onboard → load_jd → submit_keywords flow
-// using real SQLite, real file I/O, real scorer, and a stub embedder.
-// Keyword extraction is performed by the test (mimicking the MCP host role), so no
-// LLM stub is needed for scoring.
+// using real file I/O, real scorer, and no LLM (MCP host provides keywords).
 func TestOnboardThenScore(t *testing.T) {
 	// ── 1. Setup ───────────────────────────────────────────────────────────────
 
 	dataDir := t.TempDir()
+	log := slog.Default()
 
-	const embeddingDim = 3
-	stubVector := []float32{0.1, 0.2, 0.3}
-
-	// Stub embedder: returns a fixed 3-element embedding vector.
-	embedderStub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/embeddings" {
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"data": []map[string]any{{"embedding": stubVector}},
-			})
-			return
-		}
-		http.NotFound(w, r)
-	}))
-	defer embedderStub.Close()
+	// ── 2. Onboarding ──────────────────────────────────────────────────────────
 
 	defaults, err := config.LoadDefaults()
 	if err != nil {
 		t.Fatalf("LoadDefaults: %v", err)
 	}
 
-	log := slog.Default()
-
-	// ── 2. Onboarding ──────────────────────────────────────────────────────────
-
-	dbPath := filepath.Join(dataDir, "profile.db")
-	profileRepo, err := sqlite.NewProfileRepository(dbPath, embeddingDim)
-	if err != nil {
-		t.Fatalf("NewProfileRepository: %v", err)
-	}
-	defer func() { _ = profileRepo.Close() }()
-
-	embedderClient := llm.New(embedderStub.URL, "test-model", "", defaults, log)
-	onboardSvc := onboarding.New(profileRepo, embedderClient, dataDir, log)
+	onboardSvc := onboarding.New(dataDir, log)
 
 	resumeText := "golang kubernetes senior engineer five years experience"
 	onboardResult, err := onboardSvc.Run(context.Background(), model.OnboardInput{
@@ -98,7 +68,6 @@ func TestOnboardThenScore(t *testing.T) {
 		Resumes:   resumeRepo,
 		Loader:    docLoader,
 		AppRepo:   appRepo,
-		Augment:   nil,
 		Defaults:  defaults,
 		Tailor:    nil,
 		Presenter: nil,

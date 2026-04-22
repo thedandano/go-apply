@@ -56,6 +56,7 @@ func (s *Service) TailorResume(ctx context.Context, input *model.TailorInput) (m
 		TierApplied:   model.TierKeyword,
 		AddedKeywords: addedKeywords,
 		TailoredText:  tier1Text,
+		Tier1Text:     tier1Text,
 	}
 
 	// Tier-2: rewrite relevant bullets when accomplishments and budget are provided.

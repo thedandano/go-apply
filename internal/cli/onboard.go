@@ -15,13 +15,12 @@ import (
 	"github.com/thedandano/go-apply/internal/config"
 	"github.com/thedandano/go-apply/internal/loader"
 	"github.com/thedandano/go-apply/internal/model"
-	"github.com/thedandano/go-apply/internal/service/llm"
 	"github.com/thedandano/go-apply/internal/service/onboarding"
 )
 
 // NewOnboardCommand returns the cobra command for "go-apply onboard".
 // It accepts one or more resume files plus optional skills and accomplishments paths.
-// When --reset is set, it clears the profile database and inputs/ directory.
+// When --reset is set, it clears inputs/, skills.md, and accomplishments-*.md.
 func NewOnboardCommand() *cobra.Command {
 	var (
 		resumePaths         []string
@@ -33,20 +32,15 @@ func NewOnboardCommand() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "onboard",
-		Short: "Store resumes, skills, and accomplishments in the profile database",
-		Long: `Read resume, skills, and accomplishments files, embed them, and store
-them in the local profile database for use during the apply pipeline.
+		Short: "Store resumes, skills, and accomplishments in the data directory",
+		Long: `Read resume, skills, and accomplishments files, and write them to the data directory.
+Resumes are written to inputs/, skills to skills.md, and accomplishments to accomplishments-N.md.
 
-Use --reset to clear the existing profile database and inputs/ directory.`,
+Use --reset to clear inputs/, skills.md, and accomplishments-*.md.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			cfg, err := config.Load()
-			if err != nil {
-				return fmt.Errorf("load config: %w", err)
-			}
-
 			// Handle --reset flag
 			if resetFlag {
-				if err := resetProfile(cfg, yesFlag, cmd); err != nil {
+				if err := resetProfile(yesFlag, cmd); err != nil {
 					return err
 				}
 
@@ -102,21 +96,8 @@ Use --reset to clear the existing profile database and inputs/ directory.`,
 				accomplishmentsText = string(data)
 			}
 
-			defaults, err := config.LoadDefaults()
-			if err != nil {
-				return fmt.Errorf("load defaults: %w", err)
-			}
-
 			log := slog.Default()
-			embedderClient := llm.New(cfg.Embedder.BaseURL, cfg.Embedder.Model, cfg.Embedder.APIKey, defaults, log)
-
-			profileRepo, err := newSQLiteProfile(cfg)
-			if err != nil {
-				return err
-			}
-			defer profileRepo.Close() //nolint:errcheck
-
-			svc := onboarding.New(profileRepo, embedderClient, config.DataDir(), log)
+			svc := onboarding.New(config.DataDir(), log)
 
 			result, err := svc.Run(cmd.Context(), model.OnboardInput{
 				Resumes:             resumes,
@@ -139,27 +120,25 @@ Use --reset to clear the existing profile database and inputs/ directory.`,
 	cmd.Flags().StringArrayVar(&resumePaths, "resume", nil, "Path to a resume file (repeatable)")
 	cmd.Flags().StringVar(&skillsFlag, "skills", "", "Path to skills reference file")
 	cmd.Flags().StringVar(&accomplishmentsFlag, "accomplishments", "", "Path to accomplishments file")
-	cmd.Flags().BoolVar(&resetFlag, "reset", false, "Delete profile.db and inputs/ directory")
+	cmd.Flags().BoolVar(&resetFlag, "reset", false, "Delete inputs/, skills.md, and accomplishments-*.md from the data directory")
 	cmd.Flags().BoolVar(&yesFlag, "yes", false, "Skip confirmation prompt for --reset (required for non-interactive mode)")
 
 	return cmd
 }
 
-// resetProfile deletes the profile database and inputs directory.
+// resetProfile deletes the onboarding data: inputs/, skills.md, and accomplishments-*.md.
 // If --yes is not set and stdin is a TTY, prompts the user for confirmation.
 // If --yes is not set and stdin is not a TTY, returns an error.
-func resetProfile(cfg *config.Config, confirmed bool, cmd *cobra.Command) error {
-	// Check if stdin is a TTY
+func resetProfile(confirmed bool, cmd *cobra.Command) error {
+	// Check if stdin is a TTY.
 	isTTY := isatty.IsTerminal(os.Stdin.Fd())
 
-	// If not confirmed and not a TTY, require --yes
 	if !confirmed && !isTTY {
 		return fmt.Errorf("--yes required for non-interactive reset")
 	}
 
-	// If not confirmed and is a TTY, prompt for confirmation
 	if !confirmed && isTTY {
-		fmt.Fprintf(cmd.OutOrStdout(), "Delete profile.db and inputs/ at %s? This cannot be undone. [y/N]: ", config.DataDir())
+		fmt.Fprintf(cmd.OutOrStdout(), "Delete inputs/, skills.md, and accomplishments-*.md at %s? This cannot be undone. [y/N]: ", config.DataDir())
 		scanner := bufio.NewScanner(os.Stdin)
 		if !scanner.Scan() {
 			return fmt.Errorf("reset cancelled")
@@ -171,20 +150,29 @@ func resetProfile(cfg *config.Config, confirmed bool, cmd *cobra.Command) error 
 		}
 	}
 
-	// Delete profile.db
-	dbPath := cfg.ResolveDBPath()
-	if err := os.Remove(dbPath); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("delete profile.db: %w", err)
-	}
+	dataDir := config.DataDir()
 
-	// Delete WAL and SHM files (ignore if they don't exist)
-	_ = os.Remove(dbPath + "-wal")
-	_ = os.Remove(dbPath + "-shm")
-
-	// Delete inputs directory
-	inputsDir := filepath.Join(config.DataDir(), "inputs")
+	// Delete inputs/ directory (resumes).
+	inputsDir := filepath.Join(dataDir, "inputs")
 	if err := os.RemoveAll(inputsDir); err != nil {
 		return fmt.Errorf("delete inputs directory: %w", err)
+	}
+
+	// Delete skills.md (non-existence is not an error).
+	skillsPath := filepath.Join(dataDir, "skills.md")
+	if err := os.Remove(skillsPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("delete skills.md: %w", err)
+	}
+
+	// Delete all accomplishments-*.md files.
+	matches, err := filepath.Glob(filepath.Join(dataDir, "accomplishments-*.md"))
+	if err != nil {
+		return fmt.Errorf("glob accomplishments files: %w", err)
+	}
+	for _, match := range matches {
+		if err := os.Remove(match); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("delete %s: %w", match, err)
+		}
 	}
 
 	return nil

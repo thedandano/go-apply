@@ -25,10 +25,10 @@ type testEnv struct {
 }
 
 // seedXDGEnv creates an isolated XDG environment for a subprocess test.
-// It writes a config.yaml with the given orchestrator and embedder stub URLs,
+// It writes a config.yaml with the given orchestrator stub URL,
 // sets LOG_FORMAT=json and LOG_LEVEL=debug so log assertions work, and returns
 // the constructed testEnv.
-func seedXDGEnv(t *testing.T, orchestratorURL, embedderURL string) *testEnv {
+func seedXDGEnv(t *testing.T, orchestratorURL string) *testEnv {
 	t.Helper()
 
 	configDir := t.TempDir()
@@ -40,8 +40,8 @@ func seedXDGEnv(t *testing.T, orchestratorURL, embedderURL string) *testEnv {
 		t.Fatalf("create config dir: %v", err)
 	}
 
-	// Pre-create data subdirectories so SQLite (go-apply/) and the resume
-	// repository (go-apply/inputs/) don't fail on missing parent directories.
+	// Pre-create data subdirectories so the resume repository (go-apply/inputs/)
+	// doesn't fail on missing parent directories.
 	for _, sub := range []string{"go-apply", filepath.Join("go-apply", "inputs")} {
 		if err := os.MkdirAll(filepath.Join(dataDir, sub), 0o700); err != nil {
 			t.Fatalf("create data subdir %s: %v", sub, err)
@@ -52,12 +52,7 @@ func seedXDGEnv(t *testing.T, orchestratorURL, embedderURL string) *testEnv {
   base_url: %s
   model: test-model
   api_key: test-key
-embedder:
-  base_url: %s
-  model: test-embed
-  api_key: test-key
-embedding_dim: 2048
-`, orchestratorURL, embedderURL)
+`, orchestratorURL)
 
 	if err := os.WriteFile(filepath.Join(goApplyCfgDir, "config.yaml"), []byte(cfgYAML), config.FilePerm); err != nil {
 		t.Fatalf("write config.yaml: %v", err)
