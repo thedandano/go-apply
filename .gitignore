@@ -15,6 +15,7 @@ coverage.out
 
 # Git worktrees (local development isolation)
 .worktrees/
+.claude/worktrees/
 
 # Local retros (never committed)
 docs/retros/

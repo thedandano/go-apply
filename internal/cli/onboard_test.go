@@ -25,7 +25,7 @@ func executeOnboard(t *testing.T, args ...string) (stdout, stderr string, err er
 	return outBuf.String(), errBuf.String(), err
 }
 
-// TestOnboard_Reset_WithYes verifies that --reset --yes removes profile.db and inputs/ directory.
+// TestOnboard_Reset_WithYes verifies that --reset --yes removes inputs/, skills.md, and accomplishments-*.md.
 func TestOnboard_Reset_WithYes(t *testing.T) {
 	tmpDataDir := t.TempDir()
 	tmpConfigDir := t.TempDir()
@@ -38,27 +38,12 @@ func TestOnboard_Reset_WithYes(t *testing.T) {
 		t.Fatalf("failed to save config: %v", err)
 	}
 
-	// Create dummy profile.db, WAL files, and inputs directory
 	dataDir := filepath.Join(tmpDataDir, "go-apply")
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		t.Fatalf("failed to create data dir: %v", err)
 	}
 
-	dbPath := filepath.Join(dataDir, "profile.db")
-	walPath := dbPath + "-wal"
-	shmPath := dbPath + "-shm"
 	inputsDir := filepath.Join(dataDir, "inputs")
-
-	// Create the files and directories
-	if err := os.WriteFile(dbPath, []byte("dummy"), 0o600); err != nil {
-		t.Fatalf("failed to create profile.db: %v", err)
-	}
-	if err := os.WriteFile(walPath, []byte("dummy"), 0o600); err != nil {
-		t.Fatalf("failed to create WAL file: %v", err)
-	}
-	if err := os.WriteFile(shmPath, []byte("dummy"), 0o600); err != nil {
-		t.Fatalf("failed to create SHM file: %v", err)
-	}
 	if err := os.MkdirAll(inputsDir, 0o700); err != nil {
 		t.Fatalf("failed to create inputs dir: %v", err)
 	}
@@ -66,7 +51,23 @@ func TestOnboard_Reset_WithYes(t *testing.T) {
 		t.Fatalf("failed to create file in inputs: %v", err)
 	}
 
-	// Create jd_cache directory so we can verify it is NOT removed
+	// Create skills.md and accomplishments-0.md at dataDir root.
+	skillsPath := filepath.Join(dataDir, "skills.md")
+	if err := os.WriteFile(skillsPath, []byte("Go, Python"), 0o600); err != nil {
+		t.Fatalf("failed to create skills.md: %v", err)
+	}
+	accomplishmentsPath := filepath.Join(dataDir, "accomplishments-0.md")
+	if err := os.WriteFile(accomplishmentsPath, []byte("built things"), 0o600); err != nil {
+		t.Fatalf("failed to create accomplishments-0.md: %v", err)
+	}
+
+	// Create profile.db to verify it is NOT removed by --reset.
+	profileDBPath := filepath.Join(dataDir, "profile.db")
+	if err := os.WriteFile(profileDBPath, []byte("dummy"), 0o600); err != nil {
+		t.Fatalf("failed to create profile.db: %v", err)
+	}
+
+	// Create jd_cache directory so we can verify it is NOT removed.
 	jdCacheDir := filepath.Join(dataDir, "jd_cache")
 	if err := os.MkdirAll(jdCacheDir, 0o700); err != nil {
 		t.Fatalf("failed to create jd_cache dir: %v", err)
@@ -75,31 +76,28 @@ func TestOnboard_Reset_WithYes(t *testing.T) {
 		t.Fatalf("failed to create file in jd_cache: %v", err)
 	}
 
-	// Run reset with --yes
+	// Run reset with --yes.
 	stdout, _, err := executeOnboard(t, "onboard", "--reset", "--yes")
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
 
-	// Verify profile.db is removed
-	if _, err := os.Stat(dbPath); !os.IsNotExist(err) {
-		t.Errorf("expected profile.db to be removed, but it exists")
-	}
-
-	// Verify WAL files are removed
-	if _, err := os.Stat(walPath); !os.IsNotExist(err) {
-		t.Errorf("expected profile.db-wal to be removed, but it exists")
-	}
-	if _, err := os.Stat(shmPath); !os.IsNotExist(err) {
-		t.Errorf("expected profile.db-shm to be removed, but it exists")
-	}
-
-	// Verify inputs directory is removed
+	// Verify inputs/ directory is removed.
 	if _, err := os.Stat(inputsDir); !os.IsNotExist(err) {
 		t.Errorf("expected inputs/ directory to be removed, but it exists")
 	}
 
-	// Verify jd_cache is NOT removed
+	// Verify skills.md is removed.
+	if _, err := os.Stat(skillsPath); !os.IsNotExist(err) {
+		t.Errorf("expected skills.md to be removed, but it exists")
+	}
+
+	// Verify accomplishments-0.md is removed.
+	if _, err := os.Stat(accomplishmentsPath); !os.IsNotExist(err) {
+		t.Errorf("expected accomplishments-0.md to be removed, but it exists")
+	}
+
+	// Verify jd_cache is NOT removed.
 	if _, err := os.Stat(jdCacheDir); os.IsNotExist(err) {
 		t.Errorf("expected jd_cache/ to NOT be removed, but it was")
 	}
@@ -107,7 +105,12 @@ func TestOnboard_Reset_WithYes(t *testing.T) {
 		t.Errorf("expected cache file to still exist, but it was removed")
 	}
 
-	// Verify output message
+	// Verify profile.db is NOT removed by --reset.
+	if _, err := os.Stat(profileDBPath); os.IsNotExist(err) {
+		t.Errorf("expected profile.db to NOT be removed by --reset, but it was")
+	}
+
+	// Verify output message.
 	if !strings.Contains(stdout, "Profile reset") {
 		t.Errorf("expected output to contain 'Profile reset', got: %q", stdout)
 	}
@@ -201,6 +204,11 @@ func TestOnboard_Reset_WithYes_ThenResume(t *testing.T) {
 		t.Errorf("expected old inputs/old_data.txt to be removed after reset, but it exists")
 	}
 
+	// Verify profile.db is NOT removed by --reset.
+	if _, statErr := os.Stat(dbPath); os.IsNotExist(statErr) {
+		t.Errorf("expected profile.db to NOT be removed by --reset, but it was")
+	}
+
 	// Verify that the command ran (output should contain JSON result even if empty/warning)
 	if !strings.Contains(stdout, "{") {
 		t.Errorf("expected JSON output from onboarding, got: %q", stdout)
@@ -235,6 +243,11 @@ func TestOnboard_Reset_Message(t *testing.T) {
 	stdout, _, err := executeOnboard(t, "onboard", "--reset", "--yes")
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	// Verify profile.db is NOT removed by --reset.
+	if _, statErr := os.Stat(dbPath); os.IsNotExist(statErr) {
+		t.Errorf("expected profile.db to NOT be removed by --reset, but it was")
 	}
 
 	// Verify reset message

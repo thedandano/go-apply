@@ -2,64 +2,23 @@ package onboarding_test
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/thedandano/go-apply/internal/model"
-	"github.com/thedandano/go-apply/internal/port"
 	"github.com/thedandano/go-apply/internal/service/onboarding"
 )
 
-// Compile-time interface satisfaction checks.
-var _ port.ProfileRepository = (*stubProfileRepo)(nil)
-var _ port.EmbeddingClient = (*stubEmbedder)(nil)
-
-// stubProfileRepo records UpsertDocument calls and optionally injects errors.
-type stubProfileRepo struct {
-	upserted map[string]string // sourceDoc → text
-	failOn   string            // if non-empty, UpsertDocument returns error for this source
-}
-
-func (r *stubProfileRepo) UpsertDocument(_ context.Context, sourceDoc, text string, _ []float32) error {
-	if r.failOn != "" && strings.HasPrefix(sourceDoc, r.failOn) {
-		return errors.New("upsert: simulated failure")
-	}
-	if r.upserted == nil {
-		r.upserted = make(map[string]string)
-	}
-	r.upserted[sourceDoc] = text
-	return nil
-}
-
-func (r *stubProfileRepo) FindSimilar(_ context.Context, _ []float32, _ int) ([]model.ProfileEmbedding, error) {
-	return nil, nil
-}
-
-// stubEmbedder returns a fixed vector or an error.
-type stubEmbedder struct {
-	fail bool
-}
-
-func (e *stubEmbedder) Embed(_ context.Context, _ string) ([]float32, error) {
-	if e.fail {
-		return nil, errors.New("embed: simulated failure")
-	}
-	return []float32{0.1, 0.2, 0.3}, nil
-}
-
-func newService(t *testing.T, repo *stubProfileRepo, embedder *stubEmbedder) *onboarding.Service {
+func newService(t *testing.T) *onboarding.Service {
 	t.Helper()
-	dataDir := t.TempDir()
-	return onboarding.New(repo, embedder, dataDir, slog.Default())
+	return onboarding.New(t.TempDir(), slog.Default())
 }
 
-func TestOnboardingService_ResumeStoredAndIndexed(t *testing.T) {
-	repo := &stubProfileRepo{}
-	svc := newService(t, repo, &stubEmbedder{})
+func TestOnboardingService_ResumeStoredOnDisk(t *testing.T) {
+	dataDir := t.TempDir()
+	svc := onboarding.New(dataDir, slog.Default())
 
 	result, err := svc.Run(context.Background(), model.OnboardInput{
 		Resumes: []model.ResumeEntry{{Label: "backend", Text: "Go engineer resume"}},
@@ -73,14 +32,20 @@ func TestOnboardingService_ResumeStoredAndIndexed(t *testing.T) {
 	if len(result.Stored) != 1 || result.Stored[0] != "resume:backend" {
 		t.Errorf("Stored = %v, want [resume:backend]", result.Stored)
 	}
-	if _, ok := repo.upserted["resume:backend"]; !ok {
-		t.Error("resume:backend not upserted into profile repo")
+
+	// Resume must be in inputs/ subdirectory.
+	resumePath := filepath.Join(dataDir, "inputs", "backend.txt")
+	data, err := os.ReadFile(resumePath) // #nosec G304 -- test reads temp dir
+	if err != nil {
+		t.Fatalf("read resume file: %v", err)
+	}
+	if string(data) != "Go engineer resume" {
+		t.Errorf("resume content = %q, want %q", data, "Go engineer resume")
 	}
 }
 
 func TestOnboardingService_SkillsAndAccomplishmentsStored(t *testing.T) {
-	repo := &stubProfileRepo{}
-	svc := newService(t, repo, &stubEmbedder{})
+	svc := newService(t)
 
 	result, err := svc.Run(context.Background(), model.OnboardInput{
 		SkillsText:          "Go, Python, Docker",
@@ -101,42 +66,8 @@ func TestOnboardingService_SkillsAndAccomplishmentsStored(t *testing.T) {
 	}
 }
 
-func TestOnboardingService_EmbedFailureDegrades(t *testing.T) {
-	repo := &stubProfileRepo{}
-	svc := newService(t, repo, &stubEmbedder{fail: true})
-
-	result, err := svc.Run(context.Background(), model.OnboardInput{
-		Resumes: []model.ResumeEntry{{Label: "backend", Text: "Go engineer resume"}},
-	})
-	if err != nil {
-		t.Fatalf("Run must not return error on embed failure: %v", err)
-	}
-	if len(result.Warnings) == 0 {
-		t.Error("expected at least one warning on embed failure")
-	}
-	if len(result.Stored) > 0 {
-		t.Errorf("nothing should be stored on embed failure, got: %v", result.Stored)
-	}
-}
-
-func TestOnboardingService_UpsertFailureDegrades(t *testing.T) {
-	repo := &stubProfileRepo{failOn: "resume:"}
-	svc := newService(t, repo, &stubEmbedder{})
-
-	result, err := svc.Run(context.Background(), model.OnboardInput{
-		Resumes: []model.ResumeEntry{{Label: "backend", Text: "Go engineer resume"}},
-	})
-	if err != nil {
-		t.Fatalf("Run must not return error on upsert failure: %v", err)
-	}
-	if len(result.Warnings) == 0 {
-		t.Error("expected at least one warning on upsert failure")
-	}
-}
-
 func TestOnboardingService_RejectsTraversalLabel(t *testing.T) {
-	repo := &stubProfileRepo{}
-	svc := newService(t, repo, &stubEmbedder{})
+	svc := newService(t)
 
 	result, err := svc.Run(context.Background(), model.OnboardInput{
 		Resumes: []model.ResumeEntry{{Label: "../etc/passwd", Text: "malicious"}},
@@ -153,8 +84,7 @@ func TestOnboardingService_RejectsTraversalLabel(t *testing.T) {
 }
 
 func TestOnboardingService_RejectsSlashLabel(t *testing.T) {
-	repo := &stubProfileRepo{}
-	svc := newService(t, repo, &stubEmbedder{})
+	svc := newService(t)
 
 	result, err := svc.Run(context.Background(), model.OnboardInput{
 		Resumes: []model.ResumeEntry{{Label: "foo/bar", Text: "text"}},
@@ -168,8 +98,7 @@ func TestOnboardingService_RejectsSlashLabel(t *testing.T) {
 }
 
 func TestOnboardingService_RejectsEmptyLabel(t *testing.T) {
-	repo := &stubProfileRepo{}
-	svc := newService(t, repo, &stubEmbedder{})
+	svc := newService(t)
 
 	result, err := svc.Run(context.Background(), model.OnboardInput{
 		Resumes: []model.ResumeEntry{{Label: "", Text: "text"}},
@@ -189,8 +118,7 @@ func TestOnboardingService_SummaryPopulated(t *testing.T) {
 	skills := "Go\nPython\nDocker"
 	accomplishments := "## Scaled backend\nLed team of 5 engineers\n\n## Reduced latency\nCut p99 from 800ms to 120ms"
 
-	repo := &stubProfileRepo{}
-	svc := newService(t, repo, &stubEmbedder{})
+	svc := newService(t)
 
 	result, err := svc.Run(context.Background(), model.OnboardInput{
 		Resumes:             []model.ResumeEntry{{Label: "backend", Text: "Go engineer resume"}},
@@ -217,8 +145,7 @@ func TestOnboardingService_SummaryPopulated(t *testing.T) {
 }
 
 func TestOnboardingService_SummaryResumesAddedOnlyCountsSuccessful(t *testing.T) {
-	repo := &stubProfileRepo{}
-	svc := newService(t, repo, &stubEmbedder{})
+	svc := newService(t)
 
 	// One valid resume and one invalid (path traversal) — only the valid one should count.
 	result, err := svc.Run(context.Background(), model.OnboardInput{
@@ -236,9 +163,8 @@ func TestOnboardingService_SummaryResumesAddedOnlyCountsSuccessful(t *testing.T)
 }
 
 func TestOnboardingService_WritesFilesToDisk(t *testing.T) {
-	repo := &stubProfileRepo{}
 	dataDir := t.TempDir()
-	svc := onboarding.New(repo, &stubEmbedder{}, dataDir, slog.Default())
+	svc := onboarding.New(dataDir, slog.Default())
 
 	_, err := svc.Run(context.Background(), model.OnboardInput{
 		Resumes:             []model.ResumeEntry{{Label: "backend", Text: "resume content"}},
@@ -259,8 +185,9 @@ func TestOnboardingService_WritesFilesToDisk(t *testing.T) {
 			t.Errorf("%s: got %q, want %q", path, data, want)
 		}
 	}
-	inputsDir := filepath.Join(dataDir, "inputs")
-	check(filepath.Join(inputsDir, "backend.txt"), "resume content")
-	check(filepath.Join(inputsDir, "skills.md"), "skills content")
-	check(filepath.Join(inputsDir, "accomplishments-0.md"), "accomplishments content")
+
+	// Resumes go in inputs/; skills and accomplishments go in dataDir root.
+	check(filepath.Join(dataDir, "inputs", "backend.txt"), "resume content")
+	check(filepath.Join(dataDir, "skills.md"), "skills content")
+	check(filepath.Join(dataDir, "accomplishments-0.md"), "accomplishments content")
 }

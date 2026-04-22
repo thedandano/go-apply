@@ -113,18 +113,6 @@ func TestResolveLogLevel(t *testing.T) {
 	}
 }
 
-func TestResolveEmbeddingDim(t *testing.T) {
-	wantDefault := config.EmbeddedDefaults().VectorSearch.DefaultEmbeddingDim
-	cfg := &config.Config{}
-	if got := cfg.ResolveEmbeddingDim(); got != wantDefault {
-		t.Errorf("default dim = %d, want %d", got, wantDefault)
-	}
-	cfg.EmbeddingDim = 768
-	if got := cfg.ResolveEmbeddingDim(); got != 768 {
-		t.Errorf("custom dim = %d, want 768", got)
-	}
-}
-
 func TestValidateCLI_MissingBaseURL_ReturnsError(t *testing.T) {
 	cfg := &config.Config{
 		Orchestrator: config.LLMProviderConfig{Model: "some-model"},
@@ -152,16 +140,5 @@ func TestValidateCLI_Valid_ReturnsNil(t *testing.T) {
 	}
 	if err := cfg.ValidateCLI(); err != nil {
 		t.Errorf("ValidateCLI() unexpected error: %v", err)
-	}
-}
-
-func TestResolveDBPath(t *testing.T) {
-	cfg := &config.Config{DBPath: "/custom/path/db"}
-	if got := cfg.ResolveDBPath(); got != "/custom/path/db" {
-		t.Errorf("custom db path = %q, want /custom/path/db", got)
-	}
-	cfg2 := &config.Config{}
-	if got := cfg2.ResolveDBPath(); got == "" {
-		t.Error("default db path should not be empty")
 	}
 }
