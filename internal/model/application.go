@@ -1,5 +1,7 @@
 package model
 
+import "encoding/json"
+
 // ApplicationOutcome tracks the lifecycle state of a job application.
 type ApplicationOutcome string
 
@@ -37,4 +39,23 @@ type ApplicationRecord struct {
 	ResumeLabel string             `json:"resume_label,omitempty"` // which resume was submitted
 	ResumeText  string             `json:"resume_text,omitempty"`  // snapshot of resume at submission
 	Outcome     ApplicationOutcome `json:"outcome,omitempty"`
+}
+
+// MarshalJSON serializes ApplicationRecord without the TailoredText field, even
+// when the nested TailorResult carries a non-empty value. The on-disk record
+// must not store the full tailored resume body; callers that need the text
+// should read it from the file at OutputPath instead.
+//
+// The alias type breaks the MarshalJSON recursion while preserving all other
+// field tags. The receiver is never mutated; TailorResult is cloned before
+// zeroing TailoredText.
+func (r ApplicationRecord) MarshalJSON() ([]byte, error) { //nolint:gocritic // value receiver required so json.Marshal on a value also triggers redaction
+	type alias ApplicationRecord
+	redacted := alias(r)
+	if redacted.TailorResult != nil {
+		clone := *redacted.TailorResult
+		clone.TailoredText = ""
+		redacted.TailorResult = &clone
+	}
+	return json.Marshal(redacted)
 }
