@@ -16,28 +16,82 @@ AI-powered job application CLI. Scores your resume against job postings, tailors
 
 | Mode | Command | Use case |
 |------|---------|----------|
-| MCP Server | `go-apply serve` | Claude Code, Hermes, Openclaw — full orchestrated experience with automatic profile use |
-| Headless CLI | `go-apply run --url <url>` | For agents without MCP support |
+| MCP Server | `go-apply serve` | Claude Code and MCP-compatible agents — agent drives the full workflow |
+| Headless CLI | `go-apply run --url <url>` | Agents without MCP support — consume JSON output |
 
-MCP is the recommended path. The host agent drives the full tool flow and your onboarded profile is used automatically. For agents without MCP, use `go-apply run` directly — see [Commands](#commands).
+MCP is the recommended path. The host agent orchestrates everything, including first-time onboarding. For agents without MCP, see [Headless (Non-MCP Agents)](#headless-non-mcp-agents).
 
-## Quick Start
+## Quick Start (MCP)
 
 1. **Install**
    ```bash
    curl -sSfL https://raw.githubusercontent.com/thedandano/go-apply/main/scripts/install.sh | bash
    ```
 
-2. **Register with your MCP agent**
+2. **Register with your agent**
    ```bash
    go-apply setup mcp --agent claude    # Claude Code
    go-apply setup mcp --agent hermes    # Hermes
    go-apply setup mcp --agent openclaw  # Openclaw
    ```
 
-3. **Ask your agent to onboard and apply** — the agent drives the full flow via MCP tools:
+3. **Tell your agent to apply**
+
+   The agent checks your profile on first use and calls `onboard_user` automatically if you haven't onboarded yet:
    - *"Onboard my resume at ~/docs/resume.md"*
-   - *"Score my resume against this job posting and tailor it"*
+   - *"Score my resume against this job posting: https://..."*
+
+## Headless (Non-MCP Agents)
+
+For agents that call CLI tools directly and consume JSON output.
+
+### Setup
+
+1. **Configure the LLM** (required for headless mode):
+   ```bash
+   go-apply config set orchestrator.base_url https://api.anthropic.com/v1
+   go-apply config set orchestrator.model claude-sonnet-4-6
+   go-apply config set orchestrator.api_key sk-ant-...   # or set GO_APPLY_API_KEY env var
+   ```
+
+2. **Onboard your resume** (required before `run`):
+   ```bash
+   go-apply onboard --resume ~/docs/resume.md
+   # Optionally add skills and accomplishments to improve tailoring:
+   go-apply onboard --resume ~/docs/resume.md --skills ~/docs/skills.md --accomplishments ~/docs/accomplishments.md
+   ```
+
+3. **Run against a job posting**:
+   ```bash
+   go-apply run --url https://example.com/jobs/123
+   # or paste raw JD text when the page is paywalled:
+   go-apply run --text "We are hiring a senior Go engineer..."
+   ```
+
+### Output
+
+JSON to stdout, pipeline events (step-started/completed/failed) as JSON lines to stderr:
+
+```json
+{
+  "status": "success",
+  "jd": { "title": "Senior Go Engineer", "company": "Acme", "required": ["go", "kubernetes"] },
+  "scores": {
+    "my-resume": {
+      "breakdown": {
+        "keyword_match": 40.5,
+        "experience_fit": 18.0,
+        "impact_evidence": 8.0,
+        "ats_format": 9.0,
+        "readability": 4.5
+      }
+    }
+  },
+  "best_score": 80.0,
+  "best_resume": "my-resume",
+  "cover_letter": { "text": "...", "channel": "COLD", "word_count": 180 }
+}
+```
 
 ## Installation
 
@@ -47,12 +101,12 @@ MCP is the recommended path. The host agent drives the full tool flow and your o
 curl -sSfL https://raw.githubusercontent.com/thedandano/go-apply/main/scripts/install.sh | bash
 ```
 
-Install options (env vars):
+Options:
 ```bash
-# Install a specific version
-curl -sSfL https://raw.githubusercontent.com/thedandano/go-apply/main/scripts/install.sh | VERSION=0.1.0 bash
+# Specific version
+curl -sSfL https://raw.githubusercontent.com/thedandano/go-apply/main/scripts/install.sh | VERSION=0.2.0 bash
 
-# Install to a custom directory (e.g., system-wide, requires sudo)
+# Custom install directory (system-wide)
 curl -sSfL https://raw.githubusercontent.com/thedandano/go-apply/main/scripts/install.sh | INSTALL_DIR=/usr/local/bin sudo bash
 ```
 
@@ -73,221 +127,106 @@ curl -sSfL https://raw.githubusercontent.com/thedandano/go-apply/main/scripts/in
 Config file: `~/.config/go-apply/config.yaml`
 
 ```yaml
-# CLI mode only — not needed for MCP (the host agent is the orchestrator)
+# Required for headless/CLI mode only — not needed for MCP (the agent is the orchestrator)
 orchestrator:
   base_url: https://api.anthropic.com/v1
   model: claude-sonnet-4-6
   api_key: sk-ant-...        # or set GO_APPLY_API_KEY env var
 
-years_of_experience: 7
-default_seniority: senior
+# Used in cover letters — set once, applies to MCP and CLI
 user_name: "Your Name"
 occupation: "Software Engineer"
 location: "San Francisco, CA"
+linkedin_url: "https://linkedin.com/in/yourprofile"
+years_of_experience: 7
+default_seniority: senior
 ```
 
-> All tunable scoring constants (weights, thresholds, limits) live in `internal/config/defaults.json`.
-
-## Logging
-
-Log files are written to `~/.local/state/go-apply/logs/go-apply-YYYY-MM-DD.log` — one file per calendar day (multiple invocations append); last 50 files retained.
-
-```bash
-# View recent logs
-go-apply logs
-
-# Watch live (tail -f equivalent)
-go-apply logs --follow
-
-# Show last 200 lines
-go-apply logs --lines 200
-
-# Tail the raw log file with grep
-tail -f ~/.local/state/go-apply/logs/go-apply-$(date +%Y-%m-%d).log | grep ERROR
-```
-
-### Configuration
-
-Log level and verbose mode are set in `~/.config/go-apply/config.yaml`:
-
-```yaml
-log_level: debug   # debug | info | warn | error (default: info)
-verbose: true      # true = full request/response payloads in logs; false = truncated at 2 KB
-```
-
-Set them without editing the file directly:
-
-```bash
-go-apply config set log_level debug
-go-apply config set verbose true
-```
-
-### MCP server debug logging
-
-To enable debug logs when running as an MCP server, set `log_level` in the config file, or pass it via the `env` block in Claude Code's `settings.json` (config file is read on startup):
-
-```json
-{
-  "mcpServers": {
-    "go-apply": {
-      "command": "go-apply",
-      "args": ["serve"]
-    }
-  }
-}
-```
-
-Run `go-apply config set log_level debug` once and every invocation — CLI and MCP — picks it up.
+All tunable scoring constants (weights, thresholds, limits) live in `internal/config/defaults.json`.
 
 ## Commands
 
-### `go-apply run`
+### `go-apply onboard`
 
-Run the full pipeline against a job description. Fetches (or accepts) the JD, scores all resumes in `~/.local/share/go-apply/inputs/`, tailors resumes with a two-tier cascade (T1 keyword injection + T2 bullet rewriting), and generates a cover letter.
+Store resumes, skills, and accomplishments in the data directory. Required before `go-apply run`.
 
 ```bash
-# From a URL (fetches and caches the JD)
+go-apply onboard --resume ~/docs/resume.md
+go-apply onboard --resume ~/docs/resume.md --skills ~/docs/skills.md --accomplishments ~/docs/accomplishments.md
+
+# Reset all stored docs
+go-apply onboard --reset
+go-apply onboard --reset --yes   # skip confirmation (non-interactive)
+```
+
+| Flag | Description |
+|------|-------------|
+| `--resume <path>` | Resume file (repeatable; at least one required) |
+| `--skills <path>` | Skills reference file (optional — improves T1 keyword targeting) |
+| `--accomplishments <path>` | Accomplishments file (optional — improves T2 bullet rewriting) |
+| `--reset` | Delete all stored resumes, skills, and accomplishments |
+| `--yes` | Skip confirmation prompt for `--reset` |
+
+### `go-apply run`
+
+Run the full apply pipeline against a job description. Requires prior `go-apply onboard`.
+
+```bash
 go-apply run --url https://example.com/jobs/123
-
-# From raw text (useful in scripts or when the page is paywalled)
-go-apply run --text "We are hiring a senior Go engineer..."
-
-# Specify application channel
-go-apply run --url <url> --channel REFERRAL   # COLD (default), REFERRAL, RECRUITER
+go-apply run --text "We are hiring..."
+go-apply run --url <url> --channel REFERRAL
+go-apply run --url <url> --accomplishments ~/docs/accomplishments.md
 ```
-
-**Output** (stdout, JSON):
-```json
-{
-  "status": "success",
-  "jd": { "title": "Senior Go Engineer", "company": "Acme", "required": ["go", "kubernetes"], ... },
-  "scores": { "my-resume": { "breakdown": { "keyword_match": 40.5, ... }, ... } },
-  "best_score": 82.3,
-  "best_resume": "my-resume",
-  "keywords": { "required": ["go", "kubernetes"], "preferred": ["docker"] },
-  "cover_letter": { "text": "...", "channel": "COLD", "word_count": 180 },
-  "start_time": "...", "end_time": "..."
-}
-```
-
-Pipeline events (step-started/completed/failed) are written as JSON lines to stderr.
-
-**Flags:**
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--url` | — | URL of the job posting |
-| `--text` | — | Raw JD text (mutually exclusive with `--url`) |
-| `--headless` | `true` | JSON output mode |
-| `--channel` | `COLD` | Application channel: `COLD`, `REFERRAL`, `RECRUITER` |
-| `--accomplishments` | — | Path to accomplishments doc; **required for tailoring** — omitting it skips T1 and T2 entirely |
-
-## MCP Server (Claude Code, Hermes, Openclaw)
-
-Add to Claude Code `settings.json`:
-```json
-{
-  "mcpServers": {
-    "go-apply": { "command": "go-apply", "args": ["serve"] }
-  }
-}
-```
-
-Available tools: `onboard_user`, `add_resume`, `get_config`, `update_config`, `load_jd`, `submit_keywords`, `submit_tailor_t1`, `submit_tailor_t2`, `finalize`
-
-### MCP setup command
-
-Instead of editing config files manually, use the setup command:
-
-```bash
-# Register with Claude Code
-go-apply setup mcp --agent claude
-
-# Register with OpenClaw
-go-apply setup mcp --agent openclaw
-
-# Register with Hermes
-go-apply setup mcp --agent hermes
-
-# Register with all known agents at once
-go-apply setup mcp --agent all
-```
-
-To unregister:
-```bash
-go-apply setup mcp --agent claude --remove
-go-apply setup mcp --agent all --remove
-```
-
-To overwrite an existing registration:
-```bash
-go-apply setup mcp --agent claude --override   # or --force (alias)
-```
-
-The command is idempotent — running it again without `--override` reports "already registered" and makes no changes. On a TTY you will be prompted to confirm the overwrite.
-
-## CLI Reference
-
-### Global (persistent) flags
-
-These apply to every subcommand and must come before the subcommand name.
-
-There are no persistent global flags. Log level and verbose mode are configured via `go-apply config set` (see [Logging](#logging)).
-
-### `go-apply run`
-
-Run the full apply pipeline against a job description.
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--url <url>` | — | URL of the job posting to fetch |
-| `--text <jd>` | — | Raw job description text (mutually exclusive with `--url`) |
-| `--headless` | `true` | JSON output mode |
+| `--text <jd>` | — | Raw JD text (mutually exclusive with `--url`) |
 | `--channel <channel>` | `COLD` | Application channel: `COLD`, `REFERRAL`, `RECRUITER` |
-| `--accomplishments <path>` | — | Path to accomplishments doc; **required for tailoring** — omitting it skips T1 and T2 entirely |
+| `--accomplishments <path>` | — | Accomplishments doc for T2 bullet rewriting (optional) |
 
 ### `go-apply serve`
 
-Start the MCP stdio server for Claude Code integration. No flags.
-
-### `go-apply onboard`
-
-Store resumes, skills, and accomplishments in the profile database.
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--resume <path>` | — | Path to a resume file (repeatable; at least one required) |
-| `--skills <path>` | — | Path to skills reference file (optional) |
-| `--accomplishments <path>` | — | Path to accomplishments file (optional) |
-| `--reset` | `false` | Delete profile database and `inputs/` directory |
-| `--yes` | `false` | Skip confirmation prompt for `--reset` (required for non-interactive use) |
-
-### `go-apply config`
-
-Manage go-apply configuration. Subcommands:
-
-| Subcommand | Usage | Description |
-|------------|-------|-------------|
-| `set` | `go-apply config set <key> <value>` | Set a config field by dot-notation key |
-| `get` | `go-apply config get <key>` | Get a config field value by dot-notation key |
-| `show` | `go-apply config show` | Show all config fields (API keys redacted) |
-
-Config keys use dot notation (e.g. `llm.base_url`, `embedder.model`, `user_name`, `log_level`).
+Start the MCP stdio server. No flags. Registered automatically by `go-apply setup mcp` — you don't typically call this directly.
 
 ### `go-apply setup mcp`
 
 Register or unregister go-apply as an MCP server in an AI agent's config.
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--agent <name>` | — | Agent to configure: `claude`, `openclaw`, `hermes`, `all` (required) |
-| `--remove` | `false` | Unregister go-apply from the agent's config |
-| `--override` | `false` | Overwrite an existing registration |
-| `--force` | `false` | Alias for `--override` |
+```bash
+go-apply setup mcp --agent claude     # Claude Code
+go-apply setup mcp --agent openclaw
+go-apply setup mcp --agent hermes
+go-apply setup mcp --agent all        # all known agents at once
+
+go-apply setup mcp --agent claude --remove    # unregister
+go-apply setup mcp --agent claude --override  # overwrite existing registration
+```
+
+The command is idempotent — running it again without `--override` reports "already registered" and makes no changes. On a TTY you will be prompted to confirm any overwrite.
+
+### `go-apply config`
+
+Manage configuration without editing the file directly.
+
+| Subcommand | Usage | Description |
+|------------|-------|-------------|
+| `set` | `go-apply config set <key> <value>` | Set a config field |
+| `get` | `go-apply config get <key>` | Get a config field value |
+| `show` | `go-apply config show` | Show all fields (API keys redacted) |
+
+Valid keys: `orchestrator.base_url`, `orchestrator.model`, `orchestrator.api_key`, `user_name`, `occupation`, `location`, `linkedin_url`, `years_of_experience`, `default_seniority`, `log_level`, `verbose`.
 
 ### `go-apply logs`
 
-View recent go-apply log entries.
+View recent log entries.
+
+```bash
+go-apply logs              # last 100 lines
+go-apply logs -n 200       # last 200 lines
+go-apply logs -f           # follow (tail -f)
+tail -f ~/.local/state/go-apply/logs/go-apply-$(date +%Y-%m-%d).log | grep ERROR
+```
 
 | Flag | Shorthand | Default | Description |
 |------|-----------|---------|-------------|
@@ -300,13 +239,41 @@ Update go-apply to the latest GitHub release. No flags.
 
 ### `go-apply version`
 
-Print the go-apply version. No flags.
+Print the current version. No flags.
 
-## Roadmap
+## Logging
 
-| Feature | Status |
-|---------|--------|
-| Resume tailoring (keyword injection + bullet rewriting) | Shipped |
-| Multi-resume scoring with full breakdown | Shipped |
-| MCP integration (Claude Code, Hermes, Openclaw) | Shipped |
-| Headless CLI (agents without MCP) | Shipped |
+Logs are written to `~/.local/state/go-apply/logs/go-apply-YYYY-MM-DD.log` — one file per day, last 50 retained.
+
+```bash
+go-apply config set log_level debug   # debug | info | warn | error (default: info)
+go-apply config set verbose true      # true = full request/response payloads; false = truncated at 2 KB
+```
+
+MCP debug logging: set `log_level` once via `go-apply config set log_level debug` — both CLI and MCP server read it on startup.
+
+## MCP Tools
+
+Reference for agent authors. Exposed by `go-apply serve`:
+
+| Tool | Purpose |
+|------|---------|
+| `onboard_user` | Store resume, skills, and accomplishments |
+| `add_resume` | Add or replace a single resume |
+| `get_config` | Read all config fields (API keys redacted) |
+| `update_config` | Set a config field by dot-notation key |
+| `load_jd` | Fetch JD by URL or raw text; returns `session_id` + `jd_text` |
+| `submit_keywords` | Score resumes against extracted keywords; returns scores + `next_action` |
+| `submit_tailor_t1` | Inject missing keywords into the Skills section; rescores |
+| `submit_tailor_t2` | Rewrite Experience bullets to surface missing keywords; rescores |
+| `finalize` | Persist the application record and close the session |
+
+### Score thresholds
+
+| Score | `next_action` | Meaning |
+|-------|--------------|---------|
+| ≥ 70 | `cover_letter` | Strong fit — proceed to cover letter |
+| 40–69 | `tailor_t1` | Moderate fit — tailoring recommended |
+| < 40 | `advise_skip` | Structural mismatch — tailoring won't close the gap |
+
+The `job_application_workflow` MCP prompt contains full orchestration instructions for the host agent.
