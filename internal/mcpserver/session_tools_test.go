@@ -978,6 +978,184 @@ func TestHandleSubmitTailorT2_HappyPath_ReturnsNewScore(t *testing.T) {
 	}
 }
 
+// fullT2Flow runs load_jd → submit_keywords → submit_tailor_t2 and returns the T2 response text.
+func fullT2Flow(t *testing.T, cfg *pipeline.ApplyConfig, rewrites string) string {
+	t.Helper()
+
+	loadReq := callToolRequest("load_jd", map[string]any{"jd_raw_text": "Senior Go engineer. Skills: go."})
+	loadText := extractText(t, mcpserver.HandleLoadJDWithConfig(context.Background(), &loadReq, cfg))
+	var loadEnv map[string]any
+	if err := json.Unmarshal([]byte(loadText), &loadEnv); err != nil {
+		t.Fatalf("load_jd not JSON: %v", err)
+	}
+	sessionID, _ := loadEnv["session_id"].(string)
+	if sessionID == "" {
+		t.Fatal("load_jd returned no session_id")
+	}
+
+	const jdJSON = `{"title":"Go Engineer","company":"Acme","required":["go"],"preferred":[],"location":"Remote","seniority":"senior","required_years":3}`
+	kwReq := callToolRequest("submit_keywords", map[string]any{"session_id": sessionID, "jd_json": jdJSON})
+	mcpserver.HandleSubmitKeywordsWithConfig(context.Background(), &kwReq, cfg, &config.Config{})
+
+	t2Req := callToolRequest("submit_tailor_t2", map[string]any{
+		"session_id":      sessionID,
+		"bullet_rewrites": rewrites,
+	})
+	result := mcpserver.HandleSubmitTailorT2WithConfig(context.Background(), &t2Req, cfg, &config.Config{})
+	return extractText(t, result)
+}
+
+// ── Task 3.3: tailored_text in T2 response data ───────────────────────────────
+
+func TestHandleSubmitTailorT2_HappyPath_ResponseContainsTailoredText(t *testing.T) {
+	cfg := stubApplyConfigForSession()
+	// The stub loader returns "golang experience senior engineer 5 years".
+	// The rewrite replaces it verbatim, so tailored_text should equal the replacement.
+	const rewrites = `[{"original":"golang experience senior engineer 5 years","replacement":"golang experience senior engineer 5 years, Kubernetes"}]`
+	text := fullT2Flow(t, &cfg, rewrites)
+
+	var env map[string]any
+	if err := json.Unmarshal([]byte(text), &env); err != nil {
+		t.Fatalf("not JSON: %v — raw: %s", err, text)
+	}
+	if env["status"] != "ok" {
+		t.Fatalf("status = %v, want ok — full: %s", env["status"], text)
+	}
+	data, _ := env["data"].(map[string]any)
+	if data == nil {
+		t.Fatal("expected data in response")
+	}
+
+	tailoredText, ok := data["tailored_text"].(string)
+	if !ok {
+		t.Fatalf("expected tailored_text string in data, got: %s", text)
+	}
+	const wantText = "golang experience senior engineer 5 years, Kubernetes"
+	if tailoredText != wantText {
+		t.Errorf("tailored_text = %q, want %q", tailoredText, wantText)
+	}
+}
+
+// ── Task 3.2: info log carries tailored_text_bytes / tailored_text_lines ──────
+
+func TestHandleSubmitTailorT2_InfoLog_ContainsTextBytesAndLines(t *testing.T) {
+	cfg := stubApplyConfigForSession()
+
+	var buf bytes.Buffer
+	restore := captureDefaultLogger(&buf)
+	t.Cleanup(restore)
+
+	const rewrites = `[{"original":"golang experience senior engineer 5 years","replacement":"golang experience senior engineer 5 years, Kubernetes"}]`
+	text := fullT2Flow(t, &cfg, rewrites)
+	var env map[string]any
+	if err := json.Unmarshal([]byte(text), &env); err != nil {
+		t.Fatalf("not JSON: %v", err)
+	}
+	if env["status"] != "ok" {
+		t.Fatalf("status = %v, want ok", env["status"])
+	}
+
+	logOutput := buf.String()
+	foundInfoLine := false
+	for _, line := range strings.Split(logOutput, "\n") {
+		if line == "" {
+			continue
+		}
+		var entry map[string]any
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			continue
+		}
+		if entry["msg"] != "tailor T2 complete" {
+			continue
+		}
+		foundInfoLine = true
+		if _, ok := entry["tailored_text_bytes"]; !ok {
+			t.Error("info log missing tailored_text_bytes")
+		}
+		if _, ok := entry["tailored_text_lines"]; !ok {
+			t.Error("info log missing tailored_text_lines")
+		}
+		break
+	}
+	if !foundInfoLine {
+		t.Error("'tailor T2 complete' info log line not found in captured output")
+	}
+}
+
+// ── Task 3.4: error paths do not contain tailored_text ────────────────────────
+
+func TestHandleSubmitTailorT2_BadInput_ErrorEnvelopeHasNoTailoredText(t *testing.T) {
+	cfg := stubApplyConfigForSession()
+	req := callToolRequest("submit_tailor_t2", map[string]any{
+		"session_id":      "any-id",
+		"bullet_rewrites": `not-valid-json`,
+	})
+	result := mcpserver.HandleSubmitTailorT2WithConfig(context.Background(), &req, &cfg, &config.Config{})
+	text := extractText(t, result)
+
+	var env map[string]any
+	if err := json.Unmarshal([]byte(text), &env); err != nil {
+		t.Fatalf("not JSON: %v", err)
+	}
+	if env["status"] != "error" {
+		t.Fatalf("status = %v, want error", env["status"])
+	}
+	if strings.Contains(text, "tailored_text") {
+		t.Errorf("error envelope must not contain tailored_text, got: %s", text)
+	}
+}
+
+func TestHandleSubmitTailorT2_RescoreFailure_ErrorEnvelopeHasNoTailoredText(t *testing.T) {
+	// Use a scorer that succeeds on the first N calls (one per resume in stubResumeRepo)
+	// during submit_keywords, then fails on the rescore call in submit_tailor_t2.
+	failingScorer := newScorerFailAfter(1)
+	cfg := pipeline.ApplyConfig{
+		Fetcher:   &stubJDFetcher{},
+		LLM:       &stubLLMClient{},
+		Scorer:    failingScorer,
+		CLGen:     nil,
+		Resumes:   &stubResumeRepo{},
+		Loader:    &stubDocumentLoader{},
+		AppRepo:   &stubApplicationRepository{},
+		Defaults:  &config.AppDefaults{},
+		Presenter: nil,
+	}
+
+	loadReq := callToolRequest("load_jd", map[string]any{"jd_raw_text": "Senior Go engineer."})
+	loadText := extractText(t, mcpserver.HandleLoadJDWithConfig(context.Background(), &loadReq, &cfg))
+	var loadEnv map[string]any
+	if err := json.Unmarshal([]byte(loadText), &loadEnv); err != nil {
+		t.Fatalf("load_jd not JSON: %v", err)
+	}
+	sessionID, _ := loadEnv["session_id"].(string)
+
+	const jdJSON = `{"title":"Go Engineer","company":"Acme","required":["go"],"preferred":[],"location":"Remote","seniority":"senior","required_years":3}`
+	kwReq := callToolRequest("submit_keywords", map[string]any{"session_id": sessionID, "jd_json": jdJSON})
+	mcpserver.HandleSubmitKeywordsWithConfig(context.Background(), &kwReq, &cfg, &config.Config{})
+
+	t2Req := callToolRequest("submit_tailor_t2", map[string]any{
+		"session_id":      sessionID,
+		"bullet_rewrites": `[{"original":"golang experience senior engineer 5 years","replacement":"golang experience senior engineer 5 years, Kubernetes"}]`,
+	})
+	result := mcpserver.HandleSubmitTailorT2WithConfig(context.Background(), &t2Req, &cfg, &config.Config{})
+	text := extractText(t, result)
+
+	var env map[string]any
+	if err := json.Unmarshal([]byte(text), &env); err != nil {
+		t.Fatalf("not JSON: %v", err)
+	}
+	if env["status"] != "error" {
+		t.Fatalf("status = %v, want error (rescore should fail) — full: %s", env["status"], text)
+	}
+	errObj, _ := env["error"].(map[string]any)
+	if errObj == nil || errObj["code"] != "rescore_failed" {
+		t.Errorf("expected code rescore_failed, got: %v", errObj)
+	}
+	if strings.Contains(text, "tailored_text") {
+		t.Errorf("error envelope must not contain tailored_text, got: %s", text)
+	}
+}
+
 // ── nextActionFromScore tests ─────────────────────────────────────────────────
 
 func TestNextActionFromScore(t *testing.T) {

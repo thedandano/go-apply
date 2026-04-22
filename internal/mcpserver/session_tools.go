@@ -528,7 +528,11 @@ func HandleSubmitTailorT2WithConfig(ctx context.Context, req *mcp.CallToolReques
 
 	logger.Banner(ctx, slog.Default(), "Tailor", "T2")
 	tailored, substitutionsMade := tailor.ApplyBulletRewrites(baseText, rewrites)
-	slog.InfoContext(ctx, "tailor T2 complete", "substitutions_made", substitutionsMade)
+	slog.InfoContext(ctx, "tailor T2 complete",
+		"substitutions_made", substitutionsMade,
+		slog.Int("tailored_text_bytes", len(tailored)),
+		slog.Int("tailored_text_lines", lineCount(tailored)),
+	)
 	sess.TailoredText = tailored
 	sess.State = stateT2Applied
 
@@ -551,11 +555,13 @@ func HandleSubmitTailorT2WithConfig(ctx context.Context, req *mcp.CallToolReques
 		PreviousScore     float64           `json:"previous_score"`
 		NewScore          model.ScoreResult `json:"new_score"`
 		SubstitutionsMade int               `json:"substitutions_made"`
+		TailoredText      string            `json:"tailored_text,omitempty"`
 	}
 	resultData := t2Data{
 		PreviousScore:     previousScore,
 		NewScore:          newScore,
 		SubstitutionsMade: substitutionsMade,
+		TailoredText:      sess.TailoredText,
 	}
 	resultBytes, _ := json.Marshal(resultData)
 	slog.DebugContext(ctx, "mcp tool result",

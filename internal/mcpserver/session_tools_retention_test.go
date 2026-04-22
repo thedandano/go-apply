@@ -154,6 +154,71 @@ func TestHandleSubmitTailorT1_RescoreFailure_SessionRetained(t *testing.T) {
 	}
 }
 
+// TestHandleSubmitTailorT2_RescoreFailure_SessionRetained verifies that when tailor
+// succeeds and the subsequent rescore fails, the session retains TailoredText and
+// its State is stateT2Applied.
+func TestHandleSubmitTailorT2_RescoreFailure_SessionRetained(t *testing.T) {
+	// 1 successful score during submit_keywords (one resume), then fail on rescore.
+	failingScorer := newRetentionScorerFailAfter(1)
+	cfg := pipeline.ApplyConfig{
+		Fetcher:   &retentionJDFetcher{},
+		LLM:       &retentionLLMClient{},
+		Scorer:    failingScorer,
+		CLGen:     nil,
+		Resumes:   &retentionResumeRepo{},
+		Loader:    &retentionDocumentLoader{},
+		AppRepo:   &retentionAppRepo{},
+		Defaults:  &config.AppDefaults{},
+		Presenter: nil,
+	}
+
+	// load_jd
+	loadReq := callToolRequestInternal("load_jd", map[string]any{"jd_raw_text": "Senior Go engineer."})
+	loadResult := HandleLoadJDWithConfig(context.Background(), &loadReq, &cfg)
+	loadText := extractTextInternal(t, loadResult)
+	var loadEnv map[string]any
+	if err := json.Unmarshal([]byte(loadText), &loadEnv); err != nil {
+		t.Fatalf("load_jd not JSON: %v", err)
+	}
+	sessionID, _ := loadEnv["session_id"].(string)
+	if sessionID == "" {
+		t.Fatal("load_jd returned no session_id")
+	}
+
+	// submit_keywords — consumes the 1 allowed score call
+	const jdJSON = `{"title":"Go Engineer","company":"Acme","required":["go"],"preferred":[],"location":"Remote","seniority":"senior","required_years":3}`
+	kwReq := callToolRequestInternal("submit_keywords", map[string]any{"session_id": sessionID, "jd_json": jdJSON})
+	HandleSubmitKeywordsWithConfig(context.Background(), &kwReq, &cfg, &config.Config{})
+
+	// submit_tailor_t2 — rescore fails, but session state must still be updated
+	t2Req := callToolRequestInternal("submit_tailor_t2", map[string]any{
+		"session_id":      sessionID,
+		"bullet_rewrites": `[{"original":"golang experience senior engineer 5 years","replacement":"golang experience senior engineer 5 years, Kubernetes"}]`,
+	})
+	result := HandleSubmitTailorT2WithConfig(context.Background(), &t2Req, &cfg, &config.Config{})
+	text := extractTextInternal(t, result)
+
+	var env map[string]any
+	if err := json.Unmarshal([]byte(text), &env); err != nil {
+		t.Fatalf("not JSON: %v", err)
+	}
+	if env["status"] != "error" {
+		t.Fatalf("status = %v, want error — full: %s", env["status"], text)
+	}
+
+	// Verify session state was retained despite rescore failure.
+	sess := sessions.Get(sessionID)
+	if sess == nil {
+		t.Fatal("session not found after T2")
+	}
+	if sess.TailoredText == "" {
+		t.Error("sess.TailoredText is empty; expected T2 output to be retained on rescore failure")
+	}
+	if sess.State != stateT2Applied {
+		t.Errorf("sess.State = %v, want stateT2Applied", sess.State)
+	}
+}
+
 // extractTextInternal is a package-level copy of extractText for internal tests.
 func extractTextInternal(t *testing.T, result *mcp.CallToolResult) string {
 	t.Helper()
