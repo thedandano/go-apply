@@ -41,3 +41,15 @@ check: vet lint security test-unit
 
 clean:
 	rm -rf bin/
+
+# Sync the vendored /resume-tailor skill body from the grimoire vault.
+# Overridable for CI and contributors whose vault lives elsewhere. Atomic
+# write via tmpfile + rename to avoid a half-written file.
+RESUME_TAILOR_SKILL_SRC ?= $(HOME)/workplace/the-scriptorium/grimoire/skills/resume-tailor/SKILL.md
+
+.PHONY: sync-tailor-prompt
+sync-tailor-prompt:
+	@test -f "$(RESUME_TAILOR_SKILL_SRC)" || { echo "source not found: $(RESUME_TAILOR_SKILL_SRC)"; exit 1; }
+	cp "$(RESUME_TAILOR_SKILL_SRC)" internal/mcpserver/skills/resume-tailor.md.tmp
+	mv internal/mcpserver/skills/resume-tailor.md.tmp internal/mcpserver/skills/resume-tailor.md
+	@echo "synced resume-tailor.md from $(RESUME_TAILOR_SKILL_SRC)"

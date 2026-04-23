@@ -47,6 +47,17 @@ type TailorDefaults struct {
 	KeywordRelevancePreferredWeight float64 `json:"keyword_relevance_preferred_weight"`
 	BulletRelevanceKeywordWeight    float64 `json:"bullet_relevance_keyword_weight"`
 	BulletRelevanceMetricWeight     float64 `json:"bullet_relevance_metric_weight"`
+
+	// LLMEnabled is the runtime feature flag gating the agent-driven tailor
+	// (spec FR-016). Defaults to true. When false, the pipeline skips the
+	// tailor step with a structured warning — no MCP call is made.
+	// Overridable at runtime via env var GO_APPLY_TAILOR_LLM_ENABLED.
+	LLMEnabled bool `json:"llm_enabled"`
+
+	// SessionTimeoutSeconds is the per-session timeout between tailor_begin
+	// and tailor_submit (spec FR-012). Defaults to 300. Overridable at
+	// runtime via env var GO_APPLY_TAILOR_SESSION_TIMEOUT (seconds).
+	SessionTimeoutSeconds int `json:"session_timeout_seconds"`
 }
 
 type FetcherDefaults struct {

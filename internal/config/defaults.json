@@ -50,7 +50,9 @@
     "keyword_relevance_required_weight":  0.7,
     "keyword_relevance_preferred_weight": 0.3,
     "bullet_relevance_keyword_weight": 0.6,
-    "bullet_relevance_metric_weight":  0.4
+    "bullet_relevance_metric_weight":  0.4,
+    "llm_enabled":               true,
+    "session_timeout_seconds":   300
   },
   "fetcher": {
     "chromedp_timeout_ms":     60000,
