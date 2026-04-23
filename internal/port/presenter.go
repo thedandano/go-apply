@@ -3,7 +3,7 @@ package port
 import "github.com/thedandano/go-apply/internal/model"
 
 // Presenter receives pipeline events and results.
-// Implementations: headless.JSONPresenter, mcp.MCPPresenter, tui.TUIPresenter.
+// Implementations: headless.JSONPresenter, mcp.MCPPresenter.
 // Pipeline services call into Presenter — never the reverse.
 type Presenter interface {
 	// OnEvent is called for each step lifecycle event.

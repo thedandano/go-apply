@@ -43,7 +43,7 @@ func makeHandler(w io.Writer, level slog.Level, useJSON bool) slog.Handler {
 // New creates a *slog.Logger writing JSON lines to a daily log file in opts.LogDir.
 //
 // File naming: go-apply-2006-01-02.log (one per day; multiple invocations append)
-// Dual output: file at FileLevel + stderr at StderrLevel (keeps TUI clean)
+// Dual output: file at FileLevel + stderr at StderrLevel
 // Retention: keeps the last maxLogFiles files, prunes older ones on startup
 // Fallback: if LogDir is unwritable → stderr-only logger at WARN+, no error returned
 func New(opts Options) (*slog.Logger, func(), error) {

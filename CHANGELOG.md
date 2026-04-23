@@ -1,5 +1,42 @@
 # Changelog
 
+## [0.3.0] — agent-driven tailoring (2026-04-22)
+
+### ⚠ BREAKING CHANGES
+
+* **mcpserver:** `submit_tailor_t1` and `submit_tailor_t2` MCP tools removed — replaced by a single `submit_tailored_resume`. Send the full rewritten resume text in one call.
+* **mcpserver:** `job_application_workflow` MCP prompt removed — replaced by `tailor_resume` (embeds the `resume-tailor` skill body via `//go:embed`).
+* **llm:** internal LLM client (`internal/service/llm`, `port.LLMClient`) removed — go-apply no longer makes LLM calls; the MCP agent or external script authors the tailored text.
+* **orchestrator:** headless LLM orchestrator (`internal/service/orchestrator/llm.go`) removed.
+* **tui:** TUI mode removed.
+* **model:** `TailorTier` enum and `Tier1Text` / `Tier1Score` fields on `TailorResult` removed.
+* **config:** `GO_APPLY_API_KEY` environment variable and all associated LLM config fields removed.
+
+### Added
+
+* `submit_tailored_resume` MCP tool — accepts `tailored_text` (required) and `changelog` (optional JSON array of `{action, target, keyword, reason}` entries; `reason ≤ 512 bytes`, `keyword ≤ 128 bytes`). Rescores and returns `{previous_score, new_score, tailored_text, changelog}`.
+* `tailor_resume` MCP prompt — composes a go-apply-specific prelude with the vendored `resume-tailor` skill body; the agent reads it, tailors the resume, and calls `submit_tailored_resume`.
+* Headless CLI subcommands: `load-jd`, `score`, `submit-tailored-resume`, `finalize` — for scripted use without MCP.
+* Disk-backed session store at `~/.local/share/go-apply/sessions/` (directory mode `0o700`, file mode `0o600`).
+* `make sync-skill` Makefile target — atomically replaces `internal/mcpserver/skills/resume-tailor.md` from the grimoire source and regenerates the `.sha256` integrity sentinel. Override source with `RESUME_TAILOR_SKILL_SRC`.
+* `changelog` field on `submit_tailored_resume` for structured agent-reported changes.
+
+### Deprecation
+
+Mechanical resume tailoring (server-side LLM cascade) is removed. The agent driving MCP (or the human operating the CLI) is now responsible for producing the tailored text. go-apply remains responsible for scoring, persisting, and prompting.
+
+### Rollback note
+
+Reverting `v0.3.0` → `v0.2.x` additionally requires removing the session store on affected hosts:
+
+```bash
+rm -rf ~/.local/share/go-apply/sessions/
+```
+
+Session files written by the new binary are not understood by the older binary. Application records under `~/.local/share/go-apply/applications/` are forward- and backward-compatible (additive fields only).
+
+---
+
 ## [0.2.0](https://github.com/thedandano/go-apply/compare/v0.1.8...v0.2.0) (2026-04-22)
 
 

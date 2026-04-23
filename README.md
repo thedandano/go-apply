@@ -1,13 +1,12 @@
 # go-apply
 
-AI-powered job application CLI. Scores your resume against job postings, tailors it, and generates cover letters.
+go-apply is a substrate — loader, scorer, prompt, and persister — that an MCP agent drives. It fetches job descriptions, scores resumes deterministically, embeds the resume-tailor skill prompt for the agent, accepts the agent's rewritten resume via `submit_tailored_resume`, and persists the application record. go-apply does not make LLM calls or produce tailored text on its own.
 
 [![CI](https://github.com/thedandano/go-apply/actions/workflows/ci.yml/badge.svg)](https://github.com/thedandano/go-apply/actions/workflows/ci.yml)
 [![Latest Release](https://img.shields.io/github/v/release/thedandano/go-apply)](https://github.com/thedandano/go-apply/releases/latest)
 [![Go Version](https://img.shields.io/github/go-mod/go-version/thedandano/go-apply)](go.mod)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Go Report Card](https://goreportcard.com/badge/github.com/thedandano/go-apply)](https://goreportcard.com/report/github.com/thedandano/go-apply)
-[![Powered by Claude](https://img.shields.io/badge/Powered%20by-Claude-blueviolet?logo=anthropic)](https://anthropic.com)
 [![Works with Claude Code](https://img.shields.io/badge/Works%20with-Claude%20Code-blueviolet?logo=anthropic)](https://claude.ai/code)
 [![Works with OpenClaw](https://img.shields.io/badge/Works%20with-OpenClaw-orange)](https://github.com/openclaw)
 [![Works with Hermes](https://img.shields.io/badge/Works%20with-Hermes-teal)](https://github.com/hermes-agent)
@@ -16,10 +15,8 @@ AI-powered job application CLI. Scores your resume against job postings, tailors
 
 | Mode | Command | Use case |
 |------|---------|----------|
-| MCP Server | `go-apply serve` | Claude Code, Hermes, Openclaw — full orchestrated experience with automatic profile use |
-| Headless CLI | `go-apply run --url <url>` | For agents without MCP support |
-
-MCP is the recommended path. The host agent drives the full tool flow and your onboarded profile is used automatically. For agents without MCP, use `go-apply run` directly — see [Commands](#commands).
+| **MCP** (primary) | `go-apply serve` | Claude Code, Hermes, Openclaw — the agent drives the full tool flow |
+| **Headless CLI** | `go-apply load-jd / score / submit-tailored-resume / finalize` | Scripted pipelines without MCP |
 
 ## Quick Start
 
@@ -38,6 +35,10 @@ MCP is the recommended path. The host agent drives the full tool flow and your o
 3. **Ask your agent to onboard and apply** — the agent drives the full flow via MCP tools:
    - *"Onboard my resume at ~/docs/resume.md"*
    - *"Score my resume against this job posting and tailor it"*
+
+   The agent reads the `tailor_resume` prompt (which embeds the `resume-tailor` skill verbatim), writes the full tailored resume, and submits it via `submit_tailored_resume`. go-apply rescores and persists the result.
+
+   The happy path is: `load_jd → submit_keywords → submit_tailored_resume → finalize`.
 
 ## Installation
 
@@ -73,11 +74,13 @@ curl -sSfL https://raw.githubusercontent.com/thedandano/go-apply/main/scripts/in
 Config file: `~/.config/go-apply/config.yaml`
 
 ```yaml
-years_of_experience: 7
-default_seniority: senior
 user_name: "Your Name"
 occupation: "Software Engineer"
 location: "San Francisco, CA"
+linkedin_url: "https://linkedin.com/in/yourname"
+years_of_experience: 7
+log_level: info    # debug | info | warn | error
+verbose: false     # true = full request/response payloads in logs
 ```
 
 > All tunable scoring constants (weights, thresholds, limits) live in `internal/config/defaults.json`.
@@ -133,49 +136,6 @@ To enable debug logs when running as an MCP server, set `log_level` in the confi
 
 Run `go-apply config set log_level debug` once and every invocation — CLI and MCP — picks it up.
 
-## Commands
-
-### `go-apply run`
-
-Run the full pipeline against a job description. Fetches (or accepts) the JD, scores all resumes in `~/.local/share/go-apply/inputs/`, tailors resumes with a two-tier cascade (T1 keyword injection + T2 bullet rewriting), and generates a cover letter.
-
-```bash
-# From a URL (fetches and caches the JD)
-go-apply run --url https://example.com/jobs/123
-
-# From raw text (useful in scripts or when the page is paywalled)
-go-apply run --text "We are hiring a senior Go engineer..."
-
-# Specify application channel
-go-apply run --url <url> --channel REFERRAL   # COLD (default), REFERRAL, RECRUITER
-```
-
-**Output** (stdout, JSON):
-```json
-{
-  "status": "success",
-  "jd": { "title": "Senior Go Engineer", "company": "Acme", "required": ["go", "kubernetes"], ... },
-  "scores": { "my-resume": { "breakdown": { "keyword_match": 40.5, ... }, ... } },
-  "best_score": 82.3,
-  "best_resume": "my-resume",
-  "keywords": { "required": ["go", "kubernetes"], "preferred": ["docker"] },
-  "cover_letter": { "text": "...", "channel": "COLD", "word_count": 180 },
-  "start_time": "...", "end_time": "..."
-}
-```
-
-Pipeline events (step-started/completed/failed) are written as JSON lines to stderr.
-
-**Flags:**
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--url` | — | URL of the job posting |
-| `--text` | — | Raw JD text (mutually exclusive with `--url`) |
-| `--headless` | `true` | JSON output mode |
-| `--channel` | `COLD` | Application channel: `COLD`, `REFERRAL`, `RECRUITER` |
-| `--accomplishments` | — | Path to accomplishments doc; **required for tailoring** — omitting it skips T1 and T2 entirely |
-
 ## MCP Server (Claude Code, Hermes, Openclaw)
 
 Add to Claude Code `settings.json`:
@@ -187,9 +147,24 @@ Add to Claude Code `settings.json`:
 }
 ```
 
-Available tools: `onboard_user`, `add_resume`, `get_config`, `update_config`, `load_jd`, `submit_keywords`, `submit_tailor_t1`, `submit_tailor_t2`, `finalize`
+### Available tools
 
-Tailor tool responses (`submit_tailor_t1` / `submit_tailor_t2`) include the full rewritten resume as `tailored_text` in the response `data`, alongside score deltas and keyword/bullet metadata. Headless JSON output (`PipelineResult.cascade.tailored_text`) carries the same field. Note: `tailored_text` is the latest cascade state (post-T1 or post-T2); the separate `tier1_text` is a T1-only snapshot retained for T1→T2 score-delta reporting. The persisted on-disk application record excludes `tailored_text` by design.
+| Tool | Description |
+|------|-------------|
+| `onboard_user` | Store a resume, skills, and accomplishments into the profile database |
+| `add_resume` | Add or replace a single resume in the profile database |
+| `get_config` | Return all go-apply config fields (API keys redacted) |
+| `update_config` | Set a config field by dot-notation key |
+| `load_jd` | Fetch the job description by URL or accept raw text; returns `session_id` |
+| `submit_keywords` | Submit extracted keywords to score resumes; returns scores and `next_action` |
+| `submit_tailored_resume` | Accept the agent's full rewritten resume, rescore, and advance the session |
+| `finalize` | Persist the application record and close the session |
+
+### Available prompts
+
+| Prompt | Description |
+|--------|-------------|
+| `tailor_resume` | Embeds the `resume-tailor` skill verbatim plus a go-apply-specific prelude. The agent reads this prompt, writes the full tailored resume, and submits it via `submit_tailored_resume`. |
 
 ### MCP setup command
 
@@ -222,25 +197,75 @@ go-apply setup mcp --agent claude --override   # or --force (alias)
 
 The command is idempotent — running it again without `--override` reports "already registered" and makes no changes. On a TTY you will be prompted to confirm the overwrite.
 
+## Scripted usage (headless)
+
+The CLI does not produce tailored resume text. It accepts tailored text as input. You still need Claude Code, another agent, or a manual rewrite to author the file passed to `submit-tailored-resume`. The CLI is useful for scripting the load/score/persist sides of the workflow around a tailoring step you produce elsewhere.
+
+```bash
+# 1. Load the job description and capture the session ID
+SESSION=$(go-apply load-jd --url https://example.com/jobs/123 | jq -r .session_id)
+
+# 2. Score resumes against the extracted keywords
+go-apply score --session "$SESSION"
+
+# 3. Tailor the resume externally (Claude Code, another agent, or manual edit),
+#    then submit the full rewritten text
+go-apply submit-tailored-resume --session "$SESSION" --file tailored.md
+
+# 4. Persist the application record and close the session
+go-apply finalize --session "$SESSION"
+```
+
+## Maintaining the tailor prompt
+
+The `tailor_resume` MCP prompt embeds `internal/mcpserver/skills/resume-tailor.md` at build time via `//go:embed`. This file is vendored from the grimoire repository. To refresh it:
+
+```bash
+make sync-skill
+```
+
+By default `sync-skill` reads from `~/workplace/the-scriptorium/grimoire/skills/resume-tailor/SKILL.md`. Override with:
+
+```bash
+RESUME_TAILOR_SKILL_SRC=/path/to/SKILL.md make sync-skill
+```
+
+`sync-skill` atomically replaces the vendored file and regenerates the `.sha256` integrity sentinel. The test `TestTailorSkillBodyIntegrityHash` catches any mismatch between the embedded body and the sentinel at test time.
+
+For contributors who do not have the grimoire: the vendored copy at `internal/mcpserver/skills/resume-tailor.md` is the authoritative source. Do not edit it by hand; submit a PR with the updated file and a re-generated `.sha256`.
+
+## Getting a rendered PDF (external)
+
+go-apply produces a tailored resume as **text**. To produce a rendered PDF, run the `resume-tailor` skill separately.
+
+**Where the skill lives:** The typical path for maintainers is `~/workplace/the-scriptorium/grimoire/skills/resume-tailor/`. Other users install the skill per the skill's own README.
+
+**What the skill needs from go-apply:**
+- The `tailored_text` returned by `submit_tailored_resume`
+- The extracted JD keywords (from `submit_keywords` output)
+- Your resume template (`.tex` preferred; the skill's `template_generator.py` can produce one from an existing resume)
+
+**Prerequisites the skill requires:**
+- LaTeX: `tectonic` (preferred) or `xelatex` via MacTeX/TeXLive
+- Python: `uv` (preferred) or `python3` + `pip`
+
+Refer to the skill's own `setup.sh` for the authoritative install steps. go-apply does not install these for you.
+
+**Minimal bridging:** After running the go-apply flow, open a Claude Code session in a directory that has the skill loaded, paste the tailored text, and ask "render this as a PDF using resume-tailor" — the skill's manual-trigger mode takes it from there. Precise scripting is the skill's own documentation territory.
+
+## Migrating from v0.2.x
+
+**If you were using the TUI to tailor resumes:** The TUI is removed. Install Claude Code and use MCP mode (primary path), or chain the CLI subcommands documented in "Scripted usage."
+
+**If you were calling `submit_tailor_t1` and `submit_tailor_t2`:** These are replaced by a single `submit_tailored_resume`. Send the full rewritten resume text in one call.
+
+**If you relied on the TUI's progress UI:** There is no equivalent. Run in MCP mode (Claude Code shows per-tool progress) or use the CLI with debug logging enabled (`go-apply config set log_level debug`).
+
+**If you relied on the `job_application_workflow` MCP prompt:** It is replaced by `tailor_resume`. Fetch the new prompt name.
+
+**If you got PDFs directly from go-apply:** See "Getting a rendered PDF (external)" above. The `resume-tailor` skill produces them; run it externally after the go-apply flow.
+
 ## CLI Reference
-
-### Global (persistent) flags
-
-These apply to every subcommand and must come before the subcommand name.
-
-There are no persistent global flags. Log level and verbose mode are configured via `go-apply config set` (see [Logging](#logging)).
-
-### `go-apply run`
-
-Run the full apply pipeline against a job description.
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--url <url>` | — | URL of the job posting to fetch |
-| `--text <jd>` | — | Raw job description text (mutually exclusive with `--url`) |
-| `--headless` | `true` | JSON output mode |
-| `--channel <channel>` | `COLD` | Application channel: `COLD`, `REFERRAL`, `RECRUITER` |
-| `--accomplishments <path>` | — | Path to accomplishments doc; **required for tailoring** — omitting it skips T1 and T2 entirely |
 
 ### `go-apply serve`
 
@@ -258,6 +283,42 @@ Store resumes, skills, and accomplishments in the profile database.
 | `--reset` | `false` | Delete profile database and `inputs/` directory |
 | `--yes` | `false` | Skip confirmation prompt for `--reset` (required for non-interactive use) |
 
+### `go-apply load-jd`
+
+Fetch or accept a job description and start a session.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--url <url>` | — | URL of the job posting to fetch |
+| `--text <jd>` | — | Raw job description text (mutually exclusive with `--url`) |
+
+### `go-apply score`
+
+Score resumes against extracted JD keywords.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--session <id>` | — | Session ID from `load-jd` (required) |
+
+### `go-apply submit-tailored-resume`
+
+Submit a tailored resume and rescore.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--session <id>` | — | Session ID from `load-jd` (required) |
+| `--file <path>` | — | Path to the tailored resume file (required) |
+| `--changelog <json>` | — | JSON array of changelog entries (optional) |
+
+### `go-apply finalize`
+
+Persist the application record and close the session.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--session <id>` | — | Session ID from `load-jd` (required) |
+| `--cover-letter <path>` | — | Path to a cover letter file (optional) |
+
 ### `go-apply config`
 
 Manage go-apply configuration. Subcommands:
@@ -266,9 +327,7 @@ Manage go-apply configuration. Subcommands:
 |------------|-------|-------------|
 | `set` | `go-apply config set <key> <value>` | Set a config field by dot-notation key |
 | `get` | `go-apply config get <key>` | Get a config field value by dot-notation key |
-| `show` | `go-apply config show` | Show all config fields (API keys redacted) |
-
-Config keys use dot notation (e.g. `llm.base_url`, `embedder.model`, `user_name`, `log_level`).
+| `show` | `go-apply config show` | Show all config fields |
 
 ### `go-apply setup mcp`
 
@@ -298,11 +357,22 @@ Update go-apply to the latest GitHub release. No flags.
 
 Print the go-apply version. No flags.
 
+## Troubleshooting
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| `session_locked` | Another `go-apply` process is holding the session advisory lock | Wait for the other process to finish, or check `ps` for a stuck process — the lock releases on process exit |
+| `rescore_failed` | Scoring crashed internally | The envelope says "see server logs for details"; check stderr / `slog` output for the structured record with `error` attribute |
+| `invalid_changelog` | Changelog entry failed validation | The error message names the failing field and value; common cases: unknown `action`, `reason` > 512 bytes, `keyword` > 128 bytes |
+| `invalid_state` | Session is in the wrong phase for this command | The error lists current state and legal transitions |
+| Agent won't stop trying to render a PDF | Prelude regression in the prompt | Run `go test ./internal/mcpserver/...` to verify the prompt assertions pass, and `make sync-skill` if the embedded body is out of sync |
+| MCP prompt fetch returns a mismatched-hash error | `resume-tailor.md` changed without regenerating the `.sha256` sentinel | Re-run `make sync-skill` and commit both files |
+
 ## Roadmap
 
 | Feature | Status |
 |---------|--------|
-| Resume tailoring (keyword injection + bullet rewriting) | Shipped |
 | Multi-resume scoring with full breakdown | Shipped |
 | MCP integration (Claude Code, Hermes, Openclaw) | Shipped |
-| Headless CLI (agents without MCP) | Shipped |
+| Agent-driven tailoring via `tailor_resume` prompt | Shipped |
+| Headless CLI subcommand flow | Shipped |

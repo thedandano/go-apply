@@ -1,35 +1,72 @@
 # go-apply — Developer Guide
 
-## Architecture
+## High-level architecture
 
-go-apply uses a port/adapter (hexagonal) architecture. Business logic is isolated in
-`internal/service/` and `internal/repository/`. All I/O (output rendering, LLM calls,
-file access, web fetching) is behind interfaces defined in `internal/port/`.
+go-apply is a substrate, not an AI model. It provides the load, score, persist, and
+prompt layers of a job application workflow. An MCP agent (Claude Code, Hermes,
+Openclaw) or a human-authored script provides the tailored resume text; go-apply
+stores it, rescores it, and persists the record.
+
+Core packages:
 
 ```
 cmd/go-apply/main.go          CLI entry point
-internal/cli/                 Cobra commands — wire dependencies and call pipelines
+internal/cli/                 Cobra commands — wire dependencies and call services
 internal/port/                Interface definitions (the contracts)
 internal/service/pipeline/    Orchestration — calls services, emits Presenter events
 internal/service/scorer/      Deterministic scoring algorithm (pure Go, no I/O)
-internal/service/llm/         LLM + embedding HTTP client (OpenAI-compatible)
 internal/service/fetcher/     JD web fetching (chromedp primary, goquery fallback)
-internal/service/tailor/      Resume tailoring (tier1 keywords, tier2 bullet rewrites)
 internal/service/coverletter/ Cover letter generation
-internal/repository/fs/       File system repos (resume files, JD cache)
-internal/presenter/headless/  JSON output (agent/headless mode)
+internal/repository/fs/       File system repos (resume files, JD cache, sessions)
+internal/presenter/headless/  JSON output (scripted/headless mode)
 internal/presenter/mcp/       MCP tool result accumulator
-tui/                          bubbletea TUI (Epic 6)
+internal/mcpserver/           MCP stdio server (tools + tailor_resume prompt)
+internal/mcpserver/skills/    Vendored skill artifacts (refreshed via `make sync-skill`)
 internal/config/defaults.json All tunable constants — edit here, not in source
 ```
 
+The tailoring contract lives in `internal/mcpserver/skills/resume-tailor.md` —
+a vendored copy of the grimoire's `resume-tailor` skill embedded at build time
+via `//go:embed`. `make sync-skill` atomically replaces it from the source tree
+and regenerates the `.sha256` integrity sentinel. `TestTailorSkillBodyIntegrityHash`
+catches embedded/sentinel mismatches in CI.
+
 ## Adding a New Adapter
 
-To swap any external dependency (LLM provider, vector store, TUI framework):
+To swap any external dependency (web fetcher, file store, presenter):
 
 1. Implement the relevant `port.*` interface in a new package under `internal/service/` or `internal/repository/`
 2. Replace the constructor call in `internal/cli/*.go` — one line change
 3. Add unit tests using the interface, not the concrete type
+
+## Running Locally
+
+### MCP mode (primary)
+
+Register the server and let Claude Code drive the workflow:
+
+```bash
+go-apply setup mcp --agent claude
+# Then ask Claude Code: "Score my resume against this job and tailor it"
+```
+
+### Headless CLI (scripted)
+
+Chain the four subcommands directly:
+
+```bash
+# 1. Load the job description
+SESSION=$(go-apply load-jd --url https://example.com/jobs/123 | jq -r .session_id)
+
+# 2. Score resumes
+go-apply score --session "$SESSION"
+
+# 3. Tailor the resume (you author or generate the text externally)
+go-apply submit-tailored-resume --session "$SESSION" --file tailored.md
+
+# 4. Persist the record
+go-apply finalize --session "$SESSION"
+```
 
 ## Running Tests
 
@@ -78,4 +115,9 @@ Add to Claude Code `settings.json`:
 }
 ```
 
-Available tools: `apply_to_job`, `tailor_resume`, `get_score`
+Available tools: `onboard_user`, `add_resume`, `get_config`, `update_config`,
+`load_jd`, `submit_keywords`, `submit_tailored_resume`, `finalize`
+
+Available prompts: `tailor_resume` — fetches the embedded `resume-tailor` skill
+plus a go-apply-specific prelude; the agent follows it and calls `submit_tailored_resume`
+when done.
