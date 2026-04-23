@@ -299,6 +299,151 @@ func HandleFinalizeWithConfig(ctx context.Context, req *mcp.CallToolRequest, dep
 	return envelopeResult(okEnvelope(sessionID, "", resultData))
 }
 
+// HandleSubmitTailoredResume is the exported handler for the "submit_tailored_resume" MCP tool.
+func HandleSubmitTailoredResume(ctx context.Context, req *mcp.CallToolRequest) *mcp.CallToolResult {
+	return HandleSubmitTailoredResumeWithConfig(ctx, req, nil, nil)
+}
+
+// HandleSubmitTailoredResumeWithConfig is the full handler with optional injected deps (for tests).
+func HandleSubmitTailoredResumeWithConfig(ctx context.Context, req *mcp.CallToolRequest, deps *pipeline.ApplyConfig, cfg *config.Config) *mcp.CallToolResult {
+	sessionID := req.GetString("session_id", "")
+	if sessionID == "" {
+		return envelopeResult(stageErrorEnvelope("", "submit_tailored_resume", "missing_session", "session_id is required", false))
+	}
+	tailoredText := req.GetString("tailored_text", "")
+	changelogStr := req.GetString("changelog", "")
+
+	slog.DebugContext(ctx, "mcp tool invoked",
+		slog.String("tool", "submit_tailored_resume"),
+		slog.String("session_id", sessionID),
+		logger.PayloadAttr("tailored_text", tailoredText, logger.Verbose()),
+	)
+
+	// Validate tailored_text.
+	if strings.TrimSpace(tailoredText) == "" {
+		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailored_resume", "invalid_tailored_text",
+			"tailored_text is required and must not be empty or whitespace-only", false))
+	}
+
+	// Parse and validate optional changelog.
+	var entries []model.ChangelogEntry
+	if changelogStr != "" {
+		if err := json.Unmarshal([]byte(changelogStr), &entries); err != nil {
+			return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailored_resume", "invalid_changelog",
+				fmt.Sprintf("changelog parse failed: %v", err), false))
+		}
+		for i, e := range entries {
+			if !model.ValidateChangelogAction(e.Action) {
+				return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailored_resume", "invalid_changelog",
+					fmt.Sprintf("invalid action %q in changelog entry %d (allowed: added, rewrote, skipped)", e.Action, i), false))
+			}
+			if !model.ValidateChangelogTarget(e.Target) {
+				return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailored_resume", "invalid_changelog",
+					fmt.Sprintf("invalid target %q in changelog entry %d (allowed: skill, bullet, summary)", e.Target, i), false))
+			}
+			if len(e.Keyword) > 128 {
+				return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailored_resume", "invalid_changelog",
+					fmt.Sprintf("keyword in changelog entry %d exceeds 128 bytes (got %d)", i, len(e.Keyword)), false))
+			}
+			if len(e.Reason) > 512 {
+				return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailored_resume", "invalid_changelog",
+					fmt.Sprintf("reason in changelog entry %d exceeds 512 bytes (got %d)", i, len(e.Reason)), false))
+			}
+		}
+	}
+
+	// Look up session.
+	sess := sessions.Get(sessionID)
+	if sess == nil {
+		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailored_resume", "session_not_found",
+			"session not found — call load_jd first", false))
+	}
+
+	// State guard: accept stateScored or stateTailored (retry after rescore failure).
+	if sess.State != stateScored && sess.State != stateTailored {
+		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailored_resume", "invalid_state",
+			fmt.Sprintf("expected state %q or %q, got %q", stateScored, stateTailored, sess.State), false))
+	}
+
+	// Capture previous score before mutating state.
+	prevScore := sess.ScoreResult.BestScore
+	resumeLabel := sess.ScoreResult.BestLabel
+
+	// Advance session state before rescore (retry-friendly).
+	sess.TailoredText = tailoredText
+	sess.Changelog = entries
+	sess.State = stateTailored
+
+	// Wire dependencies.
+	if deps == nil {
+		liveCfg, liveDeps, err := loadDeps()
+		if err != nil {
+			return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailored_resume", "config_error", err.Error(), true))
+		}
+		deps = &liveDeps
+		if cfg == nil {
+			cfg = liveCfg
+		}
+	}
+	if cfg == nil {
+		cfg = &config.Config{}
+	}
+
+	pres := mcppres.New()
+	deps.Presenter = pres
+	pl := pipeline.NewApplyPipeline(deps)
+
+	// Rescore the tailored resume.
+	newScore, err := pl.ScoreResume(ctx, tailoredText, resumeLabel, &sess.JD, cfg)
+	if err != nil {
+		slog.ErrorContext(ctx, "rescore failed",
+			slog.String("session_id", sessionID),
+			slog.String("resume_label", resumeLabel),
+			slog.Any("error", err),
+		)
+		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailored_resume", "rescore_failed",
+			"rescore failed; see server logs for details", true))
+	}
+
+	// On success, update scores.
+	if sess.ScoreResult.Scores == nil {
+		sess.ScoreResult.Scores = make(map[string]model.ScoreResult)
+	}
+	sess.ScoreResult.Scores[resumeLabel] = newScore
+	sess.ScoreResult.BestScore = newScore.Breakdown.Total()
+
+	newTotal := newScore.Breakdown.Total()
+
+	slog.InfoContext(ctx, "tailor submission complete",
+		slog.Int("tailored_text_bytes", len(tailoredText)),
+		slog.Int("tailored_text_lines", lineCount(tailoredText)),
+		slog.Float64("previous_score", prevScore),
+		slog.Float64("new_score", newTotal),
+	)
+
+	type submitTailoredResumeData struct {
+		PreviousScore float64                `json:"previous_score"`
+		NewScore      model.ScoreResult      `json:"new_score"`
+		TailoredText  string                 `json:"tailored_text"`
+		Changelog     []model.ChangelogEntry `json:"changelog,omitempty"`
+	}
+	resultData := submitTailoredResumeData{
+		PreviousScore: prevScore,
+		NewScore:      newScore,
+		TailoredText:  tailoredText,
+		Changelog:     entries,
+	}
+	resultBytes, _ := json.Marshal(resultData)
+	slog.DebugContext(ctx, "mcp tool result",
+		slog.String("tool", "submit_tailored_resume"),
+		slog.String("session_id", sessionID),
+		slog.String("status", "ok"),
+		slog.Int("result_bytes", len(resultBytes)),
+		logger.PayloadAttr("result", string(resultBytes), logger.Verbose()),
+	)
+	return envelopeResult(okEnvelope(sessionID, "finalize", resultData))
+}
+
 // NextActionFromScore returns the recommended next action based on the best resume score.
 // Score is on a 0–100 scale (sum of weighted breakdown components). Exported for testing.
 func NextActionFromScore(score float64) string {

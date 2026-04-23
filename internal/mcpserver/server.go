@@ -95,6 +95,18 @@ func NewServer() *server.MCPServer {
 	)
 
 	srv.AddTool(
+		mcp.NewTool("submit_tailored_resume",
+			mcp.WithDescription("Submit the agent-rewritten resume after tailoring. Rescores the resume and advances the session to the tailored state. Call after submit_keywords when tailoring is required.\n\ntailored_text (required): the complete rewritten resume as plain text.\n\nchangelog (optional): JSON array of tailoring actions, each with fields: action (\"added\"|\"rewrote\"|\"skipped\"), target (\"skill\"|\"bullet\"|\"summary\"), keyword (≤128 bytes), reason (≤512 bytes).\n\nResponse data: { previous_score (float64), new_score (ScoreResult), tailored_text (string), changelog (array) }."),
+			mcp.WithString("session_id", mcp.Description("Session ID from load_jd"), mcp.Required()),
+			mcp.WithString("tailored_text", mcp.Description("Complete rewritten resume text"), mcp.Required()),
+			mcp.WithString("changelog", mcp.Description("JSON array of changelog entries (optional)")),
+		),
+		requireOnboarded(func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return HandleSubmitTailoredResume(ctx, &req), nil
+		}),
+	)
+
+	srv.AddTool(
 		mcp.NewTool("finalize",
 			mcp.WithDescription("Persist the application record and close the session. Optionally include a cover letter. Call after submit_keywords."),
 			mcp.WithString("session_id", mcp.Description("Session ID from load_jd"), mcp.Required()),

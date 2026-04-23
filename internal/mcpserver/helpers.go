@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 
@@ -64,4 +65,13 @@ func loadDeps() (*config.Config, pipeline.ApplyConfig, error) {
 func errorResult(message string) *mcp.CallToolResult {
 	data, _ := json.Marshal(map[string]string{"error": message})
 	return mcp.NewToolResultText(string(data))
+}
+
+// lineCount returns the number of lines in s. Returns 0 for empty strings,
+// otherwise strings.Count(s, "\n") + 1.
+func lineCount(s string) int {
+	if s == "" {
+		return 0
+	}
+	return strings.Count(s, "\n") + 1
 }

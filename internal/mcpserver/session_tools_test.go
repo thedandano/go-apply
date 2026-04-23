@@ -1,12 +1,16 @@
 package mcpserver_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"strings"
 	"testing"
 
 	"github.com/thedandano/go-apply/internal/config"
+	"github.com/thedandano/go-apply/internal/logger"
 	"github.com/thedandano/go-apply/internal/mcpserver"
 	"github.com/thedandano/go-apply/internal/model"
 	"github.com/thedandano/go-apply/internal/port"
@@ -527,5 +531,496 @@ func TestNextActionFromScore(t *testing.T) {
 		if got != c.want {
 			t.Errorf("NextActionFromScore(%v) = %q, want %q", c.score, got, c.want)
 		}
+	}
+}
+
+// ── HandleSubmitTailoredResume helpers ───────────────────────────────────────
+
+// countingScorer wraps a port.Scorer and fails on the first N calls, then succeeds.
+type countingScorer struct {
+	failFirst int
+	calls     int
+	inner     port.Scorer
+}
+
+var _ port.Scorer = (*countingScorer)(nil)
+
+func (s *countingScorer) Score(in *model.ScorerInput) (model.ScoreResult, error) {
+	s.calls++
+	if s.calls <= s.failFirst {
+		return model.ScoreResult{}, errors.New("scorer error: /tmp/some/path injection attempt")
+	}
+	return s.inner.Score(in)
+}
+
+// scoredSession drives load_jd then submit_keywords and returns the session ID.
+func scoredSession(t *testing.T, cfg *pipeline.ApplyConfig) string {
+	t.Helper()
+
+	loadReq := callToolRequest("load_jd", map[string]any{
+		"jd_raw_text": "Senior Go engineer. Required: go, kubernetes.",
+	})
+	loadResult := mcpserver.HandleLoadJDWithConfig(context.Background(), &loadReq, cfg)
+	loadText := extractText(t, loadResult)
+	var loadEnv map[string]any
+	if err := json.Unmarshal([]byte(loadText), &loadEnv); err != nil {
+		t.Fatalf("load_jd response not JSON: %v — raw: %s", err, loadText)
+	}
+	sessionID, _ := loadEnv["session_id"].(string)
+	if sessionID == "" {
+		t.Fatal("load_jd returned no session_id")
+	}
+
+	jdJSON := `{"title":"Go Engineer","company":"Acme","required":["go","kubernetes"],"preferred":[],"location":"Remote","seniority":"senior","required_years":3}`
+	kwReq := callToolRequest("submit_keywords", map[string]any{
+		"session_id": sessionID,
+		"jd_json":    jdJSON,
+	})
+	kwResult := mcpserver.HandleSubmitKeywordsWithConfig(context.Background(), &kwReq, cfg, &config.Config{YearsOfExperience: 5})
+	kwText := extractText(t, kwResult)
+	var kwEnv map[string]any
+	if err := json.Unmarshal([]byte(kwText), &kwEnv); err != nil {
+		t.Fatalf("submit_keywords response not JSON: %v — raw: %s", err, kwText)
+	}
+	if kwEnv["status"] != "ok" {
+		t.Fatalf("submit_keywords failed: %s", kwText)
+	}
+	return sessionID
+}
+
+// ── HandleSubmitTailoredResume tests ─────────────────────────────────────────
+
+// TestHandleSubmitTailoredResume_HappyPath_NoChangelog verifies a clean submission
+// with no changelog returns ok with previous_score and new_score.
+func TestHandleSubmitTailoredResume_HappyPath_NoChangelog(t *testing.T) {
+	cfg := stubApplyConfigForSession()
+	sessionID := scoredSession(t, &cfg)
+
+	req := callToolRequest("submit_tailored_resume", map[string]any{
+		"session_id":    sessionID,
+		"tailored_text": "Tailored resume content with go and kubernetes experience.",
+	})
+	result := mcpserver.HandleSubmitTailoredResumeWithConfig(context.Background(), &req, &cfg, &config.Config{})
+	text := extractText(t, result)
+
+	var env map[string]any
+	if err := json.Unmarshal([]byte(text), &env); err != nil {
+		t.Fatalf("response not JSON: %v — raw: %s", err, text)
+	}
+	if env["status"] != "ok" {
+		t.Errorf("status = %v, want ok — full: %s", env["status"], text)
+	}
+	if env["next_action"] != "finalize" {
+		t.Errorf("next_action = %v, want finalize", env["next_action"])
+	}
+	data, _ := env["data"].(map[string]any)
+	if data == nil {
+		t.Fatal("expected data in response")
+	}
+	if _, ok := data["previous_score"]; !ok {
+		t.Error("expected previous_score in data")
+	}
+	if _, ok := data["new_score"]; !ok {
+		t.Error("expected new_score in data")
+	}
+	if data["tailored_text"] == "" {
+		t.Error("expected tailored_text in data")
+	}
+}
+
+// TestHandleSubmitTailoredResume_HappyPath_WithChangelog verifies a valid changelog
+// round-trips through the response.
+func TestHandleSubmitTailoredResume_HappyPath_WithChangelog(t *testing.T) {
+	cfg := stubApplyConfigForSession()
+	sessionID := scoredSession(t, &cfg)
+
+	changelog := `[{"action":"added","target":"skill","keyword":"kubernetes","reason":"required by JD"},{"action":"rewrote","target":"bullet","keyword":"go","reason":""}]`
+	req := callToolRequest("submit_tailored_resume", map[string]any{
+		"session_id":    sessionID,
+		"tailored_text": "Tailored resume with kubernetes and go skills.",
+		"changelog":     changelog,
+	})
+	result := mcpserver.HandleSubmitTailoredResumeWithConfig(context.Background(), &req, &cfg, &config.Config{})
+	text := extractText(t, result)
+
+	var env map[string]any
+	if err := json.Unmarshal([]byte(text), &env); err != nil {
+		t.Fatalf("response not JSON: %v — raw: %s", err, text)
+	}
+	if env["status"] != "ok" {
+		t.Errorf("status = %v, want ok — full: %s", env["status"], text)
+	}
+	data, _ := env["data"].(map[string]any)
+	if data == nil {
+		t.Fatal("expected data in response")
+	}
+	changelogOut, _ := data["changelog"].([]any)
+	if len(changelogOut) != 2 {
+		t.Errorf("changelog length = %d, want 2", len(changelogOut))
+	}
+}
+
+// TestHandleSubmitTailoredResume_EmptyTailoredText_ReturnsInvalidTailoredText ensures
+// whitespace-only tailored_text is rejected with invalid_tailored_text code.
+func TestHandleSubmitTailoredResume_EmptyTailoredText_ReturnsInvalidTailoredText(t *testing.T) {
+	cfg := stubApplyConfigForSession()
+	sessionID := scoredSession(t, &cfg)
+
+	for _, emptyText := range []string{"", "   ", "\t\n"} {
+		req := callToolRequest("submit_tailored_resume", map[string]any{
+			"session_id":    sessionID,
+			"tailored_text": emptyText,
+		})
+		result := mcpserver.HandleSubmitTailoredResumeWithConfig(context.Background(), &req, &cfg, &config.Config{})
+		raw := extractText(t, result)
+
+		var env map[string]any
+		if err := json.Unmarshal([]byte(raw), &env); err != nil {
+			t.Fatalf("response not JSON for %q: %v", emptyText, err)
+		}
+		if env["status"] != "error" {
+			t.Errorf("expected error status for empty text %q, got %v", emptyText, env["status"])
+		}
+		errObj, _ := env["error"].(map[string]any)
+		if errObj == nil || errObj["code"] != "invalid_tailored_text" {
+			t.Errorf("expected code invalid_tailored_text for %q, got %v", emptyText, errObj)
+		}
+	}
+}
+
+// TestHandleSubmitTailoredResume_InvalidAction_ReturnsInvalidChangelog verifies that
+// an invalid action in the changelog produces invalid_changelog with field name + value.
+func TestHandleSubmitTailoredResume_InvalidAction_ReturnsInvalidChangelog(t *testing.T) {
+	cfg := stubApplyConfigForSession()
+	sessionID := scoredSession(t, &cfg)
+
+	changelog := `[{"action":"INVALID","target":"skill","keyword":"go","reason":"test"}]`
+	req := callToolRequest("submit_tailored_resume", map[string]any{
+		"session_id":    sessionID,
+		"tailored_text": "Resume content here.",
+		"changelog":     changelog,
+	})
+	result := mcpserver.HandleSubmitTailoredResumeWithConfig(context.Background(), &req, &cfg, &config.Config{})
+	text := extractText(t, result)
+
+	var env map[string]any
+	if err := json.Unmarshal([]byte(text), &env); err != nil {
+		t.Fatalf("response not JSON: %v", err)
+	}
+	if env["status"] != "error" {
+		t.Errorf("status = %v, want error", env["status"])
+	}
+	errObj, _ := env["error"].(map[string]any)
+	if errObj == nil || errObj["code"] != "invalid_changelog" {
+		t.Errorf("expected code invalid_changelog, got %v", errObj)
+	}
+	msg, _ := errObj["message"].(string)
+	if !strings.Contains(msg, "action") || !strings.Contains(msg, "INVALID") {
+		t.Errorf("expected message to name field and value, got %q", msg)
+	}
+}
+
+// TestHandleSubmitTailoredResume_InvalidTarget_ReturnsInvalidChangelog verifies that
+// an invalid target in the changelog produces invalid_changelog with field name + value.
+func TestHandleSubmitTailoredResume_InvalidTarget_ReturnsInvalidChangelog(t *testing.T) {
+	cfg := stubApplyConfigForSession()
+	sessionID := scoredSession(t, &cfg)
+
+	changelog := `[{"action":"added","target":"BADTARGET","keyword":"go","reason":"test"}]`
+	req := callToolRequest("submit_tailored_resume", map[string]any{
+		"session_id":    sessionID,
+		"tailored_text": "Resume content here.",
+		"changelog":     changelog,
+	})
+	result := mcpserver.HandleSubmitTailoredResumeWithConfig(context.Background(), &req, &cfg, &config.Config{})
+	text := extractText(t, result)
+
+	var env map[string]any
+	if err := json.Unmarshal([]byte(text), &env); err != nil {
+		t.Fatalf("response not JSON: %v", err)
+	}
+	if env["status"] != "error" {
+		t.Errorf("status = %v, want error", env["status"])
+	}
+	errObj, _ := env["error"].(map[string]any)
+	if errObj == nil || errObj["code"] != "invalid_changelog" {
+		t.Errorf("expected code invalid_changelog, got %v", errObj)
+	}
+	msg, _ := errObj["message"].(string)
+	if !strings.Contains(msg, "target") || !strings.Contains(msg, "BADTARGET") {
+		t.Errorf("expected message to name field and value, got %q", msg)
+	}
+}
+
+// TestHandleSubmitTailoredResume_ReasonTooLong_ReturnsInvalidChangelog verifies that
+// a reason exceeding 512 bytes produces invalid_changelog naming reason and length.
+func TestHandleSubmitTailoredResume_ReasonTooLong_ReturnsInvalidChangelog(t *testing.T) {
+	cfg := stubApplyConfigForSession()
+	sessionID := scoredSession(t, &cfg)
+
+	longReason := strings.Repeat("x", 513)
+	entry := map[string]any{
+		"action":  "added",
+		"target":  "skill",
+		"keyword": "go",
+		"reason":  longReason,
+	}
+	changelogBytes, _ := json.Marshal([]any{entry})
+
+	req := callToolRequest("submit_tailored_resume", map[string]any{
+		"session_id":    sessionID,
+		"tailored_text": "Resume content here.",
+		"changelog":     string(changelogBytes),
+	})
+	result := mcpserver.HandleSubmitTailoredResumeWithConfig(context.Background(), &req, &cfg, &config.Config{})
+	text := extractText(t, result)
+
+	var env map[string]any
+	if err := json.Unmarshal([]byte(text), &env); err != nil {
+		t.Fatalf("response not JSON: %v", err)
+	}
+	if env["status"] != "error" {
+		t.Errorf("status = %v, want error", env["status"])
+	}
+	errObj, _ := env["error"].(map[string]any)
+	if errObj == nil || errObj["code"] != "invalid_changelog" {
+		t.Errorf("expected code invalid_changelog, got %v", errObj)
+	}
+	msg, _ := errObj["message"].(string)
+	if !strings.Contains(msg, "reason") {
+		t.Errorf("expected message to name 'reason', got %q", msg)
+	}
+	if !strings.Contains(msg, "513") {
+		t.Errorf("expected message to include observed length 513, got %q", msg)
+	}
+}
+
+// TestHandleSubmitTailoredResume_InvalidState_WhenLoaded verifies that a session in
+// stateLoaded is rejected with invalid_state.
+func TestHandleSubmitTailoredResume_InvalidState_WhenLoaded(t *testing.T) {
+	cfg := stubApplyConfigForSession()
+
+	// Only load_jd — session stays in stateLoaded.
+	loadReq := callToolRequest("load_jd", map[string]any{
+		"jd_raw_text": "Go engineer role",
+	})
+	loadResult := mcpserver.HandleLoadJDWithConfig(context.Background(), &loadReq, &cfg)
+	loadText := extractText(t, loadResult)
+	var loadEnv map[string]any
+	if err := json.Unmarshal([]byte(loadText), &loadEnv); err != nil {
+		t.Fatalf("load_jd not JSON: %v", err)
+	}
+	sessionID, _ := loadEnv["session_id"].(string)
+
+	req := callToolRequest("submit_tailored_resume", map[string]any{
+		"session_id":    sessionID,
+		"tailored_text": "Some resume content.",
+	})
+	result := mcpserver.HandleSubmitTailoredResumeWithConfig(context.Background(), &req, &cfg, &config.Config{})
+	text := extractText(t, result)
+
+	var env map[string]any
+	if err := json.Unmarshal([]byte(text), &env); err != nil {
+		t.Fatalf("response not JSON: %v", err)
+	}
+	if env["status"] != "error" {
+		t.Errorf("status = %v, want error", env["status"])
+	}
+	errObj, _ := env["error"].(map[string]any)
+	if errObj == nil || errObj["code"] != "invalid_state" {
+		t.Errorf("expected code invalid_state, got %v", errObj)
+	}
+}
+
+// TestHandleSubmitTailoredResume_RescoreFailure_SanitizedEnvelope verifies that rescore
+// errors produce a fixed sanitized message (no paths leaked), and a retry succeeds.
+// scoredSession uses the standard stubScorer; the submit handler gets a failing scorer
+// injected directly, then a passing scorer on the retry.
+func TestHandleSubmitTailoredResume_RescoreFailure_SanitizedEnvelope(t *testing.T) {
+	// Use a regular scorer for the initial scoring flow.
+	initialCfg := stubApplyConfigForSession()
+	sessionID := scoredSession(t, &initialCfg)
+
+	// Inject a scorer that always fails for the first submit_tailored_resume call.
+	failingCfg := pipeline.ApplyConfig{
+		Fetcher:   &stubJDFetcher{},
+		Scorer:    &countingScorer{failFirst: 1, inner: &stubScorer{}},
+		Resumes:   &stubResumeRepo{},
+		Loader:    &stubDocumentLoader{},
+		AppRepo:   &stubApplicationRepository{},
+		Defaults:  &config.AppDefaults{},
+		Presenter: nil,
+	}
+
+	req1 := callToolRequest("submit_tailored_resume", map[string]any{
+		"session_id":    sessionID,
+		"tailored_text": "Tailored resume content.",
+	})
+	result1 := mcpserver.HandleSubmitTailoredResumeWithConfig(context.Background(), &req1, &failingCfg, &config.Config{})
+	text1 := extractText(t, result1)
+
+	var env1 map[string]any
+	if err := json.Unmarshal([]byte(text1), &env1); err != nil {
+		t.Fatalf("response not JSON: %v — raw: %s", err, text1)
+	}
+	if env1["status"] != "error" {
+		t.Errorf("expected error status on rescore failure, got %v", env1["status"])
+	}
+	errObj, _ := env1["error"].(map[string]any)
+	if errObj == nil || errObj["code"] != "rescore_failed" {
+		t.Errorf("expected code rescore_failed, got %v", errObj)
+	}
+	msg, _ := errObj["message"].(string)
+	if msg != "rescore failed; see server logs for details" {
+		t.Errorf("expected fixed sanitized message, got %q", msg)
+	}
+	if strings.Contains(msg, "/") {
+		t.Errorf("envelope message must not contain path separator '/': %q", msg)
+	}
+
+	// Verify the session was left in stateTailored by the failure path.
+	if state, ok := mcpserver.GetSessionStateForTest(sessionID); !ok || state != "tailored" {
+		t.Fatalf("expected session state %q after rescore failure, got %q (ok=%v)", "tailored", state, ok)
+	}
+
+	// Retry: session is now in stateTailored; inject a passing scorer.
+	passingCfg := stubApplyConfigForSession()
+	req2 := callToolRequest("submit_tailored_resume", map[string]any{
+		"session_id":    sessionID,
+		"tailored_text": "Tailored resume content on retry.",
+	})
+	result2 := mcpserver.HandleSubmitTailoredResumeWithConfig(context.Background(), &req2, &passingCfg, &config.Config{})
+	text2 := extractText(t, result2)
+
+	var env2 map[string]any
+	if err := json.Unmarshal([]byte(text2), &env2); err != nil {
+		t.Fatalf("retry response not JSON: %v — raw: %s", err, text2)
+	}
+	if env2["status"] != "ok" {
+		t.Errorf("expected ok on retry, got %v — full: %s", env2["status"], text2)
+	}
+}
+
+// TestHandleSubmitTailoredResume_VerboseGating_ResultPayload verifies that the debug
+// "mcp tool result" log carries the full result payload only when verbose is on.
+// The tailored_text is intentionally large (>2048 bytes) so that PayloadAttr's
+// truncation actually fires under verbose=false.
+func TestHandleSubmitTailoredResume_VerboseGating_ResultPayload(t *testing.T) {
+	cfg := stubApplyConfigForSession()
+	appCfg := &config.Config{}
+
+	// Unique sentinel in the middle so it falls in the dropped zone after truncation.
+	// PayloadAttr truncates at 2048 bytes (keeping first and last 1024). The sentinel is
+	// placed at ~50% of the JSON payload so it is omitted when verbose=false.
+	const uniqueSentinel = "UNIQUE_SENTINEL_MID"
+	half := strings.Repeat("Resume line content here. ", 60) // ~1560 bytes each side
+	longTailored := half + uniqueSentinel + half
+
+	for _, verbose := range []bool{false, true} {
+		name := "verbose_off"
+		if verbose {
+			name = "verbose_on"
+		}
+		t.Run(name, func(t *testing.T) {
+			logger.SetVerbose(verbose)
+			t.Cleanup(func() { logger.SetVerbose(false) })
+
+			var buf bytes.Buffer
+			h := slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})
+			slog.SetDefault(slog.New(h))
+			t.Cleanup(func() { slog.SetDefault(slog.Default()) })
+
+			sessionID := scoredSession(t, &cfg)
+
+			req := callToolRequest("submit_tailored_resume", map[string]any{
+				"session_id":    sessionID,
+				"tailored_text": longTailored,
+			})
+			_ = mcpserver.HandleSubmitTailoredResumeWithConfig(context.Background(), &req, &cfg, appCfg)
+
+			logOutput := buf.String()
+			lines := strings.Split(strings.TrimSpace(logOutput), "\n")
+
+			// Find the "mcp tool result" debug line for submit_tailored_resume.
+			var toolResultLine string
+			for _, line := range lines {
+				if strings.Contains(line, "mcp tool result") && strings.Contains(line, "submit_tailored_resume") {
+					toolResultLine = line
+					break
+				}
+			}
+			if toolResultLine == "" {
+				t.Fatal("expected 'mcp tool result' debug log line for submit_tailored_resume, not found")
+			}
+
+			if verbose {
+				// When verbose, the full result payload key should be present with content.
+				if !strings.Contains(toolResultLine, `"result"`) {
+					t.Error("verbose=true: expected 'result' key in debug log line")
+				}
+			} else {
+				// When not verbose, PayloadAttr truncates the payload: the unique sentinel
+				// in the middle of longTailored must be absent (it falls in the dropped zone),
+				// and the truncation marker must be present, proving the full text was not emitted.
+				if strings.Contains(toolResultLine, uniqueSentinel) {
+					t.Error("verbose=false: mid-payload sentinel found in log — PayloadAttr must truncate large payloads")
+				}
+				if !strings.Contains(toolResultLine, "bytes omitted") {
+					t.Error("verbose=false: expected truncation marker 'bytes omitted' in log result field")
+				}
+			}
+		})
+	}
+}
+
+// TestHandleSubmitTailoredResume_InfoLog_FourAttributes verifies the "tailor submission
+// complete" info log emits exactly the 4 required numeric attributes.
+func TestHandleSubmitTailoredResume_InfoLog_FourAttributes(t *testing.T) {
+	cfg := stubApplyConfigForSession()
+	appCfg := &config.Config{}
+
+	var buf bytes.Buffer
+	h := slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo})
+	slog.SetDefault(slog.New(h))
+	t.Cleanup(func() { slog.SetDefault(slog.Default()) })
+
+	sessionID := scoredSession(t, &cfg)
+
+	tailored := "Line one\nLine two\nLine three"
+	req := callToolRequest("submit_tailored_resume", map[string]any{
+		"session_id":    sessionID,
+		"tailored_text": tailored,
+	})
+	_ = mcpserver.HandleSubmitTailoredResumeWithConfig(context.Background(), &req, &cfg, appCfg)
+
+	logOutput := buf.String()
+	lines := strings.Split(strings.TrimSpace(logOutput), "\n")
+
+	var infoLine string
+	for _, line := range lines {
+		if strings.Contains(line, "tailor submission complete") {
+			infoLine = line
+			break
+		}
+	}
+	if infoLine == "" {
+		t.Fatalf("expected 'tailor submission complete' info log, not found in:\n%s", logOutput)
+	}
+
+	var attrs map[string]any
+	if err := json.Unmarshal([]byte(infoLine), &attrs); err != nil {
+		t.Fatalf("info log line not JSON: %v — raw: %s", err, infoLine)
+	}
+
+	for _, key := range []string{"tailored_text_bytes", "tailored_text_lines", "previous_score", "new_score"} {
+		if _, ok := attrs[key]; !ok {
+			t.Errorf("expected attribute %q in info log, not found — attrs: %v", key, attrs)
+		}
+	}
+	if attrs["tailored_text_bytes"] != float64(len(tailored)) {
+		t.Errorf("tailored_text_bytes = %v, want %d", attrs["tailored_text_bytes"], len(tailored))
+	}
+	if attrs["tailored_text_lines"] != float64(3) {
+		t.Errorf("tailored_text_lines = %v, want 3", attrs["tailored_text_lines"])
 	}
 }
