@@ -17,11 +17,17 @@ const updateCheckTTL = 24 * time.Hour
 
 // skipUpdateCheckCommands are commands where a startup update check would be
 // disruptive (serve outputs structured data; update and version handle versioning directly).
+// Headless subcommands write JSON to stdout — update notices go to stderr which is fine,
+// but we skip the check to avoid latency in scripted pipelines.
 var skipUpdateCheckCommands = map[string]bool{
-	"serve":   true,
-	"update":  true,
-	"version": true,
-	"logs":    true,
+	"serve":                  true,
+	"update":                 true,
+	"version":                true,
+	"logs":                   true,
+	"load-jd":                true,
+	"score":                  true,
+	"submit-tailored-resume": true,
+	"finalize":               true,
 }
 
 // NewRootCommand returns the root cobra command for go-apply.
@@ -47,6 +53,11 @@ func NewRootCommand(version string) *cobra.Command {
 	cmd.AddCommand(NewSetupCommand())
 	cmd.AddCommand(NewUpdateCommand(version))
 	cmd.AddCommand(NewLogsCommand())
+	// Headless scripted subcommands — each writes JSON to stdout.
+	cmd.AddCommand(NewLoadJDCommand())
+	cmd.AddCommand(NewScoreCommand())
+	cmd.AddCommand(NewSubmitTailoredResumeCommand())
+	cmd.AddCommand(NewFinalizeCommand())
 	return cmd
 }
 

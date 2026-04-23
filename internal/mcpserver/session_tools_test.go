@@ -88,7 +88,7 @@ func TestHandleLoadJDWithConfig_TextInput_ReturnsSession(t *testing.T) {
 	req := callToolRequest("load_jd", map[string]any{
 		"jd_raw_text": "Senior Go engineer wanted. Kubernetes required.",
 	})
-	result := mcpserver.HandleLoadJDWithConfig(context.Background(), &req, &cfg)
+	result := mcpserver.HandleLoadJDWithConfig(context.Background(), &req, &cfg, nil)
 	text := extractText(t, result)
 
 	var env map[string]any
@@ -118,7 +118,7 @@ func TestHandleSubmitKeywordsWithConfig_MissingSession_ReturnsError(t *testing.T
 		"session_id": "nonexistent-id",
 		"jd_json":    `{"title":"SWE","required":["go"],"preferred":["docker"]}`,
 	})
-	result := mcpserver.HandleSubmitKeywordsWithConfig(context.Background(), &req, &cfg, &config.Config{})
+	result := mcpserver.HandleSubmitKeywordsWithConfig(context.Background(), &req, &cfg, &config.Config{}, nil)
 	text := extractText(t, result)
 
 	var env map[string]any
@@ -141,7 +141,7 @@ func TestHandleSubmitKeywordsWithConfig_InvalidJD_ReturnsError(t *testing.T) {
 	loadReq := callToolRequest("load_jd", map[string]any{
 		"jd_raw_text": "Go engineer role",
 	})
-	loadResult := mcpserver.HandleLoadJDWithConfig(context.Background(), &loadReq, &cfg)
+	loadResult := mcpserver.HandleLoadJDWithConfig(context.Background(), &loadReq, &cfg, nil)
 	loadText := extractText(t, loadResult)
 	var loadEnv map[string]any
 	if err := json.Unmarshal([]byte(loadText), &loadEnv); err != nil {
@@ -154,7 +154,7 @@ func TestHandleSubmitKeywordsWithConfig_InvalidJD_ReturnsError(t *testing.T) {
 		"session_id": sessionID,
 		"jd_json":    "not-valid-json",
 	})
-	result := mcpserver.HandleSubmitKeywordsWithConfig(context.Background(), &req, &cfg, &config.Config{})
+	result := mcpserver.HandleSubmitKeywordsWithConfig(context.Background(), &req, &cfg, &config.Config{}, nil)
 	text := extractText(t, result)
 
 	var env map[string]any
@@ -173,7 +173,7 @@ func TestHandleSubmitKeywordsWithConfig_HappyPath_ReturnsScores(t *testing.T) {
 	loadReq := callToolRequest("load_jd", map[string]any{
 		"jd_raw_text": "Senior Go engineer. Required: go, kubernetes.",
 	})
-	loadResult := mcpserver.HandleLoadJDWithConfig(context.Background(), &loadReq, &cfg)
+	loadResult := mcpserver.HandleLoadJDWithConfig(context.Background(), &loadReq, &cfg, nil)
 	loadText := extractText(t, loadResult)
 	var loadEnv map[string]any
 	if err := json.Unmarshal([]byte(loadText), &loadEnv); err != nil {
@@ -190,7 +190,7 @@ func TestHandleSubmitKeywordsWithConfig_HappyPath_ReturnsScores(t *testing.T) {
 		"session_id": sessionID,
 		"jd_json":    jdJSON,
 	})
-	kwResult := mcpserver.HandleSubmitKeywordsWithConfig(context.Background(), &kwReq, &cfg, &config.Config{YearsOfExperience: 5})
+	kwResult := mcpserver.HandleSubmitKeywordsWithConfig(context.Background(), &kwReq, &cfg, &config.Config{YearsOfExperience: 5}, nil)
 	kwText := extractText(t, kwResult)
 
 	var kwEnv map[string]any
@@ -240,7 +240,7 @@ func TestHandleFinalizeWithConfig_MissingSession_ReturnsError(t *testing.T) {
 	req := callToolRequest("finalize", map[string]any{
 		"session_id": "nonexistent",
 	})
-	result := mcpserver.HandleFinalizeWithConfig(context.Background(), &req, &cfg)
+	result := mcpserver.HandleFinalizeWithConfig(context.Background(), &req, &cfg, nil)
 	text := extractText(t, result)
 
 	var env map[string]any
@@ -259,7 +259,7 @@ func TestHandleFinalizeWithConfig_WrongState_ReturnsError(t *testing.T) {
 	loadReq := callToolRequest("load_jd", map[string]any{
 		"jd_raw_text": "Go engineer role",
 	})
-	loadResult := mcpserver.HandleLoadJDWithConfig(context.Background(), &loadReq, &cfg)
+	loadResult := mcpserver.HandleLoadJDWithConfig(context.Background(), &loadReq, &cfg, nil)
 	loadText := extractText(t, loadResult)
 	var loadEnv map[string]any
 	if err := json.Unmarshal([]byte(loadText), &loadEnv); err != nil {
@@ -268,7 +268,7 @@ func TestHandleFinalizeWithConfig_WrongState_ReturnsError(t *testing.T) {
 	sessionID, _ := loadEnv["session_id"].(string)
 
 	req := callToolRequest("finalize", map[string]any{"session_id": sessionID})
-	result := mcpserver.HandleFinalizeWithConfig(context.Background(), &req, &cfg)
+	result := mcpserver.HandleFinalizeWithConfig(context.Background(), &req, &cfg, nil)
 	text := extractText(t, result)
 
 	var env map[string]any
@@ -290,7 +290,7 @@ func TestHandleFinalizeWithConfig_HappyPath(t *testing.T) {
 	loadReq := callToolRequest("load_jd", map[string]any{
 		"jd_raw_text": "Senior Go engineer. Required: go.",
 	})
-	loadResult := mcpserver.HandleLoadJDWithConfig(context.Background(), &loadReq, &cfg)
+	loadResult := mcpserver.HandleLoadJDWithConfig(context.Background(), &loadReq, &cfg, nil)
 	loadText := extractText(t, loadResult)
 	var loadEnv map[string]any
 	if err := json.Unmarshal([]byte(loadText), &loadEnv); err != nil {
@@ -302,13 +302,13 @@ func TestHandleFinalizeWithConfig_HappyPath(t *testing.T) {
 		"session_id": sessionID,
 		"jd_json":    `{"title":"Go Engineer","company":"Acme","required":["go"],"preferred":[],"location":"Remote","seniority":"senior","required_years":3}`,
 	})
-	mcpserver.HandleSubmitKeywordsWithConfig(context.Background(), &kwReq, &cfg, &config.Config{})
+	mcpserver.HandleSubmitKeywordsWithConfig(context.Background(), &kwReq, &cfg, &config.Config{}, nil)
 
 	finReq := callToolRequest("finalize", map[string]any{
 		"session_id":   sessionID,
 		"cover_letter": "Dear Hiring Manager...",
 	})
-	result := mcpserver.HandleFinalizeWithConfig(context.Background(), &finReq, &cfg)
+	result := mcpserver.HandleFinalizeWithConfig(context.Background(), &finReq, &cfg, nil)
 	text := extractText(t, result)
 
 	var env map[string]any
@@ -334,7 +334,7 @@ func TestHandleFinalizeWithConfig_SummaryIncluded(t *testing.T) {
 	loadReq := callToolRequest("load_jd", map[string]any{
 		"jd_raw_text": "Senior Go engineer. Required: go.",
 	})
-	loadResult := mcpserver.HandleLoadJDWithConfig(context.Background(), &loadReq, &cfg)
+	loadResult := mcpserver.HandleLoadJDWithConfig(context.Background(), &loadReq, &cfg, nil)
 	loadText := extractText(t, loadResult)
 	var loadEnv map[string]any
 	if err := json.Unmarshal([]byte(loadText), &loadEnv); err != nil {
@@ -346,14 +346,14 @@ func TestHandleFinalizeWithConfig_SummaryIncluded(t *testing.T) {
 		"session_id": sessionID,
 		"jd_json":    `{"title":"Go Engineer","company":"Acme","required":["go"],"preferred":[],"location":"Remote","seniority":"senior","required_years":3}`,
 	})
-	mcpserver.HandleSubmitKeywordsWithConfig(context.Background(), &kwReq, &cfg, &config.Config{})
+	mcpserver.HandleSubmitKeywordsWithConfig(context.Background(), &kwReq, &cfg, &config.Config{}, nil)
 
 	const coverLetter = "Dear Hiring Manager, I am applying..."
 	finReq := callToolRequest("finalize", map[string]any{
 		"session_id":   sessionID,
 		"cover_letter": coverLetter,
 	})
-	result := mcpserver.HandleFinalizeWithConfig(context.Background(), &finReq, &cfg)
+	result := mcpserver.HandleFinalizeWithConfig(context.Background(), &finReq, &cfg, nil)
 	text := extractText(t, result)
 
 	var env map[string]any
@@ -412,7 +412,7 @@ func TestHandleFinalizeWithConfig_NeverTailored_NoTailorResultPersisted(t *testi
 	loadReq := callToolRequest("load_jd", map[string]any{
 		"jd_url": "https://example.com/job/never-tailored",
 	})
-	loadResult := mcpserver.HandleLoadJDWithConfig(context.Background(), &loadReq, &cfg)
+	loadResult := mcpserver.HandleLoadJDWithConfig(context.Background(), &loadReq, &cfg, nil)
 	loadText := extractText(t, loadResult)
 	var loadEnv map[string]any
 	if err := json.Unmarshal([]byte(loadText), &loadEnv); err != nil {
@@ -428,11 +428,11 @@ func TestHandleFinalizeWithConfig_NeverTailored_NoTailorResultPersisted(t *testi
 		"session_id": sessionID,
 		"jd_json":    `{"title":"Go Engineer","company":"Acme","required":["go"],"preferred":[]}`,
 	})
-	mcpserver.HandleSubmitKeywordsWithConfig(context.Background(), &kwReq, &cfg, &config.Config{})
+	mcpserver.HandleSubmitKeywordsWithConfig(context.Background(), &kwReq, &cfg, &config.Config{}, nil)
 
 	// Finalize without tailoring.
 	finReq := callToolRequest("finalize", map[string]any{"session_id": sessionID})
-	result := mcpserver.HandleFinalizeWithConfig(context.Background(), &finReq, &cfg)
+	result := mcpserver.HandleFinalizeWithConfig(context.Background(), &finReq, &cfg, nil)
 	text := extractText(t, result)
 
 	var env map[string]any
@@ -560,7 +560,7 @@ func scoredSession(t *testing.T, cfg *pipeline.ApplyConfig) string {
 	loadReq := callToolRequest("load_jd", map[string]any{
 		"jd_raw_text": "Senior Go engineer. Required: go, kubernetes.",
 	})
-	loadResult := mcpserver.HandleLoadJDWithConfig(context.Background(), &loadReq, cfg)
+	loadResult := mcpserver.HandleLoadJDWithConfig(context.Background(), &loadReq, cfg, nil)
 	loadText := extractText(t, loadResult)
 	var loadEnv map[string]any
 	if err := json.Unmarshal([]byte(loadText), &loadEnv); err != nil {
@@ -576,7 +576,7 @@ func scoredSession(t *testing.T, cfg *pipeline.ApplyConfig) string {
 		"session_id": sessionID,
 		"jd_json":    jdJSON,
 	})
-	kwResult := mcpserver.HandleSubmitKeywordsWithConfig(context.Background(), &kwReq, cfg, &config.Config{YearsOfExperience: 5})
+	kwResult := mcpserver.HandleSubmitKeywordsWithConfig(context.Background(), &kwReq, cfg, &config.Config{YearsOfExperience: 5}, nil)
 	kwText := extractText(t, kwResult)
 	var kwEnv map[string]any
 	if err := json.Unmarshal([]byte(kwText), &kwEnv); err != nil {
@@ -600,7 +600,7 @@ func TestHandleSubmitTailoredResume_HappyPath_NoChangelog(t *testing.T) {
 		"session_id":    sessionID,
 		"tailored_text": "Tailored resume content with go and kubernetes experience.",
 	})
-	result := mcpserver.HandleSubmitTailoredResumeWithConfig(context.Background(), &req, &cfg, &config.Config{})
+	result := mcpserver.HandleSubmitTailoredResumeWithConfig(context.Background(), &req, &cfg, &config.Config{}, nil)
 	text := extractText(t, result)
 
 	var env map[string]any
@@ -640,7 +640,7 @@ func TestHandleSubmitTailoredResume_HappyPath_WithChangelog(t *testing.T) {
 		"tailored_text": "Tailored resume with kubernetes and go skills.",
 		"changelog":     changelog,
 	})
-	result := mcpserver.HandleSubmitTailoredResumeWithConfig(context.Background(), &req, &cfg, &config.Config{})
+	result := mcpserver.HandleSubmitTailoredResumeWithConfig(context.Background(), &req, &cfg, &config.Config{}, nil)
 	text := extractText(t, result)
 
 	var env map[string]any
@@ -671,7 +671,7 @@ func TestHandleSubmitTailoredResume_EmptyTailoredText_ReturnsInvalidTailoredText
 			"session_id":    sessionID,
 			"tailored_text": emptyText,
 		})
-		result := mcpserver.HandleSubmitTailoredResumeWithConfig(context.Background(), &req, &cfg, &config.Config{})
+		result := mcpserver.HandleSubmitTailoredResumeWithConfig(context.Background(), &req, &cfg, &config.Config{}, nil)
 		raw := extractText(t, result)
 
 		var env map[string]any
@@ -700,7 +700,7 @@ func TestHandleSubmitTailoredResume_InvalidAction_ReturnsInvalidChangelog(t *tes
 		"tailored_text": "Resume content here.",
 		"changelog":     changelog,
 	})
-	result := mcpserver.HandleSubmitTailoredResumeWithConfig(context.Background(), &req, &cfg, &config.Config{})
+	result := mcpserver.HandleSubmitTailoredResumeWithConfig(context.Background(), &req, &cfg, &config.Config{}, nil)
 	text := extractText(t, result)
 
 	var env map[string]any
@@ -732,7 +732,7 @@ func TestHandleSubmitTailoredResume_InvalidTarget_ReturnsInvalidChangelog(t *tes
 		"tailored_text": "Resume content here.",
 		"changelog":     changelog,
 	})
-	result := mcpserver.HandleSubmitTailoredResumeWithConfig(context.Background(), &req, &cfg, &config.Config{})
+	result := mcpserver.HandleSubmitTailoredResumeWithConfig(context.Background(), &req, &cfg, &config.Config{}, nil)
 	text := extractText(t, result)
 
 	var env map[string]any
@@ -772,7 +772,7 @@ func TestHandleSubmitTailoredResume_ReasonTooLong_ReturnsInvalidChangelog(t *tes
 		"tailored_text": "Resume content here.",
 		"changelog":     string(changelogBytes),
 	})
-	result := mcpserver.HandleSubmitTailoredResumeWithConfig(context.Background(), &req, &cfg, &config.Config{})
+	result := mcpserver.HandleSubmitTailoredResumeWithConfig(context.Background(), &req, &cfg, &config.Config{}, nil)
 	text := extractText(t, result)
 
 	var env map[string]any
@@ -804,7 +804,7 @@ func TestHandleSubmitTailoredResume_InvalidState_WhenLoaded(t *testing.T) {
 	loadReq := callToolRequest("load_jd", map[string]any{
 		"jd_raw_text": "Go engineer role",
 	})
-	loadResult := mcpserver.HandleLoadJDWithConfig(context.Background(), &loadReq, &cfg)
+	loadResult := mcpserver.HandleLoadJDWithConfig(context.Background(), &loadReq, &cfg, nil)
 	loadText := extractText(t, loadResult)
 	var loadEnv map[string]any
 	if err := json.Unmarshal([]byte(loadText), &loadEnv); err != nil {
@@ -816,7 +816,7 @@ func TestHandleSubmitTailoredResume_InvalidState_WhenLoaded(t *testing.T) {
 		"session_id":    sessionID,
 		"tailored_text": "Some resume content.",
 	})
-	result := mcpserver.HandleSubmitTailoredResumeWithConfig(context.Background(), &req, &cfg, &config.Config{})
+	result := mcpserver.HandleSubmitTailoredResumeWithConfig(context.Background(), &req, &cfg, &config.Config{}, nil)
 	text := extractText(t, result)
 
 	var env map[string]any
@@ -856,7 +856,7 @@ func TestHandleSubmitTailoredResume_RescoreFailure_SanitizedEnvelope(t *testing.
 		"session_id":    sessionID,
 		"tailored_text": "Tailored resume content.",
 	})
-	result1 := mcpserver.HandleSubmitTailoredResumeWithConfig(context.Background(), &req1, &failingCfg, &config.Config{})
+	result1 := mcpserver.HandleSubmitTailoredResumeWithConfig(context.Background(), &req1, &failingCfg, &config.Config{}, nil)
 	text1 := extractText(t, result1)
 
 	var env1 map[string]any
@@ -889,7 +889,7 @@ func TestHandleSubmitTailoredResume_RescoreFailure_SanitizedEnvelope(t *testing.
 		"session_id":    sessionID,
 		"tailored_text": "Tailored resume content on retry.",
 	})
-	result2 := mcpserver.HandleSubmitTailoredResumeWithConfig(context.Background(), &req2, &passingCfg, &config.Config{})
+	result2 := mcpserver.HandleSubmitTailoredResumeWithConfig(context.Background(), &req2, &passingCfg, &config.Config{}, nil)
 	text2 := extractText(t, result2)
 
 	var env2 map[string]any
@@ -936,7 +936,7 @@ func TestHandleSubmitTailoredResume_VerboseGating_ResultPayload(t *testing.T) {
 				"session_id":    sessionID,
 				"tailored_text": longTailored,
 			})
-			_ = mcpserver.HandleSubmitTailoredResumeWithConfig(context.Background(), &req, &cfg, appCfg)
+			_ = mcpserver.HandleSubmitTailoredResumeWithConfig(context.Background(), &req, &cfg, appCfg, nil)
 
 			logOutput := buf.String()
 			lines := strings.Split(strings.TrimSpace(logOutput), "\n")
@@ -991,7 +991,7 @@ func TestHandleSubmitTailoredResume_InfoLog_FourAttributes(t *testing.T) {
 		"session_id":    sessionID,
 		"tailored_text": tailored,
 	})
-	_ = mcpserver.HandleSubmitTailoredResumeWithConfig(context.Background(), &req, &cfg, appCfg)
+	_ = mcpserver.HandleSubmitTailoredResumeWithConfig(context.Background(), &req, &cfg, appCfg, nil)
 
 	logOutput := buf.String()
 	lines := strings.Split(strings.TrimSpace(logOutput), "\n")

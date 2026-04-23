@@ -3,7 +3,6 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"strings"
 	"testing"
 
@@ -13,93 +12,8 @@ import (
 	"github.com/thedandano/go-apply/internal/model"
 	"github.com/thedandano/go-apply/internal/port"
 	"github.com/thedandano/go-apply/internal/service/pipeline"
+	"github.com/thedandano/go-apply/internal/sessionstore"
 )
-
-func TestSessionStore_CreateAndGet(t *testing.T) {
-	store := NewSessionStore()
-	sess := store.Create("raw jd text")
-
-	if sess.ID == "" {
-		t.Fatal("expected non-empty session ID")
-	}
-	if sess.State != stateLoaded {
-		t.Errorf("initial state = %v, want loaded", sess.State)
-	}
-	if sess.JDText != "raw jd text" {
-		t.Errorf("JDText = %q, want %q", sess.JDText, "raw jd text")
-	}
-
-	got := store.Get(sess.ID)
-	if got == nil {
-		t.Fatal("Get returned nil for existing session")
-	}
-	if got.ID != sess.ID {
-		t.Errorf("got ID %q, want %q", got.ID, sess.ID)
-	}
-}
-
-func TestSessionStore_GetMissing_ReturnsNil(t *testing.T) {
-	store := NewSessionStore()
-	got := store.Get("nonexistent")
-	if got != nil {
-		t.Errorf("expected nil for missing session, got %+v", got)
-	}
-}
-
-func TestSessionStore_LRUEviction(t *testing.T) {
-	store := NewSessionStore()
-
-	// Fill to capacity.
-	first := store.Create("first")
-	for i := 1; i < sessionStoreCap; i++ {
-		store.Create(fmt.Sprintf("jd %d", i))
-	}
-
-	// First session should still be present.
-	if store.Get(first.ID) == nil {
-		t.Fatal("first session evicted before capacity exceeded")
-	}
-
-	// Touch first to make it recently used.
-	store.Get(first.ID)
-
-	// Add one more to trigger eviction (second created becomes oldest).
-	store.Create("overflow")
-
-	// First session (recently touched) must still be present.
-	if store.Get(first.ID) == nil {
-		t.Error("recently-touched session was incorrectly evicted")
-	}
-}
-
-func TestSessionStore_IDsAreUnique(t *testing.T) {
-	store := NewSessionStore()
-	ids := make(map[string]struct{}, 50)
-	for range 50 {
-		s := store.Create("jd")
-		if _, dup := ids[s.ID]; dup {
-			t.Fatalf("duplicate session ID: %q", s.ID)
-		}
-		ids[s.ID] = struct{}{}
-	}
-}
-
-func TestSessionState_String(t *testing.T) {
-	cases := []struct {
-		s    sessionState
-		want string
-	}{
-		{stateLoaded, "loaded"},
-		{stateScored, "scored"},
-		{stateTailored, "tailored"},
-		{stateFinalized, "finalized"},
-	}
-	for _, c := range cases {
-		if got := c.s.String(); got != c.want {
-			t.Errorf("state %d String() = %q, want %q", c.s, got, c.want)
-		}
-	}
-}
 
 // whiteBoxCapturingRepo captures the last record passed to Put for white-box handler tests.
 type whiteBoxCapturingRepo struct {
@@ -136,10 +50,16 @@ func TestHandleFinalize_TailoredSession_TailorResultAndChangelogPersisted(t *tes
 		{Action: "skipped", Target: "summary", Keyword: "docker"},
 	}
 
-	// Inject a pre-scored, tailored session directly into the package-level store.
-	sess := sessions.Create("raw jd for tailored test")
+	// Use an isolated MemoryStore for this test rather than the package-level store.
+	testStore := sessionstore.NewMemoryStore()
+	ctx := context.Background()
+
+	sess, err := testStore.Create(ctx, "raw jd for tailored test")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
 	sess.URL = "https://example.com/job/tailored-whitebox"
-	sess.State = stateTailored
+	sess.State = sessionstore.StateTailored
 	sess.TailoredText = "full tailored resume body"
 	sess.Changelog = changelog
 	sess.ScoreResult = pipeline.ScoreResumeResult{
@@ -148,6 +68,9 @@ func TestHandleFinalize_TailoredSession_TailorResultAndChangelogPersisted(t *tes
 		Scores: map[string]model.ScoreResult{
 			"main": {ResumeLabel: "main"},
 		},
+	}
+	if err := testStore.Update(ctx, sess); err != nil {
+		t.Fatalf("Update: %v", err)
 	}
 
 	capturing := &whiteBoxCapturingRepo{}
@@ -161,7 +84,7 @@ func TestHandleFinalize_TailoredSession_TailorResultAndChangelogPersisted(t *tes
 	}
 
 	req := whiteBoxCallToolRequest("finalize", map[string]any{"session_id": sess.ID})
-	result := HandleFinalizeWithConfig(context.Background(), &req, &deps)
+	result := HandleFinalizeWithConfig(ctx, &req, &deps, testStore)
 
 	if len(result.Content) == 0 {
 		t.Fatal("HandleFinalizeWithConfig returned no content")

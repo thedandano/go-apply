@@ -14,20 +14,26 @@ import (
 	"github.com/thedandano/go-apply/internal/model"
 	mcppres "github.com/thedandano/go-apply/internal/presenter/mcp"
 	"github.com/thedandano/go-apply/internal/service/pipeline"
+	"github.com/thedandano/go-apply/internal/sessionstore"
 )
 
-// sessions is the process-lifetime session store shared by all multi-turn handlers.
-var sessions = NewSessionStore()
+// sessions is the process-lifetime session store used by all MCP multi-turn handlers.
+// CLI subcommands pass their own DiskStore via the store parameter on WithConfig variants.
+var sessions sessionstore.Store = sessionstore.NewMemoryStore()
 
 // HandleLoadJD is the exported handler for the "load_jd" MCP tool.
-// In production, deps and session store come from the process-level instances.
+// Uses the process-level memory store.
 func HandleLoadJD(ctx context.Context, req *mcp.CallToolRequest) *mcp.CallToolResult {
-	return HandleLoadJDWithConfig(ctx, req, nil)
+	return HandleLoadJDWithConfig(ctx, req, nil, nil)
 }
 
-// HandleLoadJDWithConfig is the full handler with optional injected deps (for tests).
-// When deps is nil, loadDeps() is called to get live dependencies.
-func HandleLoadJDWithConfig(ctx context.Context, req *mcp.CallToolRequest, deps *pipeline.ApplyConfig) *mcp.CallToolResult {
+// HandleLoadJDWithConfig is the full handler with optional injected deps and store.
+// When deps is nil, loadDeps() is called. When store is nil, the process-level sessions store is used.
+func HandleLoadJDWithConfig(ctx context.Context, req *mcp.CallToolRequest, deps *pipeline.ApplyConfig, store sessionstore.Store) *mcp.CallToolResult {
+	if store == nil {
+		store = sessions
+	}
+
 	jdURL := req.GetString("jd_url", "")
 	jdRawText := req.GetString("jd_raw_text", "")
 	slog.DebugContext(ctx, "mcp tool invoked",
@@ -65,9 +71,16 @@ func HandleLoadJDWithConfig(ctx context.Context, req *mcp.CallToolRequest, deps 
 		return envelopeResult(stageErrorEnvelope("", "fetch", "fetch_failed", err.Error(), true))
 	}
 
-	sess := sessions.Create(jdText)
+	sess, err := store.Create(ctx, jdText)
+	if err != nil {
+		slog.ErrorContext(ctx, "load_jd: create session failed", "error", err)
+		return envelopeResult(stageErrorEnvelope("", "load_jd", "session_error", err.Error(), true))
+	}
 	sess.URL = jdURL
 	sess.IsText = isText
+	if err := store.Update(ctx, sess); err != nil {
+		slog.WarnContext(ctx, "load_jd: persist session metadata failed", "session_id", sess.ID, "error", err)
+	}
 	logger.Banner(ctx, slog.Default(), "Session", sess.ID)
 
 	type loadJDData struct {
@@ -86,11 +99,15 @@ func HandleLoadJDWithConfig(ctx context.Context, req *mcp.CallToolRequest, deps 
 
 // HandleSubmitKeywords is the exported handler for the "submit_keywords" MCP tool.
 func HandleSubmitKeywords(ctx context.Context, req *mcp.CallToolRequest) *mcp.CallToolResult {
-	return HandleSubmitKeywordsWithConfig(ctx, req, nil, nil)
+	return HandleSubmitKeywordsWithConfig(ctx, req, nil, nil, nil)
 }
 
-// HandleSubmitKeywordsWithConfig is the full handler with optional injected deps (for tests).
-func HandleSubmitKeywordsWithConfig(ctx context.Context, req *mcp.CallToolRequest, deps *pipeline.ApplyConfig, cfg *config.Config) *mcp.CallToolResult {
+// HandleSubmitKeywordsWithConfig is the full handler with optional injected deps and store.
+func HandleSubmitKeywordsWithConfig(ctx context.Context, req *mcp.CallToolRequest, deps *pipeline.ApplyConfig, cfg *config.Config, store sessionstore.Store) *mcp.CallToolResult {
+	if store == nil {
+		store = sessions
+	}
+
 	sessionID := req.GetString("session_id", "")
 	if sessionID == "" {
 		return envelopeResult(stageErrorEnvelope("", "submit_keywords", "missing_session", "session_id is required", false))
@@ -105,14 +122,17 @@ func HandleSubmitKeywordsWithConfig(ctx context.Context, req *mcp.CallToolReques
 		return envelopeResult(stageErrorEnvelope(sessionID, "submit_keywords", "missing_jd", "jd_json is required", false))
 	}
 
-	sess := sessions.Get(sessionID)
-	if sess == nil {
+	sess, ok, err := store.Get(ctx, sessionID)
+	if err != nil {
+		return envelopeResult(stageErrorEnvelope(sessionID, "submit_keywords", "session_error", err.Error(), true))
+	}
+	if !ok {
 		return envelopeResult(stageErrorEnvelope(sessionID, "submit_keywords", "session_not_found",
 			"session not found — call load_jd first", false))
 	}
-	if sess.State != stateLoaded {
+	if sess.State != sessionstore.StateLoaded {
 		return envelopeResult(stageErrorEnvelope(sessionID, "submit_keywords", "invalid_state",
-			fmt.Sprintf("expected state %q, got %q — call load_jd first", stateLoaded, sess.State), false))
+			fmt.Sprintf("expected state %q, got %q — call load_jd first", sessionstore.StateLoaded, sess.State), false))
 	}
 
 	var jd model.JDData
@@ -153,7 +173,10 @@ func HandleSubmitKeywordsWithConfig(ctx context.Context, req *mcp.CallToolReques
 
 	sess.JD = jd
 	sess.ScoreResult = scored
-	sess.State = stateScored
+	sess.State = sessionstore.StateScored
+	if updateErr := store.Update(ctx, sess); updateErr != nil {
+		slog.WarnContext(ctx, "submit_keywords: persist session failed", "session_id", sessionID, "error", updateErr)
+	}
 
 	nextAction := NextActionFromScore(scored.BestScore)
 
@@ -199,11 +222,15 @@ func HandleSubmitKeywordsWithConfig(ctx context.Context, req *mcp.CallToolReques
 
 // HandleFinalize is the exported handler for the "finalize" MCP tool.
 func HandleFinalize(ctx context.Context, req *mcp.CallToolRequest) *mcp.CallToolResult {
-	return HandleFinalizeWithConfig(ctx, req, nil)
+	return HandleFinalizeWithConfig(ctx, req, nil, nil)
 }
 
-// HandleFinalizeWithConfig is the full handler with optional injected deps (for tests).
-func HandleFinalizeWithConfig(ctx context.Context, req *mcp.CallToolRequest, deps *pipeline.ApplyConfig) *mcp.CallToolResult {
+// HandleFinalizeWithConfig is the full handler with optional injected deps and store.
+func HandleFinalizeWithConfig(ctx context.Context, req *mcp.CallToolRequest, deps *pipeline.ApplyConfig, store sessionstore.Store) *mcp.CallToolResult {
+	if store == nil {
+		store = sessions
+	}
+
 	sessionID := req.GetString("session_id", "")
 	if sessionID == "" {
 		return envelopeResult(stageErrorEnvelope("", "finalize", "missing_session", "session_id is required", false))
@@ -215,12 +242,15 @@ func HandleFinalizeWithConfig(ctx context.Context, req *mcp.CallToolRequest, dep
 		logger.PayloadAttr("cover_letter", coverLetter, logger.Verbose()),
 	)
 
-	sess := sessions.Get(sessionID)
-	if sess == nil {
+	sess, ok, err := store.Get(ctx, sessionID)
+	if err != nil {
+		return envelopeResult(stageErrorEnvelope(sessionID, "finalize", "session_error", err.Error(), true))
+	}
+	if !ok {
 		return envelopeResult(stageErrorEnvelope(sessionID, "finalize", "session_not_found",
 			"session not found — call load_jd first", false))
 	}
-	if sess.State < stateScored {
+	if sess.State == sessionstore.StateLoaded {
 		return envelopeResult(stageErrorEnvelope(sessionID, "finalize", "invalid_state",
 			fmt.Sprintf("session must be scored before finalize; current state: %q", sess.State), false))
 	}
@@ -259,7 +289,10 @@ func HandleFinalizeWithConfig(ctx context.Context, req *mcp.CallToolRequest, dep
 		}
 	}
 
-	sess.State = stateFinalized
+	sess.State = sessionstore.StateFinalized
+	if updateErr := store.Update(ctx, sess); updateErr != nil {
+		slog.WarnContext(ctx, "finalize: persist session state failed", "session_id", sessionID, "error", updateErr)
+	}
 
 	type finalizeSummary struct {
 		KeywordsRequired  int     `json:"keywords_required"`
@@ -301,11 +334,15 @@ func HandleFinalizeWithConfig(ctx context.Context, req *mcp.CallToolRequest, dep
 
 // HandleSubmitTailoredResume is the exported handler for the "submit_tailored_resume" MCP tool.
 func HandleSubmitTailoredResume(ctx context.Context, req *mcp.CallToolRequest) *mcp.CallToolResult {
-	return HandleSubmitTailoredResumeWithConfig(ctx, req, nil, nil)
+	return HandleSubmitTailoredResumeWithConfig(ctx, req, nil, nil, nil)
 }
 
-// HandleSubmitTailoredResumeWithConfig is the full handler with optional injected deps (for tests).
-func HandleSubmitTailoredResumeWithConfig(ctx context.Context, req *mcp.CallToolRequest, deps *pipeline.ApplyConfig, cfg *config.Config) *mcp.CallToolResult {
+// HandleSubmitTailoredResumeWithConfig is the full handler with optional injected deps and store.
+func HandleSubmitTailoredResumeWithConfig(ctx context.Context, req *mcp.CallToolRequest, deps *pipeline.ApplyConfig, cfg *config.Config, store sessionstore.Store) *mcp.CallToolResult {
+	if store == nil {
+		store = sessions
+	}
+
 	sessionID := req.GetString("session_id", "")
 	if sessionID == "" {
 		return envelopeResult(stageErrorEnvelope("", "submit_tailored_resume", "missing_session", "session_id is required", false))
@@ -353,16 +390,19 @@ func HandleSubmitTailoredResumeWithConfig(ctx context.Context, req *mcp.CallTool
 	}
 
 	// Look up session.
-	sess := sessions.Get(sessionID)
-	if sess == nil {
+	sess, ok, err := store.Get(ctx, sessionID)
+	if err != nil {
+		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailored_resume", "session_error", err.Error(), true))
+	}
+	if !ok {
 		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailored_resume", "session_not_found",
 			"session not found — call load_jd first", false))
 	}
 
-	// State guard: accept stateScored or stateTailored (retry after rescore failure).
-	if sess.State != stateScored && sess.State != stateTailored {
+	// State guard: accept StateScored or StateTailored (retry after rescore failure).
+	if sess.State != sessionstore.StateScored && sess.State != sessionstore.StateTailored {
 		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailored_resume", "invalid_state",
-			fmt.Sprintf("expected state %q or %q, got %q", stateScored, stateTailored, sess.State), false))
+			fmt.Sprintf("expected state %q or %q, got %q", sessionstore.StateScored, sessionstore.StateTailored, sess.State), false))
 	}
 
 	// Capture previous score before mutating state.
@@ -372,7 +412,7 @@ func HandleSubmitTailoredResumeWithConfig(ctx context.Context, req *mcp.CallTool
 	// Advance session state before rescore (retry-friendly).
 	sess.TailoredText = tailoredText
 	sess.Changelog = entries
-	sess.State = stateTailored
+	sess.State = sessionstore.StateTailored
 
 	// Wire dependencies.
 	if deps == nil {
@@ -413,6 +453,10 @@ func HandleSubmitTailoredResumeWithConfig(ctx context.Context, req *mcp.CallTool
 	sess.ScoreResult.BestScore = newScore.Breakdown.Total()
 
 	newTotal := newScore.Breakdown.Total()
+
+	if updateErr := store.Update(ctx, sess); updateErr != nil {
+		slog.WarnContext(ctx, "submit_tailored_resume: persist session failed", "session_id", sessionID, "error", updateErr)
+	}
 
 	slog.InfoContext(ctx, "tailor submission complete",
 		slog.Int("tailored_text_bytes", len(tailoredText)),
