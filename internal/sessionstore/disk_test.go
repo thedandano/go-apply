@@ -406,6 +406,36 @@ func TestDiskStore_ConcurrentUpdate_AtLeastOneSucceeds(t *testing.T) {
 	}
 }
 
+// TestDiskStore_SessionID_Entropy verifies that 10 consecutive DiskStore.Create
+// calls yield 10 distinct IDs, each matching ^[a-z0-9]{26,64}$.
+// This is a probabilistic collision test; a collision here would indicate a broken
+// CSPRNG and is vanishingly unlikely (~1/2^127 per pair).
+func TestDiskStore_SessionID_Entropy(t *testing.T) {
+	store, _ := newTestDiskStore(t)
+	ctx := context.Background()
+
+	const n = 10
+	seen := make(map[string]struct{}, n)
+
+	for i := range n {
+		sess, err := store.Create(ctx, "entropy test jd")
+		if err != nil {
+			t.Fatalf("Create #%d: %v", i, err)
+		}
+		if !sessionIDRegex.MatchString(sess.ID) {
+			t.Errorf("session ID %q does not match regex ^[a-z0-9]{26,64}$", sess.ID)
+		}
+		if _, dup := seen[sess.ID]; dup {
+			t.Fatalf("duplicate session ID %q generated (entropy failure)", sess.ID)
+		}
+		seen[sess.ID] = struct{}{}
+	}
+
+	if len(seen) != n {
+		t.Errorf("expected %d distinct IDs; got %d", n, len(seen))
+	}
+}
+
 func TestDiskStore_SessionFile_ValidJSON(t *testing.T) {
 	store, sessDir := newTestDiskStore(t)
 	ctx := context.Background()

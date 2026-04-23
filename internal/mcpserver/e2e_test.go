@@ -18,6 +18,7 @@ import (
 	"github.com/thedandano/go-apply/internal/service/onboarding"
 	"github.com/thedandano/go-apply/internal/service/pipeline"
 	"github.com/thedandano/go-apply/internal/service/scorer"
+	"github.com/thedandano/go-apply/internal/sessionstore"
 )
 
 // TestOnboardThenScore exercises the full onboard → load_jd → submit_keywords flow
@@ -62,23 +63,22 @@ func TestOnboardThenScore(t *testing.T) {
 
 	deps := pipeline.ApplyConfig{
 		Fetcher:   nil,
-		LLM:       nil, // MCP host (this test) provides keywords via submit_keywords
 		Scorer:    scorerSvc,
-		CLGen:     nil,
 		Resumes:   resumeRepo,
 		Loader:    docLoader,
 		AppRepo:   appRepo,
 		Defaults:  defaults,
-		Tailor:    nil,
 		Presenter: nil,
 	}
+
+	store := sessionstore.NewMemoryStore()
 
 	// ── 4. load_jd ─────────────────────────────────────────────────────────────
 
 	loadReq := callToolRequest("load_jd", map[string]any{
 		"jd_raw_text": "Senior Go Engineer at Acme. Requires: go, kubernetes. Nice to have: docker.",
 	})
-	loadResult := mcpserver.HandleLoadJDWithConfig(context.Background(), &loadReq, &deps)
+	loadResult := mcpserver.HandleLoadJDWithConfig(context.Background(), &loadReq, &deps, store)
 	loadText := extractText(t, loadResult)
 
 	var loadEnv map[string]any
@@ -100,7 +100,7 @@ func TestOnboardThenScore(t *testing.T) {
 		"session_id": sessionID,
 		"jd_json":    jdJSON,
 	})
-	kwResult := mcpserver.HandleSubmitKeywordsWithConfig(context.Background(), &kwReq, &deps, &config.Config{})
+	kwResult := mcpserver.HandleSubmitKeywordsWithConfig(context.Background(), &kwReq, &deps, &config.Config{}, store)
 	kwText := extractText(t, kwResult)
 
 	var kwEnv map[string]any
