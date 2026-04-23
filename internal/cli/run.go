@@ -23,7 +23,7 @@ import (
 	"github.com/thedandano/go-apply/internal/service/orchestrator"
 	"github.com/thedandano/go-apply/internal/service/pipeline"
 	"github.com/thedandano/go-apply/internal/service/scorer"
-	"github.com/thedandano/go-apply/internal/service/tailor"
+	"github.com/thedandano/go-apply/internal/service/tailorllm"
 )
 
 // NewApplyCommand returns the cobra command for "go-apply run".
@@ -107,7 +107,7 @@ Outputs a JSON result to stdout when --headless is set.`,
 			scorerSvc := scorer.New(defaults)
 			clGen := coverletter.New(llmClient, defaults, log)
 			fetcherSvc := fetcher.NewFallback(defaults, log)
-			tailorSvc := tailor.New(llmClient, defaults, log)
+			tailorSvc := &tailorllm.HeadlessNullTailor{}
 
 			// Wire presenter — always headless for now.
 			// TODO(Epic 6): swap in TUIPresenter when isatty detects a terminal and --headless is not set
@@ -115,17 +115,18 @@ Outputs a JSON result to stdout when --headless is set.`,
 
 			// Build and run the pipeline.
 			pl := pipeline.NewApplyPipeline(&pipeline.ApplyConfig{
-				Fetcher:      fetcherSvc,
-				LLM:          llmClient,
-				Scorer:       scorerSvc,
-				CLGen:        clGen,
-				Resumes:      resumeRepo,
-				Loader:       docLoader,
-				AppRepo:      appRepo,
-				Presenter:    pres,
-				Defaults:     defaults,
-				Tailor:       tailorSvc,
-				Orchestrator: orch,
+				Fetcher:          fetcherSvc,
+				LLM:              llmClient,
+				Scorer:           scorerSvc,
+				CLGen:            clGen,
+				Resumes:          resumeRepo,
+				Loader:           docLoader,
+				AppRepo:          appRepo,
+				Presenter:        pres,
+				Defaults:         defaults,
+				Tailor:           tailorSvc,
+				TailorLLMEnabled: true,
+				Orchestrator:     orch,
 			})
 
 			isText := textFlag != ""

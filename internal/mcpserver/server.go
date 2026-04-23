@@ -117,6 +117,34 @@ func NewServer() *server.MCPServer {
 	)
 
 	srv.AddTool(
+		mcp.NewTool("tailor_begin",
+			mcp.WithDescription("Open a new LLM tailor session. Returns a session_id and prompt_bundle for Claude to use. Claude must call submit_tailored_resume when done."),
+			mcp.WithString("resume_text", mcp.Description("Full resume text to tailor"), mcp.Required()),
+			mcp.WithString("accomplishments_text", mcp.Description("Accomplishments document text (optional)")),
+			mcp.WithString("jd", mcp.Description("Job description JSON (optional)")),
+			mcp.WithString("score_before", mcp.Description("Score result JSON before tailoring (optional)")),
+			mcp.WithString("options", mcp.Description("Tailor options JSON (optional)")),
+		),
+		requireOnboarded(func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return HandleTailorBegin(ctx, &req), nil
+		}),
+	)
+
+	srv.AddTool(
+		mcp.NewTool("tailor_submit",
+			mcp.WithDescription("Submit the tailored resume produced by the LLM. Delivers the result back to the pipeline that is awaiting it."),
+			mcp.WithString("session_id", mcp.Description("Session ID from tailor_begin"), mcp.Required()),
+			mcp.WithString("tailored_text", mcp.Description("The full tailored resume text"), mcp.Required()),
+			mcp.WithString("changelog", mcp.Description("JSON array of ChangelogEntry objects describing changes made (optional)")),
+			mcp.WithString("tier_1_text", mcp.Description("Tier-1-only tailored text (optional)")),
+			mcp.WithString("raw_changelog", mcp.Description("Raw markdown changelog (optional)")),
+		),
+		requireOnboarded(func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return HandleTailorSubmit(ctx, &req), nil
+		}),
+	)
+
+	srv.AddTool(
 		mcp.NewTool("finalize",
 			mcp.WithDescription("Persist the application record and close the session. Optionally include a cover letter. Call after submit_keywords (and optionally submit_tailor_t1/t2)."),
 			mcp.WithString("session_id", mcp.Description("Session ID from load_jd"), mcp.Required()),

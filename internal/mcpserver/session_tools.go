@@ -3,14 +3,17 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 
 	"github.com/thedandano/go-apply/internal/config"
 	"github.com/thedandano/go-apply/internal/logger"
+	"github.com/thedandano/go-apply/internal/mcpserver/skills"
 	"github.com/thedandano/go-apply/internal/model"
 	"github.com/thedandano/go-apply/internal/port"
 	mcppres "github.com/thedandano/go-apply/internal/presenter/mcp"
@@ -20,6 +23,9 @@ import (
 
 // sessions is the process-lifetime session store shared by all multi-turn handlers.
 var sessions = NewSessionStore()
+
+// tailorSessions is the process-lifetime store for LLM tailor round-trips.
+var tailorSessions = NewTailorSessionStore()
 
 // HandleLoadJD is the exported handler for the "load_jd" MCP tool.
 // In production, deps and session store come from the process-level instances.
@@ -572,4 +578,191 @@ func HandleSubmitTailorT2WithConfig(ctx context.Context, req *mcp.CallToolReques
 		logger.PayloadAttr("result", string(resultBytes), logger.Verbose()),
 	)
 	return envelopeResult(okEnvelope(sessionID, "cover_letter", resultData))
+}
+
+// buildTailorBundle concatenates the prompt body with the resume and accomplishments sections.
+func buildTailorBundle(promptBody, resumeText, accomplishmentsText string) string {
+	var sb strings.Builder
+	sb.WriteString(promptBody)
+	if resumeText != "" {
+		sb.WriteString("\n\n## Resume\n\n")
+		sb.WriteString(resumeText)
+	}
+	if accomplishmentsText != "" {
+		sb.WriteString("\n\n## Accomplishments\n\n")
+		sb.WriteString(accomplishmentsText)
+	}
+	return sb.String()
+}
+
+// HandleTailorBegin is the exported handler for the "tailor_begin" MCP tool.
+// In production, tailorSessions and the embedded prompt body are used.
+func HandleTailorBegin(ctx context.Context, req *mcp.CallToolRequest) *mcp.CallToolResult {
+	return HandleTailorBeginWithStore(ctx, req, tailorSessions, skills.PromptBody())
+}
+
+// HandleTailorBeginWithStore is the full handler with injected dependencies for test isolation.
+func HandleTailorBeginWithStore(ctx context.Context, req *mcp.CallToolRequest, store *TailorSessionStore, promptBody string) *mcp.CallToolResult {
+	resumeText := req.GetString("resume_text", "")
+	accomplishmentsText := req.GetString("accomplishments_text", "")
+	jdStr := req.GetString("jd", "")
+	scoreBeforeStr := req.GetString("score_before", "")
+	optionsStr := req.GetString("options", "")
+	timeoutSecs := req.GetInt("timeout_seconds", 0)
+
+	slog.DebugContext(ctx, "mcp tool invoked",
+		slog.String("tool", "tailor_begin"),
+		logger.PayloadAttr("resume_text", resumeText, logger.Verbose()),
+	)
+
+	if resumeText == "" {
+		return envelopeResult(stageErrorEnvelope("", "tailor_begin", "invalid_input", "resume_text is required", false))
+	}
+
+	// Parse optional JSON fields; use zero values on parse failure.
+	var jd model.JDData
+	if jdStr != "" && jdStr != "{}" {
+		_ = json.Unmarshal([]byte(jdStr), &jd)
+	}
+	var scoreBefore model.ScoreResult
+	if scoreBeforeStr != "" && scoreBeforeStr != "{}" {
+		_ = json.Unmarshal([]byte(scoreBeforeStr), &scoreBefore)
+	}
+	var options model.TailorOptions
+	if optionsStr != "" && optionsStr != "{}" {
+		_ = json.Unmarshal([]byte(optionsStr), &options)
+	}
+
+	input := model.TailorInput{
+		ResumeText:          resumeText,
+		AccomplishmentsText: accomplishmentsText,
+		JD:                  jd,
+		ScoreBefore:         scoreBefore,
+		Options:             options,
+	}
+
+	if timeoutSecs == 0 {
+		timeoutSecs = 120
+	}
+	timeout := time.Duration(timeoutSecs) * time.Second
+
+	bundle := buildTailorBundle(promptBody, resumeText, accomplishmentsText)
+
+	sessionID, err := store.Open(bundle, &input, timeout)
+	if err != nil {
+		return envelopeResult(stageErrorEnvelope("", "tailor_begin", "internal_error", err.Error(), true))
+	}
+
+	slog.InfoContext(ctx, "tailor_begin",
+		slog.String("session_id", sessionID),
+		slog.Int("timeout_seconds", timeoutSecs),
+	)
+
+	type tailorBeginData struct {
+		SessionID      string `json:"session_id"`
+		PromptBundle   string `json:"prompt_bundle"`
+		TimeoutSeconds int    `json:"timeout_seconds"`
+	}
+	resultData := tailorBeginData{
+		SessionID:      sessionID,
+		PromptBundle:   bundle,
+		TimeoutSeconds: timeoutSecs,
+	}
+	resultBytes, _ := json.Marshal(resultData)
+	slog.DebugContext(ctx, "mcp tool result",
+		slog.String("tool", "tailor_begin"),
+		slog.String("session_id", sessionID),
+		slog.String("status", "ok"),
+		slog.Int("result_bytes", len(resultBytes)),
+		logger.PayloadAttr("result", string(resultBytes), logger.Verbose()),
+	)
+	return envelopeResult(okEnvelope(sessionID, "submit_tailored_resume", resultData))
+}
+
+// HandleTailorSubmit is the exported handler for the "tailor_submit" MCP tool.
+// In production, tailorSessions is used.
+func HandleTailorSubmit(ctx context.Context, req *mcp.CallToolRequest) *mcp.CallToolResult {
+	return HandleTailorSubmitWithStore(ctx, req, tailorSessions)
+}
+
+// HandleTailorSubmitWithStore is the full handler with injected dependencies for test isolation.
+func HandleTailorSubmitWithStore(ctx context.Context, req *mcp.CallToolRequest, store *TailorSessionStore) *mcp.CallToolResult {
+	sessionID := req.GetString("session_id", "")
+	tailoredText := req.GetString("tailored_text", "")
+	changelogStr := req.GetString("changelog", "")
+	tier1Text := req.GetString("tier_1_text", "")
+	rawChangelog := req.GetString("raw_changelog", "")
+
+	slog.DebugContext(ctx, "mcp tool invoked",
+		slog.String("tool", "tailor_submit"),
+		slog.String("session_id", sessionID),
+	)
+
+	if sessionID == "" {
+		return envelopeResult(stageErrorEnvelope("", "tailor_submit", "invalid_input", "session_id is required", false))
+	}
+	if tailoredText == "" {
+		return envelopeResult(stageErrorEnvelope(sessionID, "tailor_submit", "invalid_input", "tailored_text is required", false))
+	}
+
+	var entries []model.ChangelogEntry
+	if changelogStr != "" {
+		if err := json.Unmarshal([]byte(changelogStr), &entries); err != nil {
+			return envelopeResult(stageErrorEnvelope(sessionID, "tailor_submit", "invalid_changelog",
+				fmt.Sprintf("changelog parse failed: %v", err), false))
+		}
+	}
+
+	for i := range entries {
+		if err := model.ValidateChangelogEntry(&entries[i]); err != nil {
+			return envelopeResult(stageErrorEnvelope(sessionID, "tailor_submit", "invalid_changelog", err.Error(), false))
+		}
+	}
+
+	result := model.TailorResult{
+		TailoredText: tailoredText,
+		Changelog:    entries,
+		Tier1Text:    tier1Text,
+		RawChangelog: rawChangelog,
+	}
+
+	if err := store.Submit(sessionID, &result); err != nil {
+		var code string
+		retriable := false
+		switch {
+		case errors.Is(err, ErrTailorSessionUnknown):
+			code = "unknown_session"
+		case errors.Is(err, ErrTailorSessionExpired):
+			code = "session_expired"
+		case errors.Is(err, ErrTailorSessionAlreadyConsumed):
+			code = "session_already_consumed"
+		default:
+			code = "internal_error"
+			retriable = true
+		}
+		return envelopeResult(stageErrorEnvelope(sessionID, "tailor_submit", code, err.Error(), retriable))
+	}
+
+	slog.InfoContext(ctx, "tailor_submit",
+		slog.String("session_id", sessionID),
+		slog.Int("changelog_entries", len(entries)),
+	)
+
+	type tailorSubmitData struct {
+		SessionID    string `json:"session_id"`
+		Acknowledged bool   `json:"acknowledged"`
+	}
+	resultData := tailorSubmitData{
+		SessionID:    sessionID,
+		Acknowledged: true,
+	}
+	resultBytes, _ := json.Marshal(resultData)
+	slog.DebugContext(ctx, "mcp tool result",
+		slog.String("tool", "tailor_submit"),
+		slog.String("session_id", sessionID),
+		slog.String("status", "ok"),
+		slog.Int("result_bytes", len(resultBytes)),
+		logger.PayloadAttr("result", string(resultBytes), logger.Verbose()),
+	)
+	return envelopeResult(okEnvelope(sessionID, "", resultData))
 }

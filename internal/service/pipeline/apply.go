@@ -34,17 +34,18 @@ type ApplyRequest struct {
 // ApplyPipeline orchestrates the full headless apply pipeline.
 // All external dependencies are injected; no I/O is performed inside the struct directly.
 type ApplyPipeline struct {
-	fetcher      port.JDFetcher
-	llm          port.LLMClient
-	scorer       port.Scorer
-	clGen        port.CoverLetterGenerator
-	resumes      port.ResumeRepository
-	loader       port.DocumentLoader
-	appRepo      port.ApplicationRepository
-	presenter    port.Presenter
-	defaults     *config.AppDefaults
-	tailor       port.Tailor
-	orchestrator port.Orchestrator
+	fetcher          port.JDFetcher
+	llm              port.LLMClient
+	scorer           port.Scorer
+	clGen            port.CoverLetterGenerator
+	resumes          port.ResumeRepository
+	loader           port.DocumentLoader
+	appRepo          port.ApplicationRepository
+	presenter        port.Presenter
+	defaults         *config.AppDefaults
+	tailor           port.Tailor
+	tailorLLMEnabled bool
+	orchestrator     port.Orchestrator
 }
 
 // ApplyConfig holds all dependencies for an ApplyPipeline.
@@ -59,6 +60,9 @@ type ApplyConfig struct {
 	Presenter port.Presenter
 	Defaults  *config.AppDefaults
 	Tailor    port.Tailor
+	// TailorLLMEnabled gates the LLM tailor step. When false, the tailor step is
+	// skipped and a warning is appended to the result.
+	TailorLLMEnabled bool
 	// Orchestrator is optional. When set, it is used for LLM decision points
 	// (keyword extraction) instead of the raw LLMClient. In MCP mode, leave nil.
 	Orchestrator port.Orchestrator
@@ -67,17 +71,18 @@ type ApplyConfig struct {
 // NewApplyPipeline constructs an ApplyPipeline with all dependencies injected via ApplyConfig.
 func NewApplyPipeline(cfg *ApplyConfig) *ApplyPipeline {
 	return &ApplyPipeline{
-		fetcher:      cfg.Fetcher,
-		llm:          cfg.LLM,
-		scorer:       cfg.Scorer,
-		clGen:        cfg.CLGen,
-		resumes:      cfg.Resumes,
-		loader:       cfg.Loader,
-		appRepo:      cfg.AppRepo,
-		presenter:    cfg.Presenter,
-		defaults:     cfg.Defaults,
-		tailor:       cfg.Tailor,
-		orchestrator: cfg.Orchestrator,
+		fetcher:          cfg.Fetcher,
+		llm:              cfg.LLM,
+		scorer:           cfg.Scorer,
+		clGen:            cfg.CLGen,
+		resumes:          cfg.Resumes,
+		loader:           cfg.Loader,
+		appRepo:          cfg.AppRepo,
+		presenter:        cfg.Presenter,
+		defaults:         cfg.Defaults,
+		tailor:           cfg.Tailor,
+		tailorLLMEnabled: cfg.TailorLLMEnabled,
+		orchestrator:     cfg.Orchestrator,
 	}
 }
 
@@ -212,6 +217,8 @@ func (p *ApplyPipeline) Run(ctx context.Context, req ApplyRequest) error {
 	switch {
 	case p.tailor == nil:
 		tailorChosen = "skip"
+	case !p.tailorLLMEnabled:
+		tailorChosen = "flag-off"
 	case req.AccomplishmentsText == "":
 		tailorChosen = "skip"
 	case result.BestResume == "":
@@ -221,34 +228,41 @@ func (p *ApplyPipeline) Run(ctx context.Context, req ApplyRequest) error {
 	}
 	slog.DebugContext(ctx, "pipeline: tailor", slog.String("chosen", tailorChosen))
 	if req.AccomplishmentsText != "" && result.BestResume != "" && p.tailor != nil {
-		tailorStart := time.Now()
-		p.presenter.OnEvent(model.StepStartedEvent{StepID: "tailor", Label: "Tailoring resume"})
-		tailorResult, tailorErr := p.runTailorStep(ctx, result, &jd, req, resumeFiles)
-		if tailorErr != nil {
-			slog.WarnContext(ctx, "tailor step failed — continuing", "error", tailorErr)
-			p.presenter.OnEvent(model.StepFailedEvent{StepID: "tailor", Label: "Tailor failed", Err: tailorErr.Error()})
+		if !p.tailorLLMEnabled {
 			result.Warnings = append(result.Warnings, model.RiskWarning{
 				Severity: model.SeverityWarn,
-				Message:  fmt.Sprintf("tailor step failed: %v", tailorErr),
+				Message:  "tailor_llm disabled via flag",
 			})
 		} else {
-			p.presenter.OnEvent(model.StepCompletedEvent{
-				StepID:    "tailor",
-				Label:     "Resume tailored",
-				ElapsedMS: time.Since(tailorStart).Milliseconds(),
-			})
-			result.Cascade = tailorResult
-			// Surface tier-2 all-fail as a structured warning: the user requested
-			// bullet rewrites but every LLM call failed; result is tier-1 only.
-			if tailorResult.BulletsAttempted > 0 && len(tailorResult.RewrittenBullets) == 0 {
+			tailorStart := time.Now()
+			p.presenter.OnEvent(model.StepStartedEvent{StepID: "tailor", Label: "Tailoring resume"})
+			tailorResult, tailorErr := p.runTailorStep(ctx, result, &jd, req, resumeFiles)
+			if tailorErr != nil {
+				slog.WarnContext(ctx, "tailor step failed — continuing", "error", tailorErr)
+				p.presenter.OnEvent(model.StepFailedEvent{StepID: "tailor", Label: "Tailor failed", Err: tailorErr.Error()})
 				result.Warnings = append(result.Warnings, model.RiskWarning{
 					Severity: model.SeverityWarn,
-					Message:  fmt.Sprintf("tier-2 bullet rewriting attempted %d bullet(s) but all LLM calls failed — result is tier-1 only", tailorResult.BulletsAttempted),
+					Message:  fmt.Sprintf("tailor step failed: %v", tailorErr),
 				})
-			}
-			// Update best score if tailored version scores higher.
-			if tailored := tailorResult.NewScore.Breakdown.Total(); tailored > result.BestScore {
-				result.BestScore = tailored
+			} else {
+				p.presenter.OnEvent(model.StepCompletedEvent{
+					StepID:    "tailor",
+					Label:     "Resume tailored",
+					ElapsedMS: time.Since(tailorStart).Milliseconds(),
+				})
+				result.Cascade = tailorResult
+				// Surface tier-2 all-fail as a structured warning: the user requested
+				// bullet rewrites but every LLM call failed; result is tier-1 only.
+				if tailorResult.BulletsAttempted > 0 && len(tailorResult.RewrittenBullets) == 0 {
+					result.Warnings = append(result.Warnings, model.RiskWarning{
+						Severity: model.SeverityWarn,
+						Message:  fmt.Sprintf("tier-2 bullet rewriting attempted %d bullet(s) but all LLM calls failed — result is tier-1 only", tailorResult.BulletsAttempted),
+					})
+				}
+				// Update best score if tailored version scores higher.
+				if tailored := tailorResult.NewScore.Breakdown.Total(); tailored > result.BestScore {
+					result.BestScore = tailored
+				}
 			}
 		}
 	}
