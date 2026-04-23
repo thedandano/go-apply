@@ -78,6 +78,80 @@ func TestApplicationRecord_MarshalJSON_NilTailorResult(t *testing.T) {
 	}
 }
 
+func TestApplicationRecord_MarshalJSON_Round_Trip_WithChangelog(t *testing.T) {
+	const sentinelText = "FULL TAILORED BODY THAT MUST BE REDACTED"
+
+	rec := ApplicationRecord{
+		URL: "https://example.com/job/123",
+		JD:  JDData{Title: "Software Engineer", Company: "Acme Corp"},
+		Score: &ScoreResult{
+			ResumeLabel: "my-resume",
+			Breakdown:   ScoreBreakdown{KeywordMatch: 20, ExperienceFit: 18},
+		},
+		ResumeLabel: "my-resume",
+		TailorResult: &TailorResult{
+			ResumeLabel:  "my-resume",
+			TailoredText: sentinelText,
+			Changelog: []ChangelogEntry{
+				{Action: "added", Target: "skill", Keyword: "kubernetes", Reason: "required by JD"},
+				{Action: "rewrote", Target: "bullet", Keyword: "aws", Reason: "broader scope"},
+				{Action: "skipped", Target: "skill", Keyword: "rust", Reason: "no accomplishments basis"},
+			},
+			NewScore: ScoreResult{ResumeLabel: "my-resume", Breakdown: ScoreBreakdown{KeywordMatch: 25}},
+		},
+		CoverLetter: "agent-supplied cover letter",
+	}
+
+	data, err := json.Marshal(&rec)
+	if err != nil {
+		t.Fatalf("json.Marshal error = %v", err)
+	}
+	jsonStr := string(data)
+
+	// 1. Sentinel body and tailored_text key must not appear in serialized bytes.
+	if strings.Contains(jsonStr, sentinelText) {
+		t.Errorf("serialized bytes contain sentinel text; redaction failed; json = %s", jsonStr)
+	}
+	if strings.Contains(jsonStr, `"tailored_text"`) {
+		t.Errorf("serialized bytes contain \"tailored_text\" key; redaction failed; json = %s", jsonStr)
+	}
+
+	// 2. All three changelog keywords, actions, and reasons must be present.
+	for _, want := range []string{"kubernetes", "required by JD", "aws", "broader scope", "rust", "no accomplishments basis"} {
+		if !strings.Contains(jsonStr, want) {
+			t.Errorf("serialized bytes missing expected changelog value %q; json = %s", want, jsonStr)
+		}
+	}
+
+	// 3. Unmarshal back and verify changelog round-trips unchanged.
+	var rec2 ApplicationRecord
+	if err := json.Unmarshal(data, &rec2); err != nil {
+		t.Fatalf("json.Unmarshal error = %v", err)
+	}
+	if rec2.TailorResult == nil {
+		t.Fatal("TailorResult nil after unmarshal")
+	}
+	if len(rec2.TailorResult.Changelog) != 3 {
+		t.Fatalf("Changelog length = %d, want 3", len(rec2.TailorResult.Changelog))
+	}
+	want := []ChangelogEntry{
+		{Action: "added", Target: "skill", Keyword: "kubernetes", Reason: "required by JD"},
+		{Action: "rewrote", Target: "bullet", Keyword: "aws", Reason: "broader scope"},
+		{Action: "skipped", Target: "skill", Keyword: "rust", Reason: "no accomplishments basis"},
+	}
+	for i, w := range want {
+		got := rec2.TailorResult.Changelog[i]
+		if got != w {
+			t.Errorf("Changelog[%d] = %+v, want %+v", i, got, w)
+		}
+	}
+
+	// 4. In-memory receiver must not be mutated by marshal.
+	if rec.TailorResult.TailoredText != sentinelText {
+		t.Errorf("in-memory TailoredText mutated; got %q, want %q", rec.TailorResult.TailoredText, sentinelText)
+	}
+}
+
 func TestApplicationRecord_MarshalJSON_PreservesOtherFields(t *testing.T) {
 	score := &ScoreResult{ResumeLabel: "cv"}
 	rec := ApplicationRecord{
