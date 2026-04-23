@@ -8,8 +8,29 @@ import (
 
 	"github.com/thedandano/go-apply/internal/config"
 	"github.com/thedandano/go-apply/internal/mcpserver"
+	"github.com/thedandano/go-apply/internal/model"
+	"github.com/thedandano/go-apply/internal/port"
 	"github.com/thedandano/go-apply/internal/service/pipeline"
 )
+
+// capturingAppRepo is a test double that records the last record passed to Put.
+// Used to assert what HandleFinalizeWithConfig persists to the application repository.
+type capturingAppRepo struct {
+	last *model.ApplicationRecord
+}
+
+var _ port.ApplicationRepository = (*capturingAppRepo)(nil)
+
+func (c *capturingAppRepo) Get(_ string) (*model.ApplicationRecord, bool, error) {
+	return nil, false, nil
+}
+func (c *capturingAppRepo) Put(rec *model.ApplicationRecord) error {
+	clone := *rec
+	c.last = &clone
+	return nil
+}
+func (c *capturingAppRepo) Update(_ *model.ApplicationRecord) error   { return nil }
+func (c *capturingAppRepo) List() ([]*model.ApplicationRecord, error) { return nil, nil }
 
 // stubApplyConfigForSession returns an ApplyConfig with all stubs and no Presenter set.
 // The handlers set the presenter internally.
@@ -363,6 +384,125 @@ func TestHandleFinalizeWithConfig_SummaryIncluded(t *testing.T) {
 	}
 	if _, ok := summary["best_score"]; !ok {
 		t.Error("expected best_score in summary")
+	}
+}
+
+// ── finalize persistence tests ────────────────────────────────────────────────
+
+// TestHandleFinalizeWithConfig_NeverTailored_NoTailorResultPersisted verifies that when a
+// session goes through load_jd → submit_keywords → finalize without any tailoring, the
+// persisted ApplicationRecord contains no tailor_result key.
+func TestHandleFinalizeWithConfig_NeverTailored_NoTailorResultPersisted(t *testing.T) {
+	capturing := &capturingAppRepo{}
+	cfg := pipeline.ApplyConfig{
+		Fetcher:   &stubJDFetcher{},
+		Scorer:    &stubScorer{},
+		Resumes:   &stubResumeRepo{},
+		Loader:    &stubDocumentLoader{},
+		AppRepo:   capturing,
+		Defaults:  &config.AppDefaults{},
+		Presenter: nil,
+	}
+
+	// Load JD with a URL so the persistence path in finalize is triggered.
+	loadReq := callToolRequest("load_jd", map[string]any{
+		"jd_url": "https://example.com/job/never-tailored",
+	})
+	loadResult := mcpserver.HandleLoadJDWithConfig(context.Background(), &loadReq, &cfg)
+	loadText := extractText(t, loadResult)
+	var loadEnv map[string]any
+	if err := json.Unmarshal([]byte(loadText), &loadEnv); err != nil {
+		t.Fatalf("load_jd not JSON: %v", err)
+	}
+	sessionID, _ := loadEnv["session_id"].(string)
+	if sessionID == "" {
+		t.Fatal("load_jd returned no session_id")
+	}
+
+	// Score resumes.
+	kwReq := callToolRequest("submit_keywords", map[string]any{
+		"session_id": sessionID,
+		"jd_json":    `{"title":"Go Engineer","company":"Acme","required":["go"],"preferred":[]}`,
+	})
+	mcpserver.HandleSubmitKeywordsWithConfig(context.Background(), &kwReq, &cfg, &config.Config{})
+
+	// Finalize without tailoring.
+	finReq := callToolRequest("finalize", map[string]any{"session_id": sessionID})
+	result := mcpserver.HandleFinalizeWithConfig(context.Background(), &finReq, &cfg)
+	text := extractText(t, result)
+
+	var env map[string]any
+	if err := json.Unmarshal([]byte(text), &env); err != nil {
+		t.Fatalf("finalize not JSON: %v — raw: %s", err, text)
+	}
+	if env["status"] != "ok" {
+		t.Fatalf("finalize status = %v, want ok — full: %s", env["status"], text)
+	}
+
+	// The capturing repo must have received a record with no TailorResult.
+	if capturing.last == nil {
+		t.Fatal("expected AppRepo.Put to be called, but it was not")
+	}
+	persisted, err := json.Marshal(capturing.last)
+	if err != nil {
+		t.Fatalf("marshal persisted record: %v", err)
+	}
+	if strings.Contains(string(persisted), `"tailor_result"`) {
+		t.Errorf("persisted record must not contain tailor_result for a never-tailored session; got: %s", persisted)
+	}
+}
+
+// TestHandleFinalizeWithConfig_TailoredSession_TailorResultAndChangelogPersisted verifies
+// that an ApplicationRecord with TailorResult and a Changelog marshals correctly:
+// tailor_result key is present, changelog entries are lossless, and tailored_text is redacted.
+// This tests the persistence artifact directly because injecting Changelog into session state
+// requires the Unit 3 submit_tailor handler (not yet implemented).
+func TestHandleFinalizeWithConfig_TailoredSession_TailorResultAndChangelogPersisted(t *testing.T) {
+	changelog := []model.ChangelogEntry{
+		{Action: "added", Target: "skill", Keyword: "kubernetes", Reason: "required by JD"},
+		{Action: "rewrote", Target: "bullet", Keyword: "go", Reason: ""},
+		{Action: "skipped", Target: "summary", Keyword: "docker"},
+	}
+	rec := &model.ApplicationRecord{
+		URL: "https://example.com/job/tailored",
+		TailorResult: &model.TailorResult{
+			ResumeLabel:  "main",
+			TailoredText: "full tailored resume body — must be redacted on disk",
+			Changelog:    changelog,
+		},
+	}
+
+	persisted, err := json.Marshal(rec)
+	if err != nil {
+		t.Fatalf("marshal ApplicationRecord: %v", err)
+	}
+
+	// tailor_result must be present.
+	if !strings.Contains(string(persisted), `"tailor_result"`) {
+		t.Errorf("tailor_result missing from persisted record; got: %s", persisted)
+	}
+
+	// tailored_text must be redacted (absent from disk artifact).
+	if strings.Contains(string(persisted), `"tailored_text"`) {
+		t.Errorf("tailored_text must be redacted from persisted record; got: %s", persisted)
+	}
+
+	// Unmarshal and verify changelog round-trips losslessly.
+	var decoded model.ApplicationRecord
+	if err := json.Unmarshal(persisted, &decoded); err != nil {
+		t.Fatalf("unmarshal persisted record: %v", err)
+	}
+	if decoded.TailorResult == nil {
+		t.Fatal("TailorResult is nil after unmarshal")
+	}
+	if len(decoded.TailorResult.Changelog) != len(changelog) {
+		t.Fatalf("Changelog length = %d, want %d", len(decoded.TailorResult.Changelog), len(changelog))
+	}
+	for i, want := range changelog {
+		got := decoded.TailorResult.Changelog[i]
+		if got.Action != want.Action || got.Target != want.Target || got.Keyword != want.Keyword || got.Reason != want.Reason {
+			t.Errorf("Changelog[%d] = %+v, want %+v", i, got, want)
+		}
 	}
 }
 

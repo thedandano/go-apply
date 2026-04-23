@@ -246,6 +246,13 @@ func HandleFinalizeWithConfig(ctx context.Context, req *mcp.CallToolRequest, dep
 				rec.Score = &bestScore
 				rec.ResumeLabel = sess.ScoreResult.BestLabel
 			}
+			if sess.TailoredText != "" || len(sess.Changelog) > 0 {
+				rec.TailorResult = &model.TailorResult{
+					ResumeLabel: sess.ScoreResult.BestLabel,
+					NewScore:    sess.ScoreResult.Scores[sess.ScoreResult.BestLabel],
+					Changelog:   sess.Changelog,
+				}
+			}
 			if putErr := deps.AppRepo.Put(rec); putErr != nil {
 				slog.WarnContext(ctx, "finalize: failed to persist record", "session_id", sessionID, "error", putErr)
 			}

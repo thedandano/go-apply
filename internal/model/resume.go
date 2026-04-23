@@ -23,4 +23,7 @@ type TailorResult struct {
 	// TailoredText is the agent-produced tailored resume text.
 	// Surfaced in MCP output; redacted from on-disk ApplicationRecord via its MarshalJSON.
 	TailoredText string `json:"tailored_text,omitempty"`
+	// Changelog records the individual tailoring actions taken by the agent.
+	// Persisted in the on-disk ApplicationRecord alongside the other TailorResult fields.
+	Changelog []ChangelogEntry `json:"changelog,omitempty"`
 }

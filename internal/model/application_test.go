@@ -15,6 +15,10 @@ func TestApplicationRecord_MarshalJSON_RedactsTailoredText(t *testing.T) {
 			TailoredText:  "body",
 			AddedKeywords: []string{"go", "kubernetes"},
 			NewScore:      ScoreResult{ResumeLabel: "my-resume"},
+			Changelog: []ChangelogEntry{
+				{Action: "added", Target: "skill", Keyword: "go", Reason: "required"},
+				{Action: "rewrote", Target: "bullet", Keyword: "kubernetes"},
+			},
 		},
 	}
 
@@ -29,11 +33,26 @@ func TestApplicationRecord_MarshalJSON_RedactsTailoredText(t *testing.T) {
 	}
 
 	// Other TailorResult fields must still be present.
-	requiredKeys := []string{`"added_keywords"`, `"new_score"`}
+	requiredKeys := []string{`"added_keywords"`, `"new_score"`, `"changelog"`}
 	for _, key := range requiredKeys {
 		if !strings.Contains(string(out), key) {
 			t.Errorf("serialized ApplicationRecord missing key %s; json = %s", key, out)
 		}
+	}
+
+	// Changelog entries must round-trip losslessly.
+	var decoded ApplicationRecord
+	if err := json.Unmarshal(out, &decoded); err != nil {
+		t.Fatalf("unmarshal redacted record: %v", err)
+	}
+	if decoded.TailorResult == nil {
+		t.Fatal("TailorResult nil after unmarshal")
+	}
+	if len(decoded.TailorResult.Changelog) != 2 {
+		t.Fatalf("Changelog length = %d, want 2", len(decoded.TailorResult.Changelog))
+	}
+	if decoded.TailorResult.Changelog[0].Action != "added" || decoded.TailorResult.Changelog[0].Keyword != "go" {
+		t.Errorf("Changelog[0] = %+v, unexpected", decoded.TailorResult.Changelog[0])
 	}
 
 	// The in-memory receiver must be unchanged after marshal.
