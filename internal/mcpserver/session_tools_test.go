@@ -452,12 +452,10 @@ func TestHandleFinalizeWithConfig_NeverTailored_NoTailorResultPersisted(t *testi
 	}
 }
 
-// TestHandleFinalizeWithConfig_TailoredSession_TailorResultAndChangelogPersisted verifies
-// that an ApplicationRecord with TailorResult and a Changelog marshals correctly:
-// tailor_result key is present, changelog entries are lossless, and tailored_text is redacted.
-// This tests the persistence artifact directly because injecting Changelog into session state
-// requires the Unit 3 submit_tailor handler (not yet implemented).
-func TestHandleFinalizeWithConfig_TailoredSession_TailorResultAndChangelogPersisted(t *testing.T) {
+// TestApplicationRecord_WithChangelog_MarshalRoundTrip verifies that an ApplicationRecord
+// carrying a TailorResult with Changelog marshals with tailor_result present, tailored_text
+// redacted, and Changelog entries lossless after unmarshal.
+func TestApplicationRecord_WithChangelog_MarshalRoundTrip(t *testing.T) {
 	changelog := []model.ChangelogEntry{
 		{Action: "added", Target: "skill", Keyword: "kubernetes", Reason: "required by JD"},
 		{Action: "rewrote", Target: "bullet", Keyword: "go", Reason: ""},
