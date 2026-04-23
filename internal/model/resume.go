@@ -37,6 +37,14 @@ type TailorResult struct {
 	TailoredText string       `json:"tailored_text,omitempty"`
 	Tier1Text    string       `json:"tier1_text,omitempty"`  // output of tier-1 keyword injection, always set when T1 runs
 	Tier1Score   *ScoreResult `json:"tier1_score,omitempty"` // score of tier-1 text; set by pipeline after TailorResume returns
+
+	// Changelog is the typed list of changes the LLM-driven tailor made.
+	// Empty for the codified tailor (which is unwired by feat/001-llm-tailor-swap).
+	Changelog []ChangelogEntry `json:"changelog,omitempty"`
+
+	// RawChangelog is the skill's original markdown changelog output, preserved
+	// verbatim for audit. May be empty if the LLM did not emit one.
+	RawChangelog string `json:"raw_changelog,omitempty"`
 }
 
 // ResumeChanges describes the mutations the tailor service applied to a resume.
