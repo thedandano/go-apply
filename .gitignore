@@ -17,6 +17,12 @@ coverage.out
 .worktrees/
 .claude/worktrees/
 
+# Local spec-kit harness (per-user, not shared) — skill defs, harness
+# scripts/templates/extensions, and generated feature specs live off-repo
+.claude/skills/speckit-*/
+.specify/
+specs/
+
 # Local retros (never committed)
 docs/retros/
 openspec/
