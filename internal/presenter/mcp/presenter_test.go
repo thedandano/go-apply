@@ -59,3 +59,26 @@ func TestCapturingPresenter_ShowTailorResult_Stores(t *testing.T) {
 		t.Errorf("TailorResult = %v, want %v", p.TailorResult, tailorResult)
 	}
 }
+
+func TestCapturingPresenter_ShowTailorResult_IncludesChangelog(t *testing.T) {
+	p := mcppres.New()
+	tailorResult := &model.TailorResult{
+		ResumeLabel: "main",
+		Changelog: []model.ChangelogEntry{
+			{Kind: model.ChangelogSkillAdd, Tier: model.ChangelogTier1, Keyword: "kubernetes"},
+		},
+	}
+
+	if err := p.ShowTailorResult(tailorResult); err != nil {
+		t.Fatalf("ShowTailorResult: %v", err)
+	}
+	if len(p.TailorResult.Changelog) != 1 {
+		t.Fatalf("Changelog len = %d, want 1", len(p.TailorResult.Changelog))
+	}
+	if p.TailorResult.Changelog[0].Kind != model.ChangelogSkillAdd {
+		t.Errorf("Kind = %v, want ChangelogSkillAdd", p.TailorResult.Changelog[0].Kind)
+	}
+	if p.TailorResult.Changelog[0].Keyword != "kubernetes" {
+		t.Errorf("Keyword = %q, want kubernetes", p.TailorResult.Changelog[0].Keyword)
+	}
+}

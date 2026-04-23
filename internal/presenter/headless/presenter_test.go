@@ -9,6 +9,7 @@ import (
 
 	"github.com/thedandano/go-apply/internal/model"
 	"github.com/thedandano/go-apply/internal/presenter/headless"
+	mcppres "github.com/thedandano/go-apply/internal/presenter/mcp"
 )
 
 func TestJSONPresenter_OnEvent_WritesToStderr(t *testing.T) {
@@ -125,6 +126,111 @@ func TestJSONPresenter_ShowTailorResult_OmitsTailoredTextWhenEmpty(t *testing.T)
 	}
 	if _, present := decoded["tailored_text"]; present {
 		t.Fatalf("tailored_text key should be absent when TailoredText is empty, but found it in output: %s", stdout.String())
+	}
+}
+
+func TestJSONPresenter_ShowTailorResult_IncludesChangelog(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	p := headless.NewWith(&stdout, &stderr)
+
+	res := &model.TailorResult{
+		ResumeLabel: "main",
+		Changelog: []model.ChangelogEntry{
+			{Kind: model.ChangelogSkillAdd, Tier: model.ChangelogTier1, Keyword: "kubernetes"},
+		},
+		RawChangelog: "raw-log",
+	}
+	if err := p.ShowTailorResult(res); err != nil {
+		t.Fatalf("ShowTailorResult: %v", err)
+	}
+
+	var decoded map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
+		t.Fatalf("stdout not valid JSON: %v — output: %s", err, stdout.String())
+	}
+
+	entries, ok := decoded["changelog"].([]any)
+	if !ok || len(entries) != 1 {
+		t.Fatalf("changelog: got %v (ok=%v), want 1-element array", decoded["changelog"], ok)
+	}
+	entry, _ := entries[0].(map[string]any)
+	if entry["kind"] != "skill_add" {
+		t.Errorf("entries[0].kind = %v, want skill_add", entry["kind"])
+	}
+	if entry["keyword"] != "kubernetes" {
+		t.Errorf("entries[0].keyword = %v, want kubernetes", entry["keyword"])
+	}
+
+	if decoded["raw_changelog"] != "raw-log" {
+		t.Errorf("raw_changelog = %v, want raw-log", decoded["raw_changelog"])
+	}
+}
+
+func TestTailorResult_ChangelogRendering(t *testing.T) {
+	entries := []model.ChangelogEntry{
+		{
+			Kind:    model.ChangelogSkillAdd,
+			Tier:    model.ChangelogTier1,
+			Keyword: "terraform",
+		},
+		{
+			Kind:   model.ChangelogBulletRewrite,
+			Tier:   model.ChangelogTier1,
+			Before: "old bullet",
+			After:  "new bullet",
+			Source: model.RewriteSourceAccomplishmentsDoc,
+		},
+		{
+			Kind:    model.ChangelogSkip,
+			Tier:    model.ChangelogTier2,
+			Keyword: "rust",
+			Reason:  model.SkipReasonNoBasisFound,
+		},
+		{
+			Kind: model.ChangelogSummaryUpdate,
+			Tier: model.ChangelogSummary,
+			Note: "updated summary to reflect leadership experience",
+		},
+	}
+	res := &model.TailorResult{ResumeLabel: "main", Changelog: entries}
+
+	// Headless: verify all four kinds serialise into JSON.
+	var stdout bytes.Buffer
+	hp := headless.NewWith(&stdout, &bytes.Buffer{})
+	if err := hp.ShowTailorResult(res); err != nil {
+		t.Fatalf("headless ShowTailorResult: %v", err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
+		t.Fatalf("headless output not valid JSON: %v — %s", err, stdout.String())
+	}
+	cl, ok := decoded["changelog"].([]any)
+	if !ok || len(cl) != 4 {
+		t.Fatalf("headless changelog: want 4 entries, got %v", decoded["changelog"])
+	}
+	wantKinds := []string{"skill_add", "bullet_rewrite", "skip", "summary_update"}
+	for i, want := range wantKinds {
+		e, _ := cl[i].(map[string]any)
+		if e["kind"] != want {
+			t.Errorf("headless cl[%d].kind = %v, want %v", i, e["kind"], want)
+		}
+	}
+
+	// MCP: verify all four entries round-trip through the capturing presenter.
+	mcp := mcppres.New()
+	if err := mcp.ShowTailorResult(res); err != nil {
+		t.Fatalf("mcp ShowTailorResult: %v", err)
+	}
+	if len(mcp.TailorResult.Changelog) != 4 {
+		t.Fatalf("mcp Changelog len = %d, want 4", len(mcp.TailorResult.Changelog))
+	}
+	for i, want := range []model.ChangelogKind{
+		model.ChangelogSkillAdd, model.ChangelogBulletRewrite,
+		model.ChangelogSkip, model.ChangelogSummaryUpdate,
+	} {
+		if mcp.TailorResult.Changelog[i].Kind != want {
+			t.Errorf("mcp cl[%d].Kind = %v, want %v", i, mcp.TailorResult.Changelog[i].Kind, want)
+		}
 	}
 }
 

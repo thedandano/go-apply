@@ -61,6 +61,42 @@ func TestApplicationRecord_MarshalJSON_NilTailorResult(t *testing.T) {
 	}
 }
 
+func TestApplicationRecord_MarshalJSON_ChangelogAndRawChangelogSurvive(t *testing.T) {
+	rec := ApplicationRecord{
+		URL: "https://example.com/job/999",
+		TailorResult: &TailorResult{
+			ResumeLabel:  "cv",
+			TailoredText: "must be redacted",
+			RawChangelog: "raw-log-data",
+			Changelog: []ChangelogEntry{
+				{Kind: ChangelogSkillAdd, Tier: ChangelogTier1, Keyword: "kubernetes"},
+			},
+		},
+	}
+
+	out, err := json.Marshal(&rec)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	s := string(out)
+
+	if strings.Contains(s, `"tailored_text"`) {
+		t.Errorf("tailored_text must be redacted; json = %s", s)
+	}
+	if !strings.Contains(s, `"raw_changelog"`) {
+		t.Errorf("raw_changelog must survive MarshalJSON; json = %s", s)
+	}
+	if !strings.Contains(s, `"changelog"`) {
+		t.Errorf("changelog must survive MarshalJSON; json = %s", s)
+	}
+	if !strings.Contains(s, `"skill_add"`) {
+		t.Errorf("changelog entry kind must be in JSON; json = %s", s)
+	}
+	if rec.TailorResult.TailoredText != "must be redacted" {
+		t.Errorf("in-memory TailoredText mutated; got %q", rec.TailorResult.TailoredText)
+	}
+}
+
 func TestApplicationRecord_MarshalJSON_PreservesOtherFields(t *testing.T) {
 	score := &ScoreResult{ResumeLabel: "cv"}
 	rec := ApplicationRecord{

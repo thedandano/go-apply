@@ -304,6 +304,22 @@ Update go-apply to the latest GitHub release. No flags.
 
 Print the go-apply version. No flags.
 
+## Maintaining the tailor prompt
+
+The `/resume-tailor` skill that drives LLM tailoring is vendored at
+`internal/mcpserver/skills/resume-tailor.md`. Keep it in sync with the
+grimoire source after every grimoire update:
+
+```bash
+make sync-tailor-prompt
+```
+
+The source path defaults to
+`~/workplace/the-scriptorium/grimoire/skills/resume-tailor/SKILL.md`.
+Override it with `RESUME_TAILOR_SKILL_SRC=/path/to/SKILL.md` if your
+grimoire lives elsewhere. The server panics at startup if the file is
+empty or missing (fail-fast by design).
+
 ## Roadmap
 
 | Feature | Status |
