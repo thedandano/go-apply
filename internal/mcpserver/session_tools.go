@@ -403,8 +403,18 @@ func HandleSubmitTailorT1WithConfig(ctx context.Context, req *mcp.CallToolReques
 	pl := pipeline.NewApplyPipeline(deps)
 
 	logger.Banner(ctx, slog.Default(), "Tailor", "T1")
-	tailored, addedKeywords := tailor.AddKeywordsToSkillsSection(baseText, skillAdds)
-	slog.InfoContext(ctx, "tailor T1 complete", "added_keywords", len(addedKeywords), "keywords", addedKeywords)
+	tailored, addedKeywords, skillsSectionFound := tailor.AddKeywordsToSkillsSection(baseText, skillAdds)
+	if !skillsSectionFound {
+		slog.WarnContext(ctx, "tailor T1: no skills section header found in resume — T1 was a no-op",
+			"session_id", sessionID, "skill_adds", len(skillAdds))
+	}
+	slog.InfoContext(ctx, "tailor T1 complete",
+		"added_keywords", len(addedKeywords),
+		"keywords", addedKeywords,
+		"skills_section_found", skillsSectionFound,
+		slog.Int("tailored_text_bytes", len(tailored)),
+		slog.Int("tailored_text_lines", lineCount(tailored)),
+	)
 	sess.TailoredText = tailored
 	sess.State = stateT1Applied
 
@@ -424,14 +434,18 @@ func HandleSubmitTailorT1WithConfig(ctx context.Context, req *mcp.CallToolReques
 	sess.ScoreResult.BestScore = newScoreTotal
 
 	type t1Data struct {
-		PreviousScore float64           `json:"previous_score"`
-		NewScore      model.ScoreResult `json:"new_score"`
-		AddedKeywords []string          `json:"added_keywords"`
+		PreviousScore      float64           `json:"previous_score"`
+		NewScore           model.ScoreResult `json:"new_score"`
+		AddedKeywords      []string          `json:"added_keywords"`
+		SkillsSectionFound bool              `json:"skills_section_found"`
+		TailoredText       string            `json:"tailored_text,omitempty"`
 	}
 	resultData := t1Data{
-		PreviousScore: previousScore,
-		NewScore:      newScore,
-		AddedKeywords: addedKeywords,
+		PreviousScore:      previousScore,
+		NewScore:           newScore,
+		AddedKeywords:      addedKeywords,
+		SkillsSectionFound: skillsSectionFound,
+		TailoredText:       sess.TailoredText,
 	}
 	resultBytes, _ := json.Marshal(resultData)
 	slog.DebugContext(ctx, "mcp tool result",
@@ -479,9 +493,9 @@ func HandleSubmitTailorT2WithConfig(ctx context.Context, req *mcp.CallToolReques
 		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t2", "session_not_found",
 			"session not found — call load_jd first", false))
 	}
-	if sess.State != stateScored && sess.State != stateT1Applied {
+	if sess.State != stateScored && sess.State != stateT1Applied && sess.State != stateT2Applied {
 		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t2", "invalid_state",
-			fmt.Sprintf("expected state %q or %q, got %q", stateScored, stateT1Applied, sess.State), false))
+			fmt.Sprintf("expected state %q, %q, or %q, got %q", stateScored, stateT1Applied, stateT2Applied, sess.State), false))
 	}
 
 	if deps == nil {
@@ -514,7 +528,11 @@ func HandleSubmitTailorT2WithConfig(ctx context.Context, req *mcp.CallToolReques
 
 	logger.Banner(ctx, slog.Default(), "Tailor", "T2")
 	tailored, substitutionsMade := tailor.ApplyBulletRewrites(baseText, rewrites)
-	slog.InfoContext(ctx, "tailor T2 complete", "substitutions_made", substitutionsMade)
+	slog.InfoContext(ctx, "tailor T2 complete",
+		"substitutions_made", substitutionsMade,
+		slog.Int("tailored_text_bytes", len(tailored)),
+		slog.Int("tailored_text_lines", lineCount(tailored)),
+	)
 	sess.TailoredText = tailored
 	sess.State = stateT2Applied
 
@@ -537,11 +555,13 @@ func HandleSubmitTailorT2WithConfig(ctx context.Context, req *mcp.CallToolReques
 		PreviousScore     float64           `json:"previous_score"`
 		NewScore          model.ScoreResult `json:"new_score"`
 		SubstitutionsMade int               `json:"substitutions_made"`
+		TailoredText      string            `json:"tailored_text,omitempty"`
 	}
 	resultData := t2Data{
 		PreviousScore:     previousScore,
 		NewScore:          newScore,
 		SubstitutionsMade: substitutionsMade,
+		TailoredText:      sess.TailoredText,
 	}
 	resultBytes, _ := json.Marshal(resultData)
 	slog.DebugContext(ctx, "mcp tool result",

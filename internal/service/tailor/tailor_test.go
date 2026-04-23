@@ -1,13 +1,16 @@
 package tailor
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"strings"
 	"testing"
 
 	"github.com/thedandano/go-apply/internal/config"
+	"github.com/thedandano/go-apply/internal/logger"
 	"github.com/thedandano/go-apply/internal/model"
 )
 
@@ -210,5 +213,171 @@ Python
 	// Verify TailoredText contains the rewritten content.
 	if !strings.Contains(result.TailoredText, "ahead of schedule") {
 		t.Errorf("TailoredText does not contain rewritten bullet content; got:\n%s", result.TailoredText)
+	}
+}
+
+// findLogRecord scans JSON log lines for the first record matching the given message.
+func findLogRecord(t *testing.T, buf *bytes.Buffer, msg string) map[string]any {
+	t.Helper()
+	for _, line := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
+		if line == "" {
+			continue
+		}
+		var rec map[string]any
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			t.Fatalf("failed to parse log line %q: %v", line, err)
+		}
+		if rec["msg"] == msg {
+			return rec
+		}
+	}
+	return nil
+}
+
+// TestTailorResume_CascadeCompleteInfoLog asserts the info summary log line is
+// emitted at the end of every cascade path with the correct attributes.
+func TestTailorResume_CascadeCompleteInfoLog(t *testing.T) {
+	defaults := defaultsForTest(t)
+
+	resume := "## Skills\nPython\n\n## Experience\n\n- Built distributed systems\n"
+	input := &model.TailorInput{
+		Resume:     model.ResumeFile{Label: "main"},
+		ResumeText: resume,
+		JD: model.JDData{
+			Required:  []string{"Golang"},
+			Preferred: []string{"Kubernetes"},
+		},
+		Options: model.TailorOptions{MaxTier2BulletRewrites: 0},
+	}
+
+	var buf bytes.Buffer
+	handler := slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo})
+	log := slog.New(handler)
+	svc := New(&stubLLMClient{response: "no-op"}, defaults, log)
+
+	result, err := svc.TailorResume(context.Background(), input)
+	if err != nil {
+		t.Fatalf("TailorResume: %v", err)
+	}
+
+	rec := findLogRecord(t, &buf, "tailor cascade complete")
+	if rec == nil {
+		t.Fatalf("expected 'tailor cascade complete' log record; got:\n%s", buf.String())
+	}
+
+	// tier_applied is logged as an int (TailorTier is int), decoded as float64 in JSON.
+	tierApplied, ok := rec["tier_applied"].(float64)
+	if !ok {
+		t.Errorf("tier_applied attribute missing or not a number; record: %v", rec)
+	} else if model.TailorTier(tierApplied) != result.TierApplied {
+		t.Errorf("tier_applied = %v, want %v", model.TailorTier(tierApplied), result.TierApplied)
+	}
+
+	// tailored_text_bytes must be a number equal to len(result.TailoredText).
+	bytesVal, ok := rec["tailored_text_bytes"].(float64)
+	if !ok {
+		t.Errorf("tailored_text_bytes attribute missing or not a number; record: %v", rec)
+	} else if int(bytesVal) != len(result.TailoredText) {
+		t.Errorf("tailored_text_bytes = %d, want %d", int(bytesVal), len(result.TailoredText))
+	}
+
+	// tailored_text_lines must be a number equal to lineCount(result.TailoredText).
+	linesVal, ok := rec["tailored_text_lines"].(float64)
+	if !ok {
+		t.Errorf("tailored_text_lines attribute missing or not a number; record: %v", rec)
+	} else if int(linesVal) != lineCount(result.TailoredText) {
+		t.Errorf("tailored_text_lines = %d, want %d", int(linesVal), lineCount(result.TailoredText))
+	}
+}
+
+// TestTailorResume_FinalTextDebugLog_VerboseOn asserts that, when verbose is on,
+// the debug "tailor final text" log carries the full tailored text.
+func TestTailorResume_FinalTextDebugLog_VerboseOn(t *testing.T) {
+	logger.SetVerbose(true)
+	t.Cleanup(func() { logger.SetVerbose(false) })
+
+	defaults := defaultsForTest(t)
+
+	resume := "## Skills\nPython\n\n## Experience\n\n- Built distributed systems\n"
+	input := &model.TailorInput{
+		Resume:     model.ResumeFile{Label: "main"},
+		ResumeText: resume,
+		JD: model.JDData{
+			Required: []string{"Golang"},
+		},
+		Options: model.TailorOptions{MaxTier2BulletRewrites: 0},
+	}
+
+	var buf bytes.Buffer
+	handler := slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})
+	log := slog.New(handler)
+	svc := New(&stubLLMClient{response: "no-op"}, defaults, log)
+
+	result, err := svc.TailorResume(context.Background(), input)
+	if err != nil {
+		t.Fatalf("TailorResume: %v", err)
+	}
+
+	rec := findLogRecord(t, &buf, "tailor final text")
+	if rec == nil {
+		t.Fatalf("expected 'tailor final text' debug record; got:\n%s", buf.String())
+	}
+
+	tailoredText, ok := rec["tailored_text"].(string)
+	if !ok {
+		t.Errorf("tailored_text attribute missing or not a string; record: %v", rec)
+	} else if tailoredText != result.TailoredText {
+		t.Errorf("tailored_text mismatch: got %q, want %q", tailoredText, result.TailoredText)
+	}
+}
+
+// TestTailorResume_FinalTextDebugLog_VerboseOff asserts that, when verbose is off,
+// the debug "tailor final text" log carries a truncated/redacted value, not the full text.
+func TestTailorResume_FinalTextDebugLog_VerboseOff(t *testing.T) {
+	logger.SetVerbose(false)
+
+	defaults := defaultsForTest(t)
+
+	// Build a resume long enough to exceed the 2048-byte payload limit so truncation fires.
+	longBullet := strings.Repeat("- Built distributed systems at global scale with many technologies\n", 40)
+	resume := "## Skills\nPython\n\n## Experience\n\n" + longBullet
+	input := &model.TailorInput{
+		Resume:     model.ResumeFile{Label: "main"},
+		ResumeText: resume,
+		JD: model.JDData{
+			Required: []string{"Golang"},
+		},
+		Options: model.TailorOptions{MaxTier2BulletRewrites: 0},
+	}
+
+	var buf bytes.Buffer
+	handler := slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})
+	log := slog.New(handler)
+	svc := New(&stubLLMClient{response: "no-op"}, defaults, log)
+
+	result, err := svc.TailorResume(context.Background(), input)
+	if err != nil {
+		t.Fatalf("TailorResume: %v", err)
+	}
+
+	rec := findLogRecord(t, &buf, "tailor final text")
+	if rec == nil {
+		t.Fatalf("expected 'tailor final text' debug record; got:\n%s", buf.String())
+	}
+
+	tailoredText, ok := rec["tailored_text"].(string)
+	if !ok {
+		t.Errorf("tailored_text attribute missing or not a string; record: %v", rec)
+		return
+	}
+
+	// When verbose is off, PayloadAttr truncates long text and inserts "bytes omitted".
+	if len(result.TailoredText) > 2048 {
+		if !strings.Contains(tailoredText, "bytes omitted") {
+			t.Errorf("expected truncated payload with 'bytes omitted' marker when verbose=false; got %q", tailoredText)
+		}
+		if tailoredText == result.TailoredText {
+			t.Errorf("expected tailored_text to be truncated when verbose=false, but got full text")
+		}
 	}
 }

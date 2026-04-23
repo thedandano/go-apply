@@ -195,6 +195,8 @@ Add to Claude Code `settings.json`:
 
 Available tools: `onboard_user`, `add_resume`, `get_config`, `update_config`, `load_jd`, `submit_keywords`, `submit_tailor_t1`, `submit_tailor_t2`, `finalize`
 
+Tailor tool responses (`submit_tailor_t1` / `submit_tailor_t2`) include the full rewritten resume as `tailored_text` in the response `data`, alongside score deltas and keyword/bullet metadata. Headless JSON output (`PipelineResult.cascade.tailored_text`) carries the same field. Note: `tailored_text` is the latest cascade state (post-T1 or post-T2); the separate `tier1_text` is a T1-only snapshot retained for T1→T2 score-delta reporting. The persisted on-disk application record excludes `tailored_text` by design.
+
 ### MCP setup command
 
 Instead of editing config files manually, use the setup command:

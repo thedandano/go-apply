@@ -83,6 +83,51 @@ func TestJSONPresenter_ShowTailorResult_WritesToStdout(t *testing.T) {
 	}
 }
 
+func TestJSONPresenter_ShowTailorResult_EmitsTailoredText(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	p := headless.NewWith(&stdout, &stderr)
+
+	res := &model.TailorResult{
+		ResumeLabel:  "my-resume",
+		TierApplied:  model.TierKeyword,
+		TailoredText: "resume body",
+	}
+	if err := p.ShowTailorResult(res); err != nil {
+		t.Fatalf("ShowTailorResult: %v", err)
+	}
+
+	var decoded map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	got, ok := decoded["tailored_text"].(string)
+	if !ok || got != "resume body" {
+		t.Fatalf("tailored_text: got %v (present=%v), want %q", got, ok, "resume body")
+	}
+}
+
+func TestJSONPresenter_ShowTailorResult_OmitsTailoredTextWhenEmpty(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	p := headless.NewWith(&stdout, &stderr)
+
+	res := &model.TailorResult{
+		ResumeLabel:  "my-resume",
+		TierApplied:  model.TierKeyword,
+		TailoredText: "",
+	}
+	if err := p.ShowTailorResult(res); err != nil {
+		t.Fatalf("ShowTailorResult: %v", err)
+	}
+
+	var decoded map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if _, present := decoded["tailored_text"]; present {
+		t.Fatalf("tailored_text key should be absent when TailoredText is empty, but found it in output: %s", stdout.String())
+	}
+}
+
 func TestJSONPresenter_ShowError_WritesToStderr(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	p := headless.NewWith(&stdout, &stderr)

@@ -3,6 +3,7 @@ package tailor
 import (
 	"context"
 	"log/slog"
+	"strings"
 
 	"github.com/thedandano/go-apply/internal/config"
 	"github.com/thedandano/go-apply/internal/debugdump"
@@ -10,6 +11,15 @@ import (
 	"github.com/thedandano/go-apply/internal/model"
 	"github.com/thedandano/go-apply/internal/port"
 )
+
+// lineCount returns the number of lines in s.
+// Returns 0 for the empty string, otherwise strings.Count(s, "\n") + 1.
+func lineCount(s string) int {
+	if s == "" {
+		return 0
+	}
+	return strings.Count(s, "\n") + 1
+}
 
 // Compile-time interface satisfaction check.
 var _ port.Tailor = (*Service)(nil)
@@ -42,8 +52,15 @@ func (s *Service) TailorResume(ctx context.Context, input *model.TailorInput) (m
 
 	// Tier-1: inject missing keywords into Skills section.
 	s.log.DebugContext(ctx, "tailor tier-1 start", "input_bytes", len(input.ResumeText), "keywords", len(allKeywords))
-	tier1Text, addedKeywords := AddKeywordsToSkillsSection(input.ResumeText, allKeywords)
-	s.log.DebugContext(ctx, "tailor tier-1 end", "output_bytes", len(tier1Text), "added_keywords", len(addedKeywords))
+	tier1Text, addedKeywords, skillsSectionFound := AddKeywordsToSkillsSection(input.ResumeText, allKeywords)
+	if !skillsSectionFound {
+		s.log.WarnContext(ctx, "tailor tier-1: no skills section header found in resume — T1 was a no-op",
+			"input_bytes", len(input.ResumeText))
+	}
+	s.log.DebugContext(ctx, "tailor tier-1 end",
+		"output_bytes", len(tier1Text),
+		"added_keywords", len(addedKeywords),
+		"skills_section_found", skillsSectionFound)
 
 	if logger.Verbose() {
 		if diff := debugdump.DiffSection("tailor.t1.skills", "Skills", input.ResumeText, tier1Text); diff != "" {
@@ -67,39 +84,49 @@ func (s *Service) TailorResume(ctx context.Context, input *model.TailorInput) (m
 		} else {
 			s.log.DebugContext(ctx, "tailor: applying tier-1 only — no accomplishments text")
 		}
-		return result, nil
+	} else {
+		tier2Input := &BulletRewriteInput{
+			Ctx:                 ctx,
+			LLM:                 s.llm,
+			Log:                 s.log,
+			ResumeText:          tier1Text,
+			JDKeywords:          allKeywords,
+			AccomplishmentsText: input.AccomplishmentsText,
+			Defaults:            s.defaults,
+			MaxRewrites:         input.Options.MaxTier2BulletRewrites,
+		}
+
+		// rewriteBullets handles per-bullet LLM errors internally (log + skip).
+		// attempted distinguishes "no keyword-matching bullets found" from "all LLM calls failed".
+		tier2Text, changes, attempted, _ := rewriteBullets(tier2Input)
+
+		result.BulletsAttempted = attempted
+
+		// If tier-2 produced changes, upgrade the result.
+		switch {
+		case len(changes) > 0:
+			s.log.DebugContext(ctx, "tailor: applied tier-2 — bullets rewritten", slog.Int("changes", len(changes)))
+			result.TierApplied = model.TierBullet
+			result.RewrittenBullets = changes
+			result.TailoredText = tier2Text
+		case attempted > 0:
+			// Every LLM call failed — degrade to tier-1 but signal the failure explicitly.
+			s.log.DebugContext(ctx, "tailor: degrading to tier-1 — all bullet LLM rewrites failed", slog.Int("attempted", attempted))
+		default:
+			s.log.DebugContext(ctx, "tailor: applying tier-1 only — no keyword-matching bullets found")
+		}
 	}
 
-	tier2Input := &BulletRewriteInput{
-		Ctx:                 ctx,
-		LLM:                 s.llm,
-		Log:                 s.log,
-		ResumeText:          tier1Text,
-		JDKeywords:          allKeywords,
-		AccomplishmentsText: input.AccomplishmentsText,
-		Defaults:            s.defaults,
-		MaxRewrites:         input.Options.MaxTier2BulletRewrites,
-	}
-
-	// rewriteBullets handles per-bullet LLM errors internally (log + skip).
-	// attempted distinguishes "no keyword-matching bullets found" from "all LLM calls failed".
-	tier2Text, changes, attempted, _ := rewriteBullets(tier2Input)
-
-	result.BulletsAttempted = attempted
-
-	// If tier-2 produced changes, upgrade the result.
-	switch {
-	case len(changes) > 0:
-		s.log.DebugContext(ctx, "tailor: applied tier-2 — bullets rewritten", slog.Int("changes", len(changes)))
-		result.TierApplied = model.TierBullet
-		result.RewrittenBullets = changes
-		result.TailoredText = tier2Text
-	case attempted > 0:
-		// Every LLM call failed — degrade to tier-1 but signal the failure explicitly.
-		s.log.DebugContext(ctx, "tailor: degrading to tier-1 — all bullet LLM rewrites failed", slog.Int("attempted", attempted))
-	default:
-		s.log.DebugContext(ctx, "tailor: applying tier-1 only — no keyword-matching bullets found")
-	}
+	// Summary log: emitted on every cascade completion path.
+	s.log.InfoContext(ctx, "tailor cascade complete",
+		"tier_applied", result.TierApplied,
+		"tailored_text_bytes", len(result.TailoredText),
+		"tailored_text_lines", lineCount(result.TailoredText),
+	)
+	// Verbose-gated full text for headless callers.
+	s.log.DebugContext(ctx, "tailor final text",
+		logger.PayloadAttr("tailored_text", result.TailoredText, logger.Verbose()),
+	)
 
 	return result, nil
 }
