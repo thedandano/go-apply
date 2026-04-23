@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/thedandano/go-apply/internal/service/llm"
 	"github.com/thedandano/go-apply/internal/service/pipeline"
 	"github.com/thedandano/go-apply/internal/service/scorer"
+	"github.com/thedandano/go-apply/internal/service/tailorllm"
 )
 
 // stubResumeRepo satisfies port.ResumeRepository.
@@ -193,16 +195,17 @@ func TestApplyPipeline_TailorStep(t *testing.T) {
 	llmClient := llm.New(llmSrv.URL, "test", "test", defaults, nil)
 
 	pl := pipeline.NewApplyPipeline(&pipeline.ApplyConfig{
-		Fetcher:   &stubJDFetcher{},
-		LLM:       llmClient,
-		Scorer:    scorer.New(defaults),
-		CLGen:     &stubCoverLetter{},
-		Resumes:   &stubResumeRepo{},
-		Loader:    &stubDocumentLoader{},
-		AppRepo:   &stubAppRepo{},
-		Presenter: pres,
-		Defaults:  defaults,
-		Tailor:    &stubTailorForApply{},
+		TailorLLMEnabled: true,
+		Fetcher:          &stubJDFetcher{},
+		LLM:              llmClient,
+		Scorer:           scorer.New(defaults),
+		CLGen:            &stubCoverLetter{},
+		Resumes:          &stubResumeRepo{},
+		Loader:           &stubDocumentLoader{},
+		AppRepo:          &stubAppRepo{},
+		Presenter:        pres,
+		Defaults:         defaults,
+		Tailor:           &stubTailorForApply{},
 	})
 
 	err = pl.Run(context.Background(), pipeline.ApplyRequest{
@@ -506,16 +509,17 @@ func TestApplyPipeline_TailorStep_Tier1ScoreSet(t *testing.T) {
 	llmClient := llm.New(llmSrv.URL, "test", "test", defaults, nil)
 
 	pl := pipeline.NewApplyPipeline(&pipeline.ApplyConfig{
-		Fetcher:   &stubJDFetcher{},
-		LLM:       llmClient,
-		Scorer:    scorer.New(defaults),
-		CLGen:     nil,
-		Resumes:   &stubResumeRepo{},
-		Loader:    &stubDocumentLoader{},
-		AppRepo:   &stubAppRepo{},
-		Presenter: pres,
-		Defaults:  defaults,
-		Tailor:    &stubTailorWithTier1Text{},
+		TailorLLMEnabled: true,
+		Fetcher:          &stubJDFetcher{},
+		LLM:              llmClient,
+		Scorer:           scorer.New(defaults),
+		CLGen:            nil,
+		Resumes:          &stubResumeRepo{},
+		Loader:           &stubDocumentLoader{},
+		AppRepo:          &stubAppRepo{},
+		Presenter:        pres,
+		Defaults:         defaults,
+		Tailor:           &stubTailorWithTier1Text{},
 	})
 
 	err = pl.Run(context.Background(), pipeline.ApplyRequest{
@@ -567,16 +571,17 @@ func TestApplyPipeline_PipelineResultContainsCascadeTailoredText(t *testing.T) {
 	llmClient := llm.New(llmSrv.URL, "test", "test", defaults, nil)
 
 	pl := pipeline.NewApplyPipeline(&pipeline.ApplyConfig{
-		Fetcher:   &stubJDFetcher{},
-		LLM:       llmClient,
-		Scorer:    scorer.New(defaults),
-		CLGen:     nil,
-		Resumes:   &stubResumeRepo{},
-		Loader:    &stubDocumentLoader{},
-		AppRepo:   &stubAppRepo{},
-		Presenter: pres,
-		Defaults:  defaults,
-		Tailor:    &stubTailorWithTier1Text{},
+		TailorLLMEnabled: true,
+		Fetcher:          &stubJDFetcher{},
+		LLM:              llmClient,
+		Scorer:           scorer.New(defaults),
+		CLGen:            nil,
+		Resumes:          &stubResumeRepo{},
+		Loader:           &stubDocumentLoader{},
+		AppRepo:          &stubAppRepo{},
+		Presenter:        pres,
+		Defaults:         defaults,
+		Tailor:           &stubTailorWithTier1Text{},
 	})
 
 	err = pl.Run(context.Background(), pipeline.ApplyRequest{
@@ -643,5 +648,168 @@ func TestScoreResumes_ReturnsScoresAndBest(t *testing.T) {
 	}
 	if result.BestLabel == "" {
 		t.Error("ScoreResumes returned empty BestLabel")
+	}
+}
+
+// spyTailor records whether TailorResume was called. Used by T023 to verify
+// the tailor step is bypassed when TailorLLMEnabled is false.
+type spyTailor struct {
+	called bool
+}
+
+var _ port.Tailor = (*spyTailor)(nil)
+
+func (s *spyTailor) TailorResume(_ context.Context, _ *model.TailorInput) (model.TailorResult, error) {
+	s.called = true
+	return model.TailorResult{TailoredText: "should not be returned"}, nil
+}
+
+// TestPipeline_TailorFlagOff_SkipsWithWarning verifies that when
+// ApplyConfig.TailorLLMEnabled is false the pipeline skips the tailor step
+// entirely — even when all other gate conditions (tailor wired,
+// AccomplishmentsText non-empty, BestResume set) would normally trigger it —
+// and appends a warning whose Message contains "tailor_llm disabled via flag".
+func TestPipeline_TailorFlagOff_SkipsWithWarning(t *testing.T) {
+	spy := &spyTailor{}
+	defaults, err := config.LoadDefaults()
+	if err != nil {
+		t.Fatalf("LoadDefaults: %v", err)
+	}
+
+	orch := &stubOrchestrator{
+		jd: model.JDData{
+			Title:     "Go Engineer",
+			Company:   "Acme",
+			Required:  []string{"golang", "kubernetes"},
+			Preferred: []string{"docker"},
+			Seniority: model.SenioritySenior,
+		},
+	}
+
+	pres := &capturingPresenter{}
+	pl := pipeline.NewApplyPipeline(&pipeline.ApplyConfig{
+		TailorLLMEnabled: false, // compile error until T028 adds this field
+		Fetcher:          &stubJDFetcher{},
+		LLM:              nil,
+		Scorer:           scorer.New(defaults),
+		CLGen:            nil,
+		Resumes:          &stubResumeRepo{},
+		Loader:           &stubDocumentLoader{},
+		AppRepo:          &stubAppRepo{},
+		Presenter:        pres,
+		Defaults:         defaults,
+		Tailor:           spy,
+		Orchestrator:     orch,
+	})
+
+	err = pl.Run(context.Background(), pipeline.ApplyRequest{
+		URLOrText:           "Senior Go engineer role",
+		IsText:              true,
+		Channel:             model.ChannelCold,
+		Config:              &config.Config{YearsOfExperience: 5, DefaultSeniority: "senior"},
+		AccomplishmentsText: "accomplishments text",
+	})
+	if err != nil {
+		t.Fatalf("unexpected pipeline error: %v", err)
+	}
+
+	if spy.called {
+		t.Error("spy.TailorResume was called — expected it to be skipped when TailorLLMEnabled=false")
+	}
+
+	if pres.result == nil {
+		t.Fatal("expected a pipeline result, got nil")
+	}
+
+	found := false
+	for _, w := range pres.result.Warnings {
+		if strings.Contains(w.Message, "tailor_llm disabled via flag") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected a warning containing %q in result.Warnings, got: %v",
+			"tailor_llm disabled via flag", pres.result.Warnings)
+	}
+}
+
+// TestPipelineImports_NoCodifiedTailor asserts that internal/service/pipeline
+// has been severed from the codified internal/service/tailor package (SC-002).
+func TestPipelineImports_NoCodifiedTailor(t *testing.T) {
+	out, err := exec.Command(
+		"go", "list", "-f", "{{range .Imports}}{{.}}\n{{end}}",
+		"github.com/thedandano/go-apply/internal/service/pipeline",
+	).CombinedOutput()
+	if err != nil {
+		t.Fatalf("go list failed: %v\noutput: %s", err, out)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if strings.Contains(line, "internal/service/tailor") && !strings.Contains(line, "tailorllm") {
+			t.Errorf("pipeline still imports codified tailor package: %q", line)
+		}
+	}
+}
+
+// TestPipeline_HeadlessSkipsTailor_WithWarning verifies that when HeadlessNullTailor
+// is wired and TailorLLMEnabled is true, the tailor step runs, immediately fails with
+// ErrHeadlessTailorNotImplemented, and the pipeline appends a warning rather than failing.
+func TestPipeline_HeadlessSkipsTailor_WithWarning(t *testing.T) {
+	defaults, err := config.LoadDefaults()
+	if err != nil {
+		t.Fatalf("LoadDefaults: %v", err)
+	}
+
+	orch := &stubOrchestrator{
+		jd: model.JDData{
+			Title:     "Go Engineer",
+			Company:   "Acme",
+			Required:  []string{"golang", "kubernetes"},
+			Preferred: []string{"docker"},
+			Seniority: model.SenioritySenior,
+		},
+	}
+
+	pres := &capturingPresenter{}
+	pl := pipeline.NewApplyPipeline(&pipeline.ApplyConfig{
+		TailorLLMEnabled: true,
+		Fetcher:          &stubJDFetcher{},
+		LLM:              nil,
+		Scorer:           scorer.New(defaults),
+		CLGen:            nil,
+		Resumes:          &stubResumeRepo{},
+		Loader:           &stubDocumentLoader{},
+		AppRepo:          &stubAppRepo{},
+		Presenter:        pres,
+		Defaults:         defaults,
+		Tailor:           &tailorllm.HeadlessNullTailor{},
+		Orchestrator:     orch,
+	})
+
+	err = pl.Run(context.Background(), pipeline.ApplyRequest{
+		URLOrText:           "Senior Go engineer role",
+		IsText:              true,
+		Channel:             model.ChannelCold,
+		Config:              &config.Config{YearsOfExperience: 5, DefaultSeniority: "senior"},
+		AccomplishmentsText: "accomplishments text",
+	})
+	if err != nil {
+		t.Fatalf("unexpected pipeline error: %v", err)
+	}
+
+	if pres.result == nil {
+		t.Fatal("expected a pipeline result, got nil")
+	}
+
+	found := false
+	for _, w := range pres.result.Warnings {
+		if strings.Contains(w.Message, "headless-mode tailor not implemented") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected a warning containing %q in result.Warnings, got: %v",
+			"headless-mode tailor not implemented", pres.result.Warnings)
 	}
 }

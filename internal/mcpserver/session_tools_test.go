@@ -7,8 +7,10 @@ import (
 	"errors"
 	"log/slog"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/thedandano/go-apply/internal/config"
 	"github.com/thedandano/go-apply/internal/logger"
@@ -16,6 +18,7 @@ import (
 	"github.com/thedandano/go-apply/internal/model"
 	"github.com/thedandano/go-apply/internal/port"
 	"github.com/thedandano/go-apply/internal/service/pipeline"
+	"github.com/thedandano/go-apply/internal/service/tailorllm"
 )
 
 // stubApplyConfigForSession returns an ApplyConfig with all stubs and no Presenter set.
@@ -1179,5 +1182,415 @@ func TestNextActionFromScore(t *testing.T) {
 		if got != c.want {
 			t.Errorf("NextActionFromScore(%v) = %q, want %q", c.score, got, c.want)
 		}
+	}
+}
+
+// ── HandleTailorBegin / HandleTailorSubmit tests (T014–T020) ─────────────────
+
+func TestHandleTailorBegin_HappyPath(t *testing.T) {
+	store := mcpserver.NewTailorSessionStore()
+	req := callToolRequest("tailor_begin", map[string]any{
+		"resume_text":          "resume content",
+		"accomplishments_text": "my accomplishments",
+		"jd":                   "{}",
+		"score_before":         "{}",
+		"options":              "{}",
+	})
+	result := mcpserver.HandleTailorBeginWithStore(context.Background(), &req, store, "mock-prompt-body")
+	text := extractText(t, result)
+
+	var env map[string]any
+	if err := json.Unmarshal([]byte(text), &env); err != nil {
+		t.Fatalf("response is not JSON: %v — raw: %s", err, text)
+	}
+	if env["status"] != "ok" {
+		t.Errorf("status = %v, want ok — full: %s", env["status"], text)
+	}
+	data, _ := env["data"].(map[string]any)
+	if data == nil {
+		t.Fatal("expected data in response")
+	}
+	sessionID, _ := data["session_id"].(string)
+	if sessionID == "" {
+		t.Error("expected non-empty session_id in data")
+	}
+	promptBundle, _ := data["prompt_bundle"].(string)
+	if promptBundle == "" {
+		t.Error("expected non-empty prompt_bundle in data")
+	}
+}
+
+func TestHandleTailorBegin_MissingResumeText(t *testing.T) {
+	store := mcpserver.NewTailorSessionStore()
+	req := callToolRequest("tailor_begin", map[string]any{
+		"resume_text":          "",
+		"accomplishments_text": "my accomplishments",
+		"jd":                   "{}",
+		"score_before":         "{}",
+		"options":              "{}",
+	})
+	result := mcpserver.HandleTailorBeginWithStore(context.Background(), &req, store, "mock-prompt-body")
+	text := extractText(t, result)
+
+	var env map[string]any
+	if err := json.Unmarshal([]byte(text), &env); err != nil {
+		t.Fatalf("response is not JSON: %v — raw: %s", err, text)
+	}
+	if env["status"] != "error" {
+		t.Errorf("status = %v, want error — full: %s", env["status"], text)
+	}
+	errObj, _ := env["error"].(map[string]any)
+	if errObj == nil || errObj["code"] != "invalid_input" {
+		t.Errorf("expected code invalid_input, got: %v", errObj)
+	}
+}
+
+func TestHandleTailorSubmit_HappyPath(t *testing.T) {
+	store := mcpserver.NewTailorSessionStore()
+	input := &model.TailorInput{ResumeText: "original resume"}
+	id, err := store.Open("bundle", input, 5*time.Second)
+	if err != nil {
+		t.Fatalf("Open: unexpected error: %v", err)
+	}
+
+	changelog := []map[string]any{
+		{"kind": "skill_add", "tier": "tier_1", "keyword": "Go"},
+		{"kind": "skip", "tier": "tier_1", "keyword": "Rust", "reason": "no_basis_found"},
+	}
+	changelogJSON, err := json.Marshal(changelog)
+	if err != nil {
+		t.Fatalf("marshal changelog: %v", err)
+	}
+
+	req := callToolRequest("tailor_submit", map[string]any{
+		"session_id":    id,
+		"tailored_text": "tailored content",
+		"changelog":     string(changelogJSON),
+	})
+	result := mcpserver.HandleTailorSubmitWithStore(context.Background(), &req, store)
+	text := extractText(t, result)
+
+	var env map[string]any
+	if err := json.Unmarshal([]byte(text), &env); err != nil {
+		t.Fatalf("response is not JSON: %v — raw: %s", err, text)
+	}
+	if env["status"] != "ok" {
+		t.Errorf("status = %v, want ok — full: %s", env["status"], text)
+	}
+	data, _ := env["data"].(map[string]any)
+	if data == nil {
+		t.Fatal("expected data in response")
+	}
+	if data["acknowledged"] != true {
+		t.Errorf("acknowledged = %v, want true", data["acknowledged"])
+	}
+
+	waitResult, waitErr := store.Wait(context.Background(), id)
+	if waitErr != nil {
+		t.Fatalf("Wait returned error: %v", waitErr)
+	}
+	if waitResult.TailoredText != "tailored content" {
+		t.Errorf("TailoredText = %q, want %q", waitResult.TailoredText, "tailored content")
+	}
+	if len(waitResult.Changelog) != 2 {
+		t.Errorf("len(Changelog) = %d, want 2", len(waitResult.Changelog))
+	}
+}
+
+func TestHandleTailorSubmit_UnknownSession(t *testing.T) {
+	store := mcpserver.NewTailorSessionStore()
+	req := callToolRequest("tailor_submit", map[string]any{
+		"session_id":    "nonexistent",
+		"tailored_text": "x",
+		"changelog":     "[]",
+	})
+	result := mcpserver.HandleTailorSubmitWithStore(context.Background(), &req, store)
+	text := extractText(t, result)
+
+	var env map[string]any
+	if err := json.Unmarshal([]byte(text), &env); err != nil {
+		t.Fatalf("response is not JSON: %v — raw: %s", err, text)
+	}
+	if env["status"] != "error" {
+		t.Errorf("status = %v, want error — full: %s", env["status"], text)
+	}
+	errObj, _ := env["error"].(map[string]any)
+	if errObj == nil || errObj["code"] != "unknown_session" {
+		t.Errorf("expected code unknown_session, got: %v", errObj)
+	}
+}
+
+func TestHandleTailorSubmit_ExpiredSession(t *testing.T) {
+	store := mcpserver.NewTailorSessionStore()
+	input := &model.TailorInput{}
+	id, err := store.Open("bundle", input, 1*time.Millisecond)
+	if err != nil {
+		t.Fatalf("Open: unexpected error: %v", err)
+	}
+	time.Sleep(10 * time.Millisecond)
+
+	req := callToolRequest("tailor_submit", map[string]any{
+		"session_id":    id,
+		"tailored_text": "x",
+		"changelog":     "[]",
+	})
+	result := mcpserver.HandleTailorSubmitWithStore(context.Background(), &req, store)
+	text := extractText(t, result)
+
+	var env map[string]any
+	if err := json.Unmarshal([]byte(text), &env); err != nil {
+		t.Fatalf("response is not JSON: %v — raw: %s", err, text)
+	}
+	if env["status"] != "error" {
+		t.Errorf("status = %v, want error — full: %s", env["status"], text)
+	}
+	errObj, _ := env["error"].(map[string]any)
+	if errObj == nil || errObj["code"] != "session_expired" {
+		t.Errorf("expected code session_expired, got: %v", errObj)
+	}
+}
+
+func TestHandleTailorSubmit_AlreadyConsumed(t *testing.T) {
+	store := mcpserver.NewTailorSessionStore()
+	input := &model.TailorInput{}
+	id, err := store.Open("bundle", input, 5*time.Second)
+	if err != nil {
+		t.Fatalf("Open: unexpected error: %v", err)
+	}
+
+	changelog := []map[string]any{
+		{"kind": "skill_add", "tier": "tier_1", "keyword": "Go"},
+	}
+	changelogJSON, err := json.Marshal(changelog)
+	if err != nil {
+		t.Fatalf("marshal changelog: %v", err)
+	}
+
+	req1 := callToolRequest("tailor_submit", map[string]any{
+		"session_id":    id,
+		"tailored_text": "first tailored text",
+		"changelog":     string(changelogJSON),
+	})
+	firstResult := mcpserver.HandleTailorSubmitWithStore(context.Background(), &req1, store)
+	firstText := extractText(t, firstResult)
+	var firstEnv map[string]any
+	if err := json.Unmarshal([]byte(firstText), &firstEnv); err != nil {
+		t.Fatalf("first submit response is not JSON: %v", err)
+	}
+	if firstEnv["status"] != "ok" {
+		t.Fatalf("first submit status = %v, want ok — full: %s", firstEnv["status"], firstText)
+	}
+
+	req2 := callToolRequest("tailor_submit", map[string]any{
+		"session_id":    id,
+		"tailored_text": "second tailored text",
+		"changelog":     string(changelogJSON),
+	})
+	result := mcpserver.HandleTailorSubmitWithStore(context.Background(), &req2, store)
+	text := extractText(t, result)
+
+	var env map[string]any
+	if err := json.Unmarshal([]byte(text), &env); err != nil {
+		t.Fatalf("response is not JSON: %v — raw: %s", err, text)
+	}
+	if env["status"] != "error" {
+		t.Errorf("status = %v, want error — full: %s", env["status"], text)
+	}
+	errObj, _ := env["error"].(map[string]any)
+	if errObj == nil || errObj["code"] != "session_already_consumed" {
+		t.Errorf("expected code session_already_consumed, got: %v", errObj)
+	}
+}
+
+func TestHandleTailorSubmit_OversizeKeyword(t *testing.T) {
+	store := mcpserver.NewTailorSessionStore()
+	input := &model.TailorInput{}
+	id, err := store.Open("bundle", input, 5*time.Second)
+	if err != nil {
+		t.Fatalf("Open: unexpected error: %v", err)
+	}
+
+	oversizeKeyword := strings.Repeat("a", 129)
+	changelog := []map[string]any{
+		{"kind": "skill_add", "tier": "tier_1", "keyword": oversizeKeyword},
+	}
+	changelogJSON, err := json.Marshal(changelog)
+	if err != nil {
+		t.Fatalf("marshal changelog: %v", err)
+	}
+
+	req := callToolRequest("tailor_submit", map[string]any{
+		"session_id":    id,
+		"tailored_text": "tailored content",
+		"changelog":     string(changelogJSON),
+	})
+	result := mcpserver.HandleTailorSubmitWithStore(context.Background(), &req, store)
+	text := extractText(t, result)
+
+	var env map[string]any
+	if err := json.Unmarshal([]byte(text), &env); err != nil {
+		t.Fatalf("response is not JSON: %v — raw: %s", err, text)
+	}
+	if env["status"] != "error" {
+		t.Errorf("status = %v, want error — full: %s", env["status"], text)
+	}
+	errObj, _ := env["error"].(map[string]any)
+	if errObj == nil || errObj["code"] != "invalid_changelog" {
+		t.Errorf("expected code invalid_changelog, got: %v", errObj)
+	}
+	if errObj != nil {
+		msg, _ := errObj["message"].(string)
+		if !strings.Contains(msg, "Keyword") {
+			t.Errorf("expected error message to contain 'Keyword', got: %q", msg)
+		}
+	}
+}
+
+// ── logSink: in-memory slog handler for log attribute assertions ──────────────
+
+type logSink struct {
+	mu      sync.Mutex
+	records []slog.Record
+}
+
+func (l *logSink) Enabled(_ context.Context, _ slog.Level) bool { return true }
+
+func (l *logSink) Handle(_ context.Context, r slog.Record) error { //nolint:gocritic // slog.Handler interface mandates value receiver
+	l.mu.Lock()
+	l.records = append(l.records, r.Clone())
+	l.mu.Unlock()
+	return nil
+}
+
+func (l *logSink) WithAttrs(_ []slog.Attr) slog.Handler { return l }
+func (l *logSink) WithGroup(_ string) slog.Handler      { return l }
+
+func (l *logSink) findRecord(msg string) (*slog.Record, bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for i := range l.records {
+		if l.records[i].Message == msg {
+			return &l.records[i], true
+		}
+	}
+	return nil, false
+}
+
+func (l *logSink) hasAttr(r *slog.Record, key, value string) bool {
+	found := false
+	r.Attrs(func(a slog.Attr) bool {
+		if a.Key == key && a.Value.String() == value {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
+}
+
+// ── fakeSessionStore: satisfies tailorllm.TailorStore ────────────────────────
+
+type fakeSessionStore struct {
+	openFunc func(bundle string, input *model.TailorInput, timeout time.Duration) (string, error)
+	waitFunc func(ctx context.Context, id string) (model.TailorResult, error)
+}
+
+func (f *fakeSessionStore) Open(bundle string, input *model.TailorInput, timeout time.Duration) (string, error) {
+	return f.openFunc(bundle, input, timeout)
+}
+
+func (f *fakeSessionStore) Wait(ctx context.Context, id string) (model.TailorResult, error) {
+	return f.waitFunc(ctx, id)
+}
+
+// ── T029/T030: TestLogAttributes_TailorLifecycle ──────────────────────────────
+
+func TestLogAttributes_TailorLifecycle(t *testing.T) {
+	sink := &logSink{}
+	origLogger := slog.Default()
+	slog.SetDefault(slog.New(sink))
+	t.Cleanup(func() { slog.SetDefault(origLogger) })
+
+	store := mcpserver.NewTailorSessionStore()
+
+	// --- tailor_begin ---
+	req := callToolRequest("tailor_begin", map[string]any{
+		"resume_text":          "resume body",
+		"accomplishments_text": "accomplishments",
+	})
+	result := mcpserver.HandleTailorBeginWithStore(context.Background(), &req, store, "prompt-body")
+	text := extractText(t, result)
+	var beginEnv map[string]any
+	if err := json.Unmarshal([]byte(text), &beginEnv); err != nil || beginEnv["status"] != "ok" {
+		t.Fatalf("tailor_begin failed: %s", text)
+	}
+	data, _ := beginEnv["data"].(map[string]any)
+	sessionID, _ := data["session_id"].(string)
+
+	r, ok := sink.findRecord("tailor_begin")
+	if !ok {
+		t.Error("expected tailor_begin INFO log record")
+	} else if !sink.hasAttr(r, "session_id", sessionID) {
+		t.Errorf("tailor_begin log missing session_id=%q", sessionID)
+	}
+
+	// --- tailor_submit ---
+	changelog := []map[string]any{{"kind": "skill_add", "tier": "tier_1", "keyword": "Go"}}
+	changelogJSON, _ := json.Marshal(changelog)
+	req2 := callToolRequest("tailor_submit", map[string]any{
+		"session_id":    sessionID,
+		"tailored_text": "tailored body",
+		"changelog":     string(changelogJSON),
+	})
+	result2 := mcpserver.HandleTailorSubmitWithStore(context.Background(), &req2, store)
+	text2 := extractText(t, result2)
+	var submitEnv map[string]any
+	if err := json.Unmarshal([]byte(text2), &submitEnv); err != nil || submitEnv["status"] != "ok" {
+		t.Fatalf("tailor_submit failed: %s", text2)
+	}
+
+	r2, ok := sink.findRecord("tailor_submit")
+	if !ok {
+		t.Error("expected tailor_submit INFO log record")
+	} else if !sink.hasAttr(r2, "session_id", sessionID) {
+		t.Errorf("tailor_submit log missing session_id=%q", sessionID)
+	}
+
+	// --- tailor_timeout ---
+	expiredStore := &fakeSessionStore{
+		openFunc: func(_ string, _ *model.TailorInput, _ time.Duration) (string, error) {
+			return "timeout-session", nil
+		},
+		waitFunc: func(_ context.Context, _ string) (model.TailorResult, error) {
+			return model.TailorResult{}, errors.New("tailor session expired")
+		},
+	}
+	llmTailor := tailorllm.New(tailorllm.Config{Timeout: 5 * time.Second, PromptBody: "p"}, expiredStore)
+	_, _ = llmTailor.TailorResume(context.Background(), &model.TailorInput{ResumeText: "r"})
+
+	r3, ok := sink.findRecord("tailor_timeout")
+	if !ok {
+		t.Error("expected tailor_timeout INFO log record")
+	} else if !sink.hasAttr(r3, "session_id", "timeout-session") {
+		t.Errorf("tailor_timeout log missing session_id")
+	}
+
+	// --- tailor_error ---
+	errStore := &fakeSessionStore{
+		openFunc: func(_ string, _ *model.TailorInput, _ time.Duration) (string, error) {
+			return "error-session", nil
+		},
+		waitFunc: func(_ context.Context, _ string) (model.TailorResult, error) {
+			return model.TailorResult{}, errors.New("network failure")
+		},
+	}
+	llmTailor2 := tailorllm.New(tailorllm.Config{Timeout: 5 * time.Second, PromptBody: "p"}, errStore)
+	_, _ = llmTailor2.TailorResume(context.Background(), &model.TailorInput{ResumeText: "r"})
+
+	r4, ok := sink.findRecord("tailor_error")
+	if !ok {
+		t.Error("expected tailor_error INFO log record")
+	} else if !sink.hasAttr(r4, "session_id", "error-session") {
+		t.Errorf("tailor_error log missing session_id")
 	}
 }
