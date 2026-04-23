@@ -117,6 +117,22 @@ func NewServer() *server.MCPServer {
 		},
 	)
 
+	// ── Prompts ───────────────────────────────────────────────────────────────
+
+	srv.AddPrompt(
+		mcp.NewPrompt("tailor_resume",
+			mcp.WithPromptDescription("Guide for tailoring the candidate's resume to the current JD. Follow the Golden Rule verbatim; submit the result via `submit_tailored_resume`."),
+		),
+		func(_ context.Context, _ mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+			return &mcp.GetPromptResult{
+				Description: "Guide for tailoring the candidate's resume to the current JD. Follow the Golden Rule verbatim; submit the result via `submit_tailored_resume`.",
+				Messages: []mcp.PromptMessage{
+					mcp.NewPromptMessage(mcp.RoleUser, mcp.NewTextContent(tailorResumePromptText)),
+				},
+			}, nil
+		},
+	)
+
 	return srv
 }
 
