@@ -436,6 +436,116 @@ func TestDiskStore_SessionID_Entropy(t *testing.T) {
 	}
 }
 
+// TestDiskStore_Update_NoTruncateOnContention verifies that a failed Update (due to
+// lock contention) does NOT corrupt the existing session file on disk.
+// The file must be byte-identical to its pre-Update contents after the contending
+// Update returns ErrSessionLocked.
+func TestDiskStore_Update_NoTruncateOnContention(t *testing.T) {
+	store, sessDir := newTestDiskStore(t)
+	ctx := context.Background()
+
+	// Create a session and capture its serialised form.
+	sess, err := store.Create(ctx, "jd for truncation guard test")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	path := filepath.Join(sessDir, sess.ID+".json")
+	originalBytes, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read original file: %v", err)
+	}
+	if len(originalBytes) == 0 {
+		t.Fatal("original session file is empty — unexpected")
+	}
+
+	// Hold an exclusive flock on a separate FD to simulate contention.
+	holder, err := os.OpenFile(path, os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatalf("open holder fd: %v", err)
+	}
+	defer holder.Close() //nolint:errcheck
+
+	if lockErr := syscall.Flock(int(holder.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); lockErr != nil {
+		t.Skipf("flock unavailable on this platform/fs: %v", lockErr)
+	}
+
+	// Attempt Update while lock is held — must return ErrSessionLocked.
+	clone := *sess
+	clone.State = sessionstore.StateScored
+	updateErr := store.Update(ctx, &clone)
+
+	// Release the holder lock.
+	_ = syscall.Flock(int(holder.Fd()), syscall.LOCK_UN)
+
+	if !errors.Is(updateErr, sessionstore.ErrSessionLocked) {
+		t.Fatalf("expected ErrSessionLocked, got: %v", updateErr)
+	}
+
+	// The on-disk file MUST be unchanged — not truncated, not corrupted.
+	afterBytes, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read file after contended Update: %v", err)
+	}
+	if !bytes.Equal(originalBytes, afterBytes) {
+		t.Errorf("file was modified despite ErrSessionLocked\nbefore (%d bytes): %s\nafter  (%d bytes): %s",
+			len(originalBytes), originalBytes, len(afterBytes), afterBytes)
+	}
+}
+
+// TestDiskStore_Get_DuringUpdate_ReturnsPriorOrNewState verifies that concurrent
+// Get calls during an Update never observe a torn/partial file.
+// With atomic rename, Get sees either the old complete file or the new complete one.
+func TestDiskStore_Get_DuringUpdate_ReturnsPriorOrNewState(t *testing.T) {
+	store, _ := newTestDiskStore(t)
+	ctx := context.Background()
+
+	sess, err := store.Create(ctx, "jd for concurrent get/update test")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	const iterations = 50
+	var wg sync.WaitGroup
+
+	// Concurrent updaters.
+	for i := range iterations {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			clone := *sess
+			if i%2 == 0 {
+				clone.State = sessionstore.StateScored
+			} else {
+				clone.State = sessionstore.StateTailored
+			}
+			_ = store.Update(ctx, &clone) // ignore lock contention errors
+		}(i)
+	}
+
+	// Concurrent readers — must never see a decode error.
+	for range iterations {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			got, _, err := store.Get(ctx, sess.ID)
+			if err != nil {
+				t.Errorf("Get during concurrent Update returned error: %v", err)
+			}
+			if got != nil {
+				switch got.State {
+				case sessionstore.StateLoaded, sessionstore.StateScored, sessionstore.StateTailored:
+					// all valid states the file may be in
+				default:
+					t.Errorf("Get returned session with unexpected state %q", got.State)
+				}
+			}
+		}()
+	}
+
+	wg.Wait()
+}
+
 func TestDiskStore_SessionFile_ValidJSON(t *testing.T) {
 	store, sessDir := newTestDiskStore(t)
 	ctx := context.Background()

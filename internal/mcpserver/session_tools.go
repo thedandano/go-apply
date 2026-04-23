@@ -79,7 +79,9 @@ func HandleLoadJDWithConfig(ctx context.Context, req *mcp.CallToolRequest, deps 
 	sess.URL = jdURL
 	sess.IsText = isText
 	if err := store.Update(ctx, sess); err != nil {
-		slog.WarnContext(ctx, "load_jd: persist session metadata failed", "session_id", sess.ID, "error", err)
+		slog.ErrorContext(ctx, "load_jd: persist session metadata failed", "session_id", sess.ID, "error", err)
+		return envelopeResult(stageErrorEnvelope(sess.ID, "load_jd", "session_error",
+			"failed to persist session; retry after brief delay", true))
 	}
 	logger.Banner(ctx, slog.Default(), "Session", sess.ID)
 
@@ -175,7 +177,9 @@ func HandleSubmitKeywordsWithConfig(ctx context.Context, req *mcp.CallToolReques
 	sess.ScoreResult = scored
 	sess.State = sessionstore.StateScored
 	if updateErr := store.Update(ctx, sess); updateErr != nil {
-		slog.WarnContext(ctx, "submit_keywords: persist session failed", "session_id", sessionID, "error", updateErr)
+		slog.ErrorContext(ctx, "submit_keywords: persist session failed", "session_id", sessionID, "error", updateErr)
+		return envelopeResult(stageErrorEnvelope(sessionID, "submit_keywords", "session_error",
+			"failed to persist session; retry after brief delay", true))
 	}
 
 	nextAction := NextActionFromScore(scored.BestScore)
@@ -250,48 +254,52 @@ func HandleFinalizeWithConfig(ctx context.Context, req *mcp.CallToolRequest, dep
 		return envelopeResult(stageErrorEnvelope(sessionID, "finalize", "session_not_found",
 			"session not found — call load_jd first", false))
 	}
-	if sess.State == sessionstore.StateLoaded {
+	if sess.State == sessionstore.StateLoaded || sess.State == sessionstore.StateFinalized {
 		return envelopeResult(stageErrorEnvelope(sessionID, "finalize", "invalid_state",
-			fmt.Sprintf("session must be scored before finalize; current state: %q", sess.State), false))
+			fmt.Sprintf("cannot finalize session in state %q; session already finalized or not yet scored", sess.State), false))
 	}
 
 	// Persist the application record for URL-based flows.
 	if sess.URL != "" {
 		if deps == nil {
-			_, liveDeps, err := loadDeps()
-			if err == nil {
-				deps = &liveDeps
+			_, liveDeps, loadErr := loadDeps()
+			if loadErr != nil {
+				slog.ErrorContext(ctx, "finalize: load deps failed", "session_id", sessionID, "error", loadErr)
+				return envelopeResult(stageErrorEnvelope(sessionID, "finalize", "config_error", loadErr.Error(), true))
+			}
+			deps = &liveDeps
+		}
+		pres := mcppres.New()
+		deps.Presenter = pres
+		rec := &model.ApplicationRecord{
+			URL:         sess.URL,
+			RawText:     sess.JDText,
+			JD:          sess.JD,
+			CoverLetter: coverLetter,
+		}
+		if bestScore, ok := sess.ScoreResult.Scores[sess.ScoreResult.BestLabel]; ok {
+			rec.Score = &bestScore
+			rec.ResumeLabel = sess.ScoreResult.BestLabel
+		}
+		if sess.TailoredText != "" || len(sess.Changelog) > 0 {
+			rec.TailorResult = &model.TailorResult{
+				ResumeLabel: sess.ScoreResult.BestLabel,
+				NewScore:    sess.ScoreResult.Scores[sess.ScoreResult.BestLabel],
+				Changelog:   sess.Changelog,
 			}
 		}
-		if deps != nil {
-			pres := mcppres.New()
-			deps.Presenter = pres
-			rec := &model.ApplicationRecord{
-				URL:         sess.URL,
-				RawText:     sess.JDText,
-				JD:          sess.JD,
-				CoverLetter: coverLetter,
-			}
-			if bestScore, ok := sess.ScoreResult.Scores[sess.ScoreResult.BestLabel]; ok {
-				rec.Score = &bestScore
-				rec.ResumeLabel = sess.ScoreResult.BestLabel
-			}
-			if sess.TailoredText != "" || len(sess.Changelog) > 0 {
-				rec.TailorResult = &model.TailorResult{
-					ResumeLabel: sess.ScoreResult.BestLabel,
-					NewScore:    sess.ScoreResult.Scores[sess.ScoreResult.BestLabel],
-					Changelog:   sess.Changelog,
-				}
-			}
-			if putErr := deps.AppRepo.Put(rec); putErr != nil {
-				slog.WarnContext(ctx, "finalize: failed to persist record", "session_id", sessionID, "error", putErr)
-			}
+		if putErr := deps.AppRepo.Put(rec); putErr != nil {
+			slog.ErrorContext(ctx, "finalize: failed to persist record", "session_id", sessionID, "error", putErr)
+			return envelopeResult(stageErrorEnvelope(sessionID, "finalize", "session_error",
+				"failed to persist application record; retry after brief delay", true))
 		}
 	}
 
 	sess.State = sessionstore.StateFinalized
 	if updateErr := store.Update(ctx, sess); updateErr != nil {
-		slog.WarnContext(ctx, "finalize: persist session state failed", "session_id", sessionID, "error", updateErr)
+		slog.ErrorContext(ctx, "finalize: persist session state failed", "session_id", sessionID, "error", updateErr)
+		return envelopeResult(stageErrorEnvelope(sessionID, "finalize", "session_error",
+			"failed to persist session; retry after brief delay", true))
 	}
 
 	type finalizeSummary struct {
@@ -409,10 +417,17 @@ func HandleSubmitTailoredResumeWithConfig(ctx context.Context, req *mcp.CallTool
 	prevScore := sess.ScoreResult.BestScore
 	resumeLabel := sess.ScoreResult.BestLabel
 
-	// Advance session state before rescore (retry-friendly).
+	// Advance session state and persist tailored text BEFORE rescore so that a
+	// crash or rescore failure leaves the tailored text recorded on disk.
+	// A retry can then re-use TailoredText without resubmitting the full text.
 	sess.TailoredText = tailoredText
 	sess.Changelog = entries
 	sess.State = sessionstore.StateTailored
+	if updateErr := store.Update(ctx, sess); updateErr != nil {
+		slog.ErrorContext(ctx, "submit_tailored_resume: persist tailored text failed", "session_id", sessionID, "error", updateErr)
+		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailored_resume", "session_error",
+			"failed to persist session; retry after brief delay", true))
+	}
 
 	// Wire dependencies.
 	if deps == nil {
@@ -445,7 +460,7 @@ func HandleSubmitTailoredResumeWithConfig(ctx context.Context, req *mcp.CallTool
 			"rescore failed; see server logs for details", true))
 	}
 
-	// On success, update scores.
+	// On success, persist the updated scores.
 	if sess.ScoreResult.Scores == nil {
 		sess.ScoreResult.Scores = make(map[string]model.ScoreResult)
 	}
@@ -455,7 +470,9 @@ func HandleSubmitTailoredResumeWithConfig(ctx context.Context, req *mcp.CallTool
 	newTotal := newScore.Breakdown.Total()
 
 	if updateErr := store.Update(ctx, sess); updateErr != nil {
-		slog.WarnContext(ctx, "submit_tailored_resume: persist session failed", "session_id", sessionID, "error", updateErr)
+		slog.ErrorContext(ctx, "submit_tailored_resume: persist scores failed", "session_id", sessionID, "error", updateErr)
+		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailored_resume", "session_error",
+			"failed to persist session; retry after brief delay", true))
 	}
 
 	slog.InfoContext(ctx, "tailor submission complete",

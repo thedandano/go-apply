@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -76,10 +77,13 @@ func runFinalize(ctx context.Context, sessionID, coverLetterFile string) error {
 	}
 
 	// Delete the session file on success (finalize is terminal).
+	// Best-effort: the record was already persisted; an orphaned session file is a cleanup
+	// concern only. Emit a structured log line rather than a third envelope shape to stderr.
 	if delErr := store.Delete(ctx, sessionID); delErr != nil {
-		// Non-fatal: log but don't fail the command.
-		fmt.Fprintf(os.Stderr, `{"status":"warn","code":"session_cleanup_failed","message":%q}`+"\n",
-			delErr.Error())
+		slog.WarnContext(ctx, "finalize: session cleanup failed (orphaned file)",
+			"session_id", sessionID,
+			"error", delErr,
+		)
 	}
 	return nil
 }
