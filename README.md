@@ -73,12 +73,6 @@ curl -sSfL https://raw.githubusercontent.com/thedandano/go-apply/main/scripts/in
 Config file: `~/.config/go-apply/config.yaml`
 
 ```yaml
-# CLI mode only — not needed for MCP (the host agent is the orchestrator)
-orchestrator:
-  base_url: https://api.anthropic.com/v1
-  model: claude-sonnet-4-6
-  api_key: sk-ant-...        # or set GO_APPLY_API_KEY env var
-
 years_of_experience: 7
 default_seniority: senior
 user_name: "Your Name"

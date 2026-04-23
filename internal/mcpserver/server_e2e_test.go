@@ -101,7 +101,7 @@ const jdRawText = "We are looking for a Senior Go Engineer to join our platform 
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
-// TestServerDispatch_ToolsRegistered verifies that all five tools are
+// TestServerDispatch_ToolsRegistered verifies that the expected tools are
 // discoverable through the live MCP server.
 func TestServerDispatch_ToolsRegistered(t *testing.T) {
 	setupTestEnv(t)
@@ -113,15 +113,13 @@ func TestServerDispatch_ToolsRegistered(t *testing.T) {
 	}
 
 	want := map[string]bool{
-		"load_jd":          false,
-		"submit_keywords":  false,
-		"submit_tailor_t1": false,
-		"submit_tailor_t2": false,
-		"finalize":         false,
-		"onboard_user":     false,
-		"add_resume":       false,
-		"update_config":    false,
-		"get_config":       false,
+		"load_jd":         false,
+		"submit_keywords": false,
+		"finalize":        false,
+		"onboard_user":    false,
+		"add_resume":      false,
+		"update_config":   false,
+		"get_config":      false,
 	}
 	for _, tool := range result.Tools {
 		want[tool.Name] = true
@@ -131,38 +129,14 @@ func TestServerDispatch_ToolsRegistered(t *testing.T) {
 			t.Errorf("tool %q not registered", name)
 		}
 	}
-}
 
-// TestServerDispatch_PromptsRegistered verifies that the job_application_workflow
-// prompt is registered and returns non-empty content.
-func TestServerDispatch_PromptsRegistered(t *testing.T) {
-	setupTestEnv(t)
-	cl := newMCPClient(t)
-
-	const wantPrompt = "job_application_workflow"
-
-	listResult, err := cl.ListPrompts(context.Background(), mcp.ListPromptsRequest{})
-	if err != nil {
-		t.Fatalf("ListPrompts: %v", err)
-	}
-	found := false
-	for _, p := range listResult.Prompts {
-		if p.Name == wantPrompt {
-			found = true
+	// T1/T2 tools must NOT be registered after this unit.
+	for _, name := range []string{"submit_tailor_t1", "submit_tailor_t2"} {
+		for _, tool := range result.Tools {
+			if tool.Name == name {
+				t.Errorf("tool %q must not be registered", name)
+			}
 		}
-	}
-	if !found {
-		t.Fatalf("prompt %q not listed", wantPrompt)
-	}
-
-	getResult, err := cl.GetPrompt(context.Background(), mcp.GetPromptRequest{
-		Params: mcp.GetPromptParams{Name: wantPrompt},
-	})
-	if err != nil {
-		t.Fatalf("GetPrompt %s: %v", wantPrompt, err)
-	}
-	if len(getResult.Messages) == 0 {
-		t.Errorf("prompt %q returned no messages", wantPrompt)
 	}
 }
 
@@ -190,10 +164,10 @@ func TestServerDispatch_LoadJD_BlockedUntilOnboarded(t *testing.T) {
 	}
 }
 
-// TestServerDispatch_GetConfig_ReturnsMCPKeys verifies that get_config returns
-// all MCP-relevant keys and excludes orchestrator keys (Claude is the orchestrator
+// TestServerDispatch_GetConfig_ReturnsAllKeys verifies that get_config returns
+// all config keys and excludes orchestrator keys (Claude is the orchestrator
 // in MCP mode).
-func TestServerDispatch_GetConfig_ReturnsMCPKeys(t *testing.T) {
+func TestServerDispatch_GetConfig_ReturnsAllKeys(t *testing.T) {
 	setupTestEnv(t)
 	cl := newMCPClient(t)
 
@@ -207,9 +181,6 @@ func TestServerDispatch_GetConfig_ReturnsMCPKeys(t *testing.T) {
 		if _, ok := fields[key]; !ok {
 			t.Errorf("key %q missing from get_config response", key)
 		}
-	}
-	if _, ok := fields["orchestrator.base_url"]; ok {
-		t.Error("orchestrator.base_url must not appear in MCP mode config")
 	}
 }
 

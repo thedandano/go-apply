@@ -39,14 +39,6 @@ func (s *stubJDFetcher) Fetch(_ context.Context, _ string) (string, error) {
 	return "fake job description text", nil
 }
 
-type stubLLMClient struct{}
-
-var _ port.LLMClient = (*stubLLMClient)(nil)
-
-func (s *stubLLMClient) ChatComplete(_ context.Context, _ []model.ChatMessage, _ model.ChatOptions) (string, error) {
-	return `{"title":"SWE","company":"Acme","required":["go"],"preferred":["docker"],"location":"Remote","seniority":"senior","required_years":3}`, nil
-}
-
 type stubScorer struct{}
 
 var _ port.Scorer = (*stubScorer)(nil)
@@ -61,14 +53,6 @@ func (s *stubScorer) Score(_ *model.ScorerInput) (model.ScoreResult, error) {
 			Readability:    0.9,
 		},
 	}, nil
-}
-
-type stubCoverLetterGen struct{}
-
-var _ port.CoverLetterGenerator = (*stubCoverLetterGen)(nil)
-
-func (s *stubCoverLetterGen) Generate(_ context.Context, _ *model.CoverLetterInput) (model.CoverLetterResult, error) {
-	return model.CoverLetterResult{Text: "Cover letter.", Channel: model.ChannelCold}, nil
 }
 
 type stubResumeRepo struct{}
@@ -298,21 +282,6 @@ func TestHandleUpdateConfig_ValidKey_ReturnsSuccess(t *testing.T) {
 
 // ── handleGetConfigWith tests ─────────────────────────────────────────────────
 
-func TestHandleGetConfigWith_ExcludesOrchestratorKeys(t *testing.T) {
-	result := mcpserver.HandleGetConfigWith(&config.Config{})
-
-	text := extractText(t, result)
-	var response map[string]interface{}
-	if err := json.Unmarshal([]byte(text), &response); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	for _, key := range []string{"orchestrator.base_url", "orchestrator.model", "orchestrator.api_key"} {
-		if _, found := response[key]; found {
-			t.Errorf("get_config must not expose %q in MCP mode", key)
-		}
-	}
-}
-
 func TestHandleUpdateConfig_RejectsOrchestratorKey(t *testing.T) {
 	req := callToolRequest("update_config", map[string]any{
 		"key":   "orchestrator.model",
@@ -466,8 +435,6 @@ func TestHandleGetConfigWithProfile_OnboardedFalse_WhenNoResumes(t *testing.T) {
 
 func TestHandleGetConfigWithProfile_PreservesConfigFields(t *testing.T) {
 	cfg := &config.Config{}
-	cfg.Orchestrator.BaseURL = "https://api.example.com/v1"
-	cfg.Orchestrator.Model = "claude-sonnet-4-6"
 
 	tmpDir := t.TempDir()
 	inputsDir := filepath.Join(tmpDir, "inputs")
@@ -483,14 +450,7 @@ func TestHandleGetConfigWithProfile_PreservesConfigFields(t *testing.T) {
 		t.Fatalf("response is not JSON: %v", err)
 	}
 
-	// Orchestrator keys are excluded from MCP mode — verify they are absent.
-	for _, key := range []string{"orchestrator.base_url", "orchestrator.model", "orchestrator.api_key"} {
-		if _, found := response[key]; found {
-			t.Errorf("get_config must not expose %q in MCP mode", key)
-		}
-	}
-
-	// log_level should be present (it is in MCPKeys).
+	// log_level should be present (it is in AllKeys).
 	if _, ok := response["log_level"]; !ok {
 		t.Error("response missing 'log_level' key")
 	}

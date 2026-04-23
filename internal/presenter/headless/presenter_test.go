@@ -66,7 +66,7 @@ func TestJSONPresenter_ShowTailorResult_WritesToStdout(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	p := headless.NewWith(&stdout, &stderr)
 
-	result := &model.TailorResult{ResumeLabel: "resume", TierApplied: model.TierKeyword}
+	result := &model.TailorResult{ResumeLabel: "resume", AddedKeywords: []string{"golang"}}
 
 	if err := p.ShowTailorResult(result); err != nil {
 		t.Fatalf("ShowTailorResult returned error: %v", err)
@@ -88,9 +88,9 @@ func TestJSONPresenter_ShowTailorResult_EmitsTailoredText(t *testing.T) {
 	p := headless.NewWith(&stdout, &stderr)
 
 	res := &model.TailorResult{
-		ResumeLabel:  "my-resume",
-		TierApplied:  model.TierKeyword,
-		TailoredText: "resume body",
+		ResumeLabel:   "my-resume",
+		AddedKeywords: []string{"golang"},
+		TailoredText:  "resume body",
 	}
 	if err := p.ShowTailorResult(res); err != nil {
 		t.Fatalf("ShowTailorResult: %v", err)
@@ -111,9 +111,9 @@ func TestJSONPresenter_ShowTailorResult_OmitsTailoredTextWhenEmpty(t *testing.T)
 	p := headless.NewWith(&stdout, &stderr)
 
 	res := &model.TailorResult{
-		ResumeLabel:  "my-resume",
-		TierApplied:  model.TierKeyword,
-		TailoredText: "",
+		ResumeLabel:   "my-resume",
+		AddedKeywords: []string{"golang"},
+		TailoredText:  "",
 	}
 	if err := p.ShowTailorResult(res); err != nil {
 		t.Fatalf("ShowTailorResult: %v", err)

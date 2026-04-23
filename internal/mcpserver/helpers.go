@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 
@@ -20,8 +19,7 @@ import (
 
 // loadDeps loads configuration and wires all pipeline dependencies.
 // Config is loaded fresh per invocation so changes take effect immediately.
-// The MCP host is the orchestrator — LLM, CLGen, and Tailor are nil so the host
-// handles keyword extraction, cover letters, and tailoring.
+// The MCP host is the orchestrator; the pipeline handles only scoring and JD acquisition.
 func loadDeps() (*config.Config, pipeline.ApplyConfig, error) {
 	log := slog.Default()
 
@@ -45,14 +43,11 @@ func loadDeps() (*config.Config, pipeline.ApplyConfig, error) {
 
 	deps := pipeline.ApplyConfig{
 		Fetcher:  fetcherSvc,
-		LLM:      nil,
 		Scorer:   scorerSvc,
-		CLGen:    nil,
 		Resumes:  resumeRepo,
 		Loader:   docLoader,
 		AppRepo:  appRepo,
 		Defaults: defaults,
-		Tailor:   nil,
 	}
 
 	r := redact.New(&redact.Profile{
@@ -63,15 +58,6 @@ func loadDeps() (*config.Config, pipeline.ApplyConfig, error) {
 	logger.SetRedactor(r)
 
 	return cfg, deps, nil
-}
-
-// lineCount returns the number of lines in s. Returns 0 for an empty string,
-// otherwise strings.Count(s, "\n") + 1.
-func lineCount(s string) int {
-	if s == "" {
-		return 0
-	}
-	return strings.Count(s, "\n") + 1
 }
 
 // errorResult wraps an error message as a JSON text tool result.

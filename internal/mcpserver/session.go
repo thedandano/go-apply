@@ -15,8 +15,6 @@ type sessionState int
 const (
 	stateLoaded    sessionState = iota // load_jd succeeded; host must provide keywords
 	stateScored                        // submit_keywords succeeded; host decides next step
-	stateT1Applied                     // submit_tailor_t1 succeeded
-	stateT2Applied                     // submit_tailor_t2 succeeded
 	stateFinalized                     // finalize succeeded
 )
 
@@ -26,10 +24,6 @@ func (s sessionState) String() string {
 		return "loaded"
 	case stateScored:
 		return "scored"
-	case stateT1Applied:
-		return "t1_applied"
-	case stateT2Applied:
-		return "t2_applied"
 	case stateFinalized:
 		return "finalized"
 	default:
@@ -47,7 +41,7 @@ type Session struct {
 	JDText       string
 	JD           model.JDData
 	ScoreResult  pipeline.ScoreResumeResult
-	TailoredText string // updated by T1/T2 handlers
+	TailoredText string // reserved for agent-submitted tailored resume text (Unit 3)
 }
 
 const sessionStoreCap = 100

@@ -47,9 +47,7 @@ type PipelineResult struct {
 		Preferred []string `json:"preferred"`
 	} `json:"keywords"`
 
-	Cascade     *TailorResult     `json:"cascade,omitempty"`
-	CoverLetter CoverLetterResult `json:"cover_letter"`
-	Warnings    []RiskWarning     `json:"warnings"`
+	Warnings []RiskWarning `json:"warnings"`
 
 	StartTime time.Time `json:"start_time"`
 	EndTime   time.Time `json:"end_time"`

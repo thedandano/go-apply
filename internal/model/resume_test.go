@@ -28,7 +28,6 @@ func TestTailorResult_MarshalJSON_TailoredText(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			r := TailorResult{
 				ResumeLabel:  "test-resume",
-				TierApplied:  TierKeyword,
 				TailoredText: tt.tailoredText,
 			}
 
@@ -55,9 +54,7 @@ func TestTailorResult_MarshalJSON_TailoredText(t *testing.T) {
 func TestTailorResult_RoundTrip_TailoredText(t *testing.T) {
 	original := TailorResult{
 		ResumeLabel:  "round-trip-resume",
-		TierApplied:  TierBullet,
 		TailoredText: "full tailored body",
-		Tier1Text:    "tier1 only body",
 	}
 
 	out, err := json.Marshal(original)
@@ -72,9 +69,6 @@ func TestTailorResult_RoundTrip_TailoredText(t *testing.T) {
 
 	if decoded.TailoredText != original.TailoredText {
 		t.Errorf("TailoredText after round-trip = %q, want %q", decoded.TailoredText, original.TailoredText)
-	}
-	if decoded.Tier1Text != original.Tier1Text {
-		t.Errorf("Tier1Text after round-trip = %q, want %q", decoded.Tier1Text, original.Tier1Text)
 	}
 	if decoded.ResumeLabel != original.ResumeLabel {
 		t.Errorf("ResumeLabel after round-trip = %q, want %q", decoded.ResumeLabel, original.ResumeLabel)

@@ -47,20 +47,6 @@ func TestSetField_FloatField(t *testing.T) {
 	}
 }
 
-func TestSetField_NestedField(t *testing.T) {
-	c := &Config{}
-	if err := c.SetField("orchestrator.model", "claude-opus-4-6"); err != nil {
-		t.Fatalf("SetField: %v", err)
-	}
-	got, err := c.GetField("orchestrator.model")
-	if err != nil {
-		t.Fatalf("GetField: %v", err)
-	}
-	if got != "claude-opus-4-6" {
-		t.Errorf("got %q, want %q", got, "claude-opus-4-6")
-	}
-}
-
 func TestSetField_UnknownKey(t *testing.T) {
 	c := &Config{}
 	err := c.SetField("nonexistent.field", "value")
@@ -101,8 +87,8 @@ func TestSetField_FloatField_InvalidValue(t *testing.T) {
 
 func TestAllKeys_CoversAllFields(t *testing.T) {
 	keys := AllKeys()
-	if len(keys) != 10 {
-		t.Errorf("AllKeys() returned %d keys, want 10", len(keys))
+	if len(keys) != 7 {
+		t.Errorf("AllKeys() returned %d keys, want 7", len(keys))
 	}
 
 	// Each key must be settable and gettable on a zero-value Config.

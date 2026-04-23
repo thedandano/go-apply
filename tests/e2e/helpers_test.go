@@ -4,7 +4,6 @@ package e2e_test
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -25,10 +24,9 @@ type testEnv struct {
 }
 
 // seedXDGEnv creates an isolated XDG environment for a subprocess test.
-// It writes a config.yaml with the given orchestrator stub URL,
-// sets LOG_FORMAT=json and LOG_LEVEL=debug so log assertions work, and returns
+// Sets LOG_FORMAT=json and LOG_LEVEL=debug so log assertions work, and returns
 // the constructed testEnv.
-func seedXDGEnv(t *testing.T, orchestratorURL string) *testEnv {
+func seedXDGEnv(t *testing.T) *testEnv {
 	t.Helper()
 
 	configDir := t.TempDir()
@@ -48,13 +46,7 @@ func seedXDGEnv(t *testing.T, orchestratorURL string) *testEnv {
 		}
 	}
 
-	cfgYAML := fmt.Sprintf(`orchestrator:
-  base_url: %s
-  model: test-model
-  api_key: test-key
-`, orchestratorURL)
-
-	if err := os.WriteFile(filepath.Join(goApplyCfgDir, "config.yaml"), []byte(cfgYAML), config.FilePerm); err != nil {
+	if err := os.WriteFile(filepath.Join(goApplyCfgDir, "config.yaml"), []byte(""), config.FilePerm); err != nil {
 		t.Fatalf("write config.yaml: %v", err)
 	}
 
@@ -62,7 +54,6 @@ func seedXDGEnv(t *testing.T, orchestratorURL string) *testEnv {
 		"XDG_CONFIG_HOME="+configDir,
 		"XDG_DATA_HOME="+dataDir,
 		"XDG_STATE_HOME="+stateDir,
-		"GO_APPLY_API_KEY=test-key",
 		"LOG_FORMAT=json",
 		"LOG_LEVEL=debug",
 	)

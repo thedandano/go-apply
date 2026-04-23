@@ -81,8 +81,6 @@ func TestSessionState_String(t *testing.T) {
 	}{
 		{stateLoaded, "loaded"},
 		{stateScored, "scored"},
-		{stateT1Applied, "t1_applied"},
-		{stateT2Applied, "t2_applied"},
 		{stateFinalized, "finalized"},
 	}
 	for _, c := range cases {

@@ -57,7 +57,7 @@ func NewServer() *server.MCPServer {
 
 	srv.AddTool(
 		mcp.NewTool("update_config",
-			mcp.WithDescription("Set a go-apply config field by dot-notation key (e.g. user_name, log_level, verbose). Orchestrator keys are not used in MCP mode."),
+			mcp.WithDescription("Set a go-apply config field by dot-notation key (e.g. user_name, log_level, verbose)."),
 			mcp.WithString("key", mcp.Description("Dot-notation config key"), mcp.Required()),
 			mcp.WithString("value", mcp.Description("New value for the key"), mcp.Required()),
 		),
@@ -95,43 +95,14 @@ func NewServer() *server.MCPServer {
 	)
 
 	srv.AddTool(
-		mcp.NewTool("submit_tailor_t1",
-			mcp.WithDescription("Apply T1 tailoring: inject skill keywords into the resume's Skills section and rescore. Call after submit_keywords when next_action is 'tailor_t1'. Provide skill_adds as a JSON array of strings. Response data includes tailored_text (the full rewritten resume), added_keywords, skills_section_found, previous_score, and new_score."),
-			mcp.WithString("session_id", mcp.Description("Session ID from load_jd"), mcp.Required()),
-			mcp.WithString("skill_adds", mcp.Description("JSON array of skill strings to inject, e.g. [\"Kubernetes\",\"Terraform\"]"), mcp.Required()),
-		),
-		requireOnboarded(func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			return HandleSubmitTailorT1(ctx, &req), nil
-		}),
-	)
-
-	srv.AddTool(
-		mcp.NewTool("submit_tailor_t2",
-			mcp.WithDescription("Apply T2 tailoring: substitute Experience bullet points and rescore. Call after submit_tailor_t1. Provide bullet_rewrites as JSON array of {original, replacement} objects. Response data includes tailored_text (the full rewritten resume), substitutions_made, previous_score, and new_score."),
-			mcp.WithString("session_id", mcp.Description("Session ID from load_jd"), mcp.Required()),
-			mcp.WithString("bullet_rewrites", mcp.Description("JSON array of {\"original\":\"...\",\"replacement\":\"...\"} objects"), mcp.Required()),
-		),
-		requireOnboarded(func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			return HandleSubmitTailorT2(ctx, &req), nil
-		}),
-	)
-
-	srv.AddTool(
 		mcp.NewTool("finalize",
-			mcp.WithDescription("Persist the application record and close the session. Optionally include a cover letter. Call after submit_keywords (and optionally submit_tailor_t1/t2)."),
+			mcp.WithDescription("Persist the application record and close the session. Optionally include a cover letter. Call after submit_keywords."),
 			mcp.WithString("session_id", mcp.Description("Session ID from load_jd"), mcp.Required()),
 			mcp.WithString("cover_letter", mcp.Description("Cover letter text to store with the record (optional)")),
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			return HandleFinalize(ctx, &req), nil
 		},
-	)
-
-	srv.AddPrompt(
-		mcp.NewPrompt("job_application_workflow",
-			mcp.WithPromptDescription("Orchestration guide: how Claude should use go-apply MCP tools to evaluate job fit and generate cover letters"),
-		),
-		HandleWorkflowPrompt,
 	)
 
 	return srv

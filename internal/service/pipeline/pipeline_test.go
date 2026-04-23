@@ -1,20 +1,12 @@
 package pipeline_test
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"fmt"
-	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/thedandano/go-apply/internal/config"
 	"github.com/thedandano/go-apply/internal/model"
 	"github.com/thedandano/go-apply/internal/port"
-	"github.com/thedandano/go-apply/internal/presenter/headless"
-	"github.com/thedandano/go-apply/internal/service/llm"
 	"github.com/thedandano/go-apply/internal/service/pipeline"
 	"github.com/thedandano/go-apply/internal/service/scorer"
 )
@@ -44,195 +36,13 @@ func (s *stubAppRepo) List() ([]*model.ApplicationRecord, error)            { re
 
 var _ port.ApplicationRepository = (*stubAppRepo)(nil)
 
-// stubCoverLetter — fixed cover letter.
-type stubCoverLetter struct{}
-
-var _ port.CoverLetterGenerator = (*stubCoverLetter)(nil)
-
-func (s *stubCoverLetter) Generate(_ context.Context, _ *model.CoverLetterInput) (model.CoverLetterResult, error) {
-	return model.CoverLetterResult{Text: "Cover letter.", Channel: model.ChannelCold, SentenceCount: 1}, nil
-}
-
-// stubJDFetcher.
+// stubJDFetcher satisfies port.JDFetcher.
 type stubJDFetcher struct{}
 
 var _ port.JDFetcher = (*stubJDFetcher)(nil)
 
 func (s *stubJDFetcher) Fetch(_ context.Context, _ string) (string, error) {
-	return "fake JD text", nil
-}
-
-// stubTailorForApply satisfies port.Tailor with a fixed result for use in ApplyPipeline tests.
-type stubTailorForApply struct{}
-
-var _ port.Tailor = (*stubTailorForApply)(nil)
-
-func (s *stubTailorForApply) TailorResume(_ context.Context, _ *model.TailorInput) (model.TailorResult, error) {
-	return model.TailorResult{
-		TierApplied:   model.TierKeyword,
-		AddedKeywords: []string{"golang"},
-		TailoredText:  "tailored resume text",
-	}, nil
-}
-
-// stubTailorWithTier1Text satisfies port.Tailor and returns a non-empty Tier1Text so
-// the pipeline can rescore it and set Tier1Score (M5.4c).
-type stubTailorWithTier1Text struct{}
-
-var _ port.Tailor = (*stubTailorWithTier1Text)(nil)
-
-func (s *stubTailorWithTier1Text) TailorResume(_ context.Context, _ *model.TailorInput) (model.TailorResult, error) {
-	return model.TailorResult{
-		TierApplied:   model.TierKeyword,
-		AddedKeywords: []string{"golang"},
-		TailoredText:  "tailored resume text golang kubernetes docker python",
-		Tier1Text:     "tier1 resume text golang kubernetes docker python",
-	}, nil
-}
-
-// stubTailorError satisfies port.Tailor and always returns an error to exercise degradation.
-type stubTailorError struct{}
-
-var _ port.Tailor = (*stubTailorError)(nil)
-
-func (s *stubTailorError) TailorResume(_ context.Context, _ *model.TailorInput) (model.TailorResult, error) {
-	return model.TailorResult{}, fmt.Errorf("llm unavailable")
-}
-
-func TestApplyPipeline_HeadlessE2E(t *testing.T) {
-	llmSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
-			"choices": []map[string]any{
-				{"message": map[string]any{
-					"content": `{"title":"SWE","company":"Acme","required":["python","golang","kubernetes"],"preferred":["docker"],"location":"Remote","seniority":"senior","required_years":3}`,
-				}},
-			},
-		})
-	}))
-	defer llmSrv.Close()
-
-	var stdout, stderr bytes.Buffer
-	pres := headless.NewWith(&stdout, &stderr)
-
-	cfg := &config.Config{
-		Orchestrator:      config.LLMProviderConfig{BaseURL: llmSrv.URL, Model: "test", APIKey: "test"},
-		YearsOfExperience: 5,
-		DefaultSeniority:  "exact",
-	}
-
-	defaults, err := config.LoadDefaults()
-	if err != nil {
-		t.Fatalf("LoadDefaults: %v", err)
-	}
-	llmClient := llm.New(llmSrv.URL, "test", "test", defaults, nil)
-
-	pl := pipeline.NewApplyPipeline(&pipeline.ApplyConfig{
-		Fetcher:   &stubJDFetcher{},
-		LLM:       llmClient,
-		Scorer:    scorer.New(defaults),
-		CLGen:     &stubCoverLetter{},
-		Resumes:   &stubResumeRepo{},
-		Loader:    &stubDocumentLoader{},
-		AppRepo:   &stubAppRepo{},
-		Presenter: pres,
-		Defaults:  defaults,
-		Tailor:    nil,
-	})
-
-	err = pl.Run(context.Background(), pipeline.ApplyRequest{
-		URLOrText: `We are hiring a senior Go engineer. Required: python, golang, kubernetes. Preferred: docker.`,
-		IsText:    true,
-		Channel:   model.ChannelCold,
-		Config:    cfg,
-	})
-
-	if err != nil {
-		t.Fatalf("pipeline error: %v", err)
-	}
-
-	var result model.PipelineResult
-	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
-		t.Fatalf("output is not valid JSON: %v\nOutput: %s", err, stdout.String())
-	}
-	if result.Status != "success" {
-		t.Errorf("status = %q, want success", result.Status)
-	}
-	if result.JDText == "" {
-		t.Error("expected JDText to be populated, got empty string")
-	}
-	if result.BestScore == 0 {
-		t.Error("best_score is 0 — scoring did not run")
-	}
-}
-
-func TestApplyPipeline_TailorStep(t *testing.T) {
-	llmSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
-			"choices": []map[string]any{
-				{"message": map[string]any{
-					"content": `{"title":"SWE","company":"Acme","required":["python","golang","kubernetes"],"preferred":["docker"],"location":"Remote","seniority":"senior","required_years":3}`,
-				}},
-			},
-		})
-	}))
-	defer llmSrv.Close()
-
-	var stdout, stderr bytes.Buffer
-	pres := headless.NewWith(&stdout, &stderr)
-
-	cfg := &config.Config{
-		Orchestrator:      config.LLMProviderConfig{BaseURL: llmSrv.URL, Model: "test", APIKey: "test"},
-		YearsOfExperience: 5,
-		DefaultSeniority:  "senior",
-	}
-
-	defaults, err := config.LoadDefaults()
-	if err != nil {
-		t.Fatalf("LoadDefaults: %v", err)
-	}
-	llmClient := llm.New(llmSrv.URL, "test", "test", defaults, nil)
-
-	pl := pipeline.NewApplyPipeline(&pipeline.ApplyConfig{
-		Fetcher:   &stubJDFetcher{},
-		LLM:       llmClient,
-		Scorer:    scorer.New(defaults),
-		CLGen:     &stubCoverLetter{},
-		Resumes:   &stubResumeRepo{},
-		Loader:    &stubDocumentLoader{},
-		AppRepo:   &stubAppRepo{},
-		Presenter: pres,
-		Defaults:  defaults,
-		Tailor:    &stubTailorForApply{},
-	})
-
-	err = pl.Run(context.Background(), pipeline.ApplyRequest{
-		URLOrText:           `We are hiring a senior Go engineer. Required: python, golang, kubernetes. Preferred: docker.`,
-		IsText:              true,
-		Channel:             model.ChannelCold,
-		Config:              cfg,
-		AccomplishmentsText: "accomplishments text",
-	})
-	if err != nil {
-		t.Fatalf("pipeline error: %v", err)
-	}
-
-	var result model.PipelineResult
-	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
-		t.Fatalf("output is not valid JSON: %v\nOutput: %s", err, stdout.String())
-	}
-	if result.Cascade == nil {
-		t.Fatal("result.Cascade is nil — tailor step did not run")
-	}
-	found := false
-	for _, kw := range result.Cascade.AddedKeywords {
-		if kw == "golang" {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Errorf("result.Cascade.AddedKeywords = %v, want to contain %q", result.Cascade.AddedKeywords, "golang")
-	}
+	return "fake JD text from url", nil
 }
 
 // capturingPresenter captures the ShowResult call.
@@ -255,99 +65,35 @@ func minimalApplyConfig(pres *capturingPresenter) *pipeline.ApplyConfig {
 	defaults, _ := config.LoadDefaults()
 	return &pipeline.ApplyConfig{
 		Fetcher:   &stubJDFetcher{},
-		LLM:       nil,
 		Scorer:    scorer.New(defaults),
-		CLGen:     &stubCoverLetter{},
 		Resumes:   &stubResumeRepo{},
 		Loader:    &stubDocumentLoader{},
 		AppRepo:   &stubAppRepo{},
 		Presenter: pres,
 		Defaults:  defaults,
-		Tailor:    nil,
 	}
 }
 
-func TestApplyPipeline_NilLLM_ErrorsOnEmptyJD(t *testing.T) {
+func TestScoreResumes_ReturnsScoresAndBest(t *testing.T) {
 	pres := &capturingPresenter{}
 	cfg := minimalApplyConfig(pres)
-	cfg.LLM = nil
-	cfg.CLGen = nil
-
 	pl := pipeline.NewApplyPipeline(cfg)
-	err := pl.Run(context.Background(), pipeline.ApplyRequest{
-		URLOrText: "Software Engineer at Acme",
-		IsText:    true,
-		Channel:   model.ChannelCold,
-		Config:    &config.Config{},
-	})
-	if err == nil {
-		t.Fatal("expected error when JD cannot be extracted, got nil")
+
+	jd := model.JDData{
+		Title:     "Go Engineer",
+		Company:   "Acme",
+		Required:  []string{"golang", "kubernetes"},
+		Preferred: []string{"docker"},
 	}
-	if !strings.Contains(err.Error(), "could not extract a job description") {
-		t.Errorf("expected actionable error message, got: %v", err)
-	}
-}
-
-func TestApplyPipeline_TailorStep_TailorError(t *testing.T) {
-	llmSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
-			"choices": []map[string]any{
-				{"message": map[string]any{
-					"content": `{"title":"SWE","company":"Acme","required":["python","golang","kubernetes"],"preferred":["docker"],"location":"Remote","seniority":"senior","required_years":3}`,
-				}},
-			},
-		})
-	}))
-	defer llmSrv.Close()
-
-	var stdout, stderr bytes.Buffer
-	pres := headless.NewWith(&stdout, &stderr)
-
-	cfg := &config.Config{
-		Orchestrator:      config.LLMProviderConfig{BaseURL: llmSrv.URL, Model: "test", APIKey: "test"},
-		YearsOfExperience: 5,
-		DefaultSeniority:  "senior",
-	}
-
-	defaults, err := config.LoadDefaults()
+	result, err := pl.ScoreResumes(context.Background(), &jd, &config.Config{YearsOfExperience: 5})
 	if err != nil {
-		t.Fatalf("LoadDefaults: %v", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
-	llmClient := llm.New(llmSrv.URL, "test", "test", defaults, nil)
-
-	pl := pipeline.NewApplyPipeline(&pipeline.ApplyConfig{
-		Fetcher:   &stubJDFetcher{},
-		LLM:       llmClient,
-		Scorer:    scorer.New(defaults),
-		CLGen:     &stubCoverLetter{},
-		Resumes:   &stubResumeRepo{},
-		Loader:    &stubDocumentLoader{},
-		AppRepo:   &stubAppRepo{},
-		Presenter: pres,
-		Defaults:  defaults,
-		Tailor:    &stubTailorError{},
-	})
-
-	err = pl.Run(context.Background(), pipeline.ApplyRequest{
-		URLOrText:           `We are hiring a senior Go engineer. Required: python, golang, kubernetes. Preferred: docker.`,
-		IsText:              true,
-		Channel:             model.ChannelCold,
-		Config:              cfg,
-		AccomplishmentsText: "accomplishments text",
-	})
-	if err != nil {
-		t.Fatalf("pipeline error: %v — expected degradation (nil error), not a fatal failure", err)
+	if len(result.Scores) == 0 {
+		t.Error("ScoreResumes returned no scores")
 	}
-
-	var result model.PipelineResult
-	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
-		t.Fatalf("output is not valid JSON: %v\nOutput: %s", err, stdout.String())
-	}
-	if result.Cascade != nil {
-		t.Errorf("result.Cascade = %+v, want nil — tailor error should not produce output", result.Cascade)
-	}
-	if len(result.Warnings) == 0 {
-		t.Error("result.Warnings is empty — expected a warning to be recorded on tailor error")
+	if result.BestLabel == "" {
+		t.Error("ScoreResumes returned empty BestLabel")
 	}
 }
 
@@ -379,251 +125,7 @@ func TestAcquireJD_URLInput_FetchesText(t *testing.T) {
 	}
 }
 
-// stubOrchestrator is a hand-rolled mock for port.Orchestrator.
-type stubOrchestrator struct {
-	jd  model.JDData
-	err error
-}
-
-var _ port.Orchestrator = (*stubOrchestrator)(nil)
-
-func (s *stubOrchestrator) ExtractKeywords(_ context.Context, _ port.ExtractKeywordsInput) (model.JDData, error) {
-	return s.jd, s.err
-}
-func (s *stubOrchestrator) PlanT1(_ context.Context, _ *port.PlanT1Input) (port.PlanT1Output, error) {
-	return port.PlanT1Output{}, nil
-}
-func (s *stubOrchestrator) PlanT2(_ context.Context, _ *port.PlanT2Input) (port.PlanT2Output, error) {
-	return port.PlanT2Output{}, nil
-}
-func (s *stubOrchestrator) GenerateCoverLetter(_ context.Context, _ *port.CoverLetterInput) (string, error) {
-	return "", nil
-}
-
-// TestApplyPipeline_WithOrchestrator verifies that Run delegates keyword extraction
-// to the Orchestrator when one is wired (and no LLMClient is needed).
-func TestApplyPipeline_WithOrchestrator(t *testing.T) {
-	pres := &capturingPresenter{}
-	defaults, _ := config.LoadDefaults()
-
-	jd := model.JDData{
-		Title:     "Go Engineer",
-		Company:   "Acme",
-		Required:  []string{"golang", "kubernetes"},
-		Preferred: []string{"docker"},
-		Seniority: model.SenioritySenior,
-	}
-	orch := &stubOrchestrator{jd: jd}
-
-	pl := pipeline.NewApplyPipeline(&pipeline.ApplyConfig{
-		Fetcher:      &stubJDFetcher{},
-		LLM:          nil, // no direct LLM — orchestrator provides keywords
-		Scorer:       scorer.New(defaults),
-		CLGen:        nil,
-		Resumes:      &stubResumeRepo{},
-		Loader:       &stubDocumentLoader{},
-		AppRepo:      &stubAppRepo{},
-		Presenter:    pres,
-		Defaults:     defaults,
-		Tailor:       nil,
-		Orchestrator: orch,
-	})
-
-	err := pl.Run(context.Background(), pipeline.ApplyRequest{
-		URLOrText: "Senior Go engineer role",
-		IsText:    true,
-		Channel:   model.ChannelCold,
-		Config:    &config.Config{YearsOfExperience: 5, DefaultSeniority: "senior"},
-	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if pres.result == nil {
-		t.Fatal("expected result, got nil")
-	}
-	if pres.result.JD.Title != "Go Engineer" {
-		t.Errorf("JD.Title = %q, want %q", pres.result.JD.Title, "Go Engineer")
-	}
-}
-
-// TestApplyPipeline_OrchestratorError_ReturnsError verifies that a keyword extraction
-// error from the orchestrator propagates as an error from Run.
-func TestApplyPipeline_OrchestratorError_ReturnsError(t *testing.T) {
-	pres := &capturingPresenter{}
-	defaults, _ := config.LoadDefaults()
-
-	orch := &stubOrchestrator{err: fmt.Errorf("orchestrator unavailable")}
-
-	pl := pipeline.NewApplyPipeline(&pipeline.ApplyConfig{
-		Fetcher:      &stubJDFetcher{},
-		LLM:          nil,
-		Scorer:       scorer.New(defaults),
-		CLGen:        nil,
-		Resumes:      &stubResumeRepo{},
-		Loader:       &stubDocumentLoader{},
-		AppRepo:      &stubAppRepo{},
-		Presenter:    pres,
-		Defaults:     defaults,
-		Tailor:       nil,
-		Orchestrator: orch,
-	})
-
-	err := pl.Run(context.Background(), pipeline.ApplyRequest{
-		URLOrText: "some job text",
-		IsText:    true,
-		Channel:   model.ChannelCold,
-		Config:    &config.Config{},
-	})
-	if err == nil {
-		t.Fatal("expected error when orchestrator fails keyword extraction, got nil")
-	}
-}
-
-// TestApplyPipeline_TailorStep_Tier1ScoreSet asserts that Tier1Score is non-nil after
-// the pipeline rescores the tier-1 text returned by TailorResume (M5.4c).
-func TestApplyPipeline_TailorStep_Tier1ScoreSet(t *testing.T) {
-	llmSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
-			"choices": []map[string]any{
-				{"message": map[string]any{
-					"content": `{"title":"SWE","company":"Acme","required":["python","golang","kubernetes"],"preferred":["docker"],"location":"Remote","seniority":"senior","required_years":3}`,
-				}},
-			},
-		})
-	}))
-	defer llmSrv.Close()
-
-	pres := &capturingPresenter{}
-	cfg := &config.Config{
-		Orchestrator:      config.LLMProviderConfig{BaseURL: llmSrv.URL, Model: "test", APIKey: "test"},
-		YearsOfExperience: 5,
-		DefaultSeniority:  "senior",
-	}
-	defaults, err := config.LoadDefaults()
-	if err != nil {
-		t.Fatalf("LoadDefaults: %v", err)
-	}
-	llmClient := llm.New(llmSrv.URL, "test", "test", defaults, nil)
-
-	pl := pipeline.NewApplyPipeline(&pipeline.ApplyConfig{
-		Fetcher:   &stubJDFetcher{},
-		LLM:       llmClient,
-		Scorer:    scorer.New(defaults),
-		CLGen:     nil,
-		Resumes:   &stubResumeRepo{},
-		Loader:    &stubDocumentLoader{},
-		AppRepo:   &stubAppRepo{},
-		Presenter: pres,
-		Defaults:  defaults,
-		Tailor:    &stubTailorWithTier1Text{},
-	})
-
-	err = pl.Run(context.Background(), pipeline.ApplyRequest{
-		URLOrText:           `We are hiring a senior Go engineer. Required: python, golang, kubernetes. Preferred: docker.`,
-		IsText:              true,
-		Channel:             model.ChannelCold,
-		Config:              cfg,
-		AccomplishmentsText: "accomplishments text",
-	})
-	if err != nil {
-		t.Fatalf("pipeline error: %v", err)
-	}
-	if pres.result == nil {
-		t.Fatal("expected result, got nil")
-	}
-	if pres.result.Cascade == nil {
-		t.Fatal("Cascade is nil — tailor step did not run")
-	}
-	if pres.result.Cascade.Tier1Score == nil {
-		t.Error("Tier1Score must be non-nil after the pipeline rescores the tier-1 text")
-	}
-}
-
-// TestApplyPipeline_PipelineResultContainsCascadeTailoredText asserts that
-// TailoredText set by the tailor stub flows into PipelineResult.Cascade and
-// round-trips through json.Marshal as cascade.tailored_text.
-func TestApplyPipeline_PipelineResultContainsCascadeTailoredText(t *testing.T) {
-	llmSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
-			"choices": []map[string]any{
-				{"message": map[string]any{
-					"content": `{"title":"SWE","company":"Acme","required":["python","golang","kubernetes"],"preferred":["docker"],"location":"Remote","seniority":"senior","required_years":3}`,
-				}},
-			},
-		})
-	}))
-	defer llmSrv.Close()
-
-	pres := &capturingPresenter{}
-	cfg := &config.Config{
-		Orchestrator:      config.LLMProviderConfig{BaseURL: llmSrv.URL, Model: "test", APIKey: "test"},
-		YearsOfExperience: 5,
-		DefaultSeniority:  "senior",
-	}
-	defaults, err := config.LoadDefaults()
-	if err != nil {
-		t.Fatalf("LoadDefaults: %v", err)
-	}
-	llmClient := llm.New(llmSrv.URL, "test", "test", defaults, nil)
-
-	pl := pipeline.NewApplyPipeline(&pipeline.ApplyConfig{
-		Fetcher:   &stubJDFetcher{},
-		LLM:       llmClient,
-		Scorer:    scorer.New(defaults),
-		CLGen:     nil,
-		Resumes:   &stubResumeRepo{},
-		Loader:    &stubDocumentLoader{},
-		AppRepo:   &stubAppRepo{},
-		Presenter: pres,
-		Defaults:  defaults,
-		Tailor:    &stubTailorWithTier1Text{},
-	})
-
-	err = pl.Run(context.Background(), pipeline.ApplyRequest{
-		URLOrText:           `We are hiring a senior Go engineer. Required: python, golang, kubernetes. Preferred: docker.`,
-		IsText:              true,
-		Channel:             model.ChannelCold,
-		Config:              cfg,
-		AccomplishmentsText: "accomplishments text",
-	})
-	if err != nil {
-		t.Fatalf("pipeline error: %v", err)
-	}
-	if pres.result == nil {
-		t.Fatal("expected result, got nil")
-	}
-	if pres.result.Cascade == nil {
-		t.Fatal("Cascade is nil — tailor step did not run")
-	}
-
-	const wantTailoredText = "tailored resume text golang kubernetes docker python"
-	if pres.result.Cascade.TailoredText != wantTailoredText {
-		t.Errorf("Cascade.TailoredText = %q, want %q", pres.result.Cascade.TailoredText, wantTailoredText)
-	}
-
-	// Verify round-trip through JSON: cascade.tailored_text must be present and correct.
-	out, err := json.Marshal(pres.result)
-	if err != nil {
-		t.Fatalf("json.Marshal(result): %v", err)
-	}
-	var decoded map[string]any
-	if err := json.Unmarshal(out, &decoded); err != nil {
-		t.Fatalf("json.Unmarshal: %v", err)
-	}
-	cascade, ok := decoded["cascade"].(map[string]any)
-	if !ok {
-		t.Fatalf("cascade key missing or wrong type in JSON: %s", string(out))
-	}
-	gotTailored, ok := cascade["tailored_text"].(string)
-	if !ok {
-		t.Fatalf("cascade.tailored_text missing or wrong type in JSON: %s", string(out))
-	}
-	if gotTailored != wantTailoredText {
-		t.Errorf("cascade.tailored_text = %q, want %q", gotTailored, wantTailoredText)
-	}
-}
-
-func TestScoreResumes_ReturnsScoresAndBest(t *testing.T) {
+func TestScoreResume_SingleResume_ReturnsScore(t *testing.T) {
 	pres := &capturingPresenter{}
 	cfg := minimalApplyConfig(pres)
 	pl := pipeline.NewApplyPipeline(cfg)
@@ -631,17 +133,20 @@ func TestScoreResumes_ReturnsScoresAndBest(t *testing.T) {
 	jd := model.JDData{
 		Title:     "Go Engineer",
 		Company:   "Acme",
-		Required:  []string{"golang", "kubernetes"},
+		Required:  []string{"golang"},
 		Preferred: []string{"docker"},
 	}
-	result, err := pl.ScoreResumes(context.Background(), &jd, &config.Config{YearsOfExperience: 5})
+	result, err := pl.ScoreResume(
+		context.Background(),
+		"golang kubernetes experience senior",
+		"test",
+		&jd,
+		&config.Config{YearsOfExperience: 5, DefaultSeniority: "senior"},
+	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(result.Scores) == 0 {
-		t.Error("ScoreResumes returned no scores")
-	}
-	if result.BestLabel == "" {
-		t.Error("ScoreResumes returned empty BestLabel")
+	if result.Breakdown.Total() == 0 {
+		t.Error("ScoreResume returned zero total score")
 	}
 }

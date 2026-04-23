@@ -12,11 +12,9 @@ func TestApplicationRecord_MarshalJSON_RedactsTailoredText(t *testing.T) {
 		RawText: "raw job description",
 		TailorResult: &TailorResult{
 			ResumeLabel:   "my-resume",
-			TierApplied:   TierKeyword,
 			TailoredText:  "body",
 			AddedKeywords: []string{"go", "kubernetes"},
 			NewScore:      ScoreResult{ResumeLabel: "my-resume"},
-			Tier1Score:    &ScoreResult{ResumeLabel: "my-resume"},
 		},
 	}
 
@@ -31,7 +29,7 @@ func TestApplicationRecord_MarshalJSON_RedactsTailoredText(t *testing.T) {
 	}
 
 	// Other TailorResult fields must still be present.
-	requiredKeys := []string{`"tier_applied"`, `"added_keywords"`, `"new_score"`, `"tier1_score"`}
+	requiredKeys := []string{`"added_keywords"`, `"new_score"`}
 	for _, key := range requiredKeys {
 		if !strings.Contains(string(out), key) {
 			t.Errorf("serialized ApplicationRecord missing key %s; json = %s", key, out)
@@ -69,7 +67,6 @@ func TestApplicationRecord_MarshalJSON_PreservesOtherFields(t *testing.T) {
 		Score:       score,
 		TailorResult: &TailorResult{
 			ResumeLabel:  "cv",
-			TierApplied:  TierBullet,
 			TailoredText: "full text here",
 		},
 		Applied: "2026-04-22",
