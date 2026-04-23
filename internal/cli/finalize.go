@@ -41,7 +41,7 @@ Writes {"status":"error","code":"...","message":"..."} to stderr and exits non-z
 func runFinalize(ctx context.Context, sessionID, coverLetterFile string) error {
 	coverLetter := ""
 	if coverLetterFile != "" {
-		data, err := os.ReadFile(coverLetterFile)
+		data, err := os.ReadFile(coverLetterFile) // #nosec G304 -- path explicitly provided by the user via --cover-letter-file flag
 		if err != nil {
 			return writeError("file_read_error", fmt.Sprintf("read cover letter file: %v", err))
 		}

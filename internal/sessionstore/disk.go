@@ -39,7 +39,7 @@ func NewDiskStore(dir string) (*DiskStore, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("create sessions dir: %w", err)
 	}
-	if err := os.Chmod(dir, 0o700); err != nil {
+	if err := os.Chmod(dir, 0o700); err != nil { // #nosec G302 -- directory needs execute bit; 0o700 is user-only rwx
 		return nil, fmt.Errorf("chmod sessions dir: %w", err)
 	}
 	return &DiskStore{dir: dir}, nil
@@ -68,7 +68,7 @@ func (d *DiskStore) Create(ctx context.Context, jdText string) (*Session, error)
 // Get reads the session from disk. Returns nil, false, nil when not found.
 func (d *DiskStore) Get(_ context.Context, id string) (*Session, bool, error) {
 	path := d.sessionPath(id)
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- path is d.dir + regex-validated session id, no traversal possible
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil, false, nil
@@ -139,14 +139,14 @@ func (d *DiskStore) writeSession(ctx context.Context, sess *Session, isCreate bo
 // writeSessionCreate handles the Create path: opens with O_EXCL to prevent overwrites,
 // locks the new file, then writes.
 func (d *DiskStore) writeSessionCreate(ctx context.Context, id, path string, data []byte) error {
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600) // #nosec G304 -- path is d.dir + regex-validated session id
 	if err != nil {
 		if errors.Is(err, fs.ErrExist) {
 			return fmt.Errorf("%w: %s", ErrSessionExists, id)
 		}
 		return fmt.Errorf("open session file %q: %w", id, err)
 	}
-	defer f.Close() //nolint:errcheck
+	defer func() { _ = f.Close() }()
 
 	if chErr := os.Chmod(path, 0o600); chErr != nil {
 		return fmt.Errorf("chmod session file %q: %w", id, chErr)
@@ -191,37 +191,37 @@ func (d *DiskStore) writeSessionUpdate(ctx context.Context, id, path string, dat
 		}
 	}()
 
-	tmpF, err := os.OpenFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	tmpF, err := os.OpenFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600) // #nosec G304 -- tmpPath is path + pid + crypto/rand nonce, go-apply-generated
 	if err != nil {
 		return fmt.Errorf("open tmp file for session %q: %w", id, err)
 	}
 
 	if chErr := os.Chmod(tmpPath, 0o600); chErr != nil {
-		tmpF.Close() //nolint:errcheck
+		_ = tmpF.Close()
 		return fmt.Errorf("chmod tmp file for session %q: %w", id, chErr)
 	}
 
 	if _, writeErr := tmpF.Write(data); writeErr != nil {
-		tmpF.Close() //nolint:errcheck
+		_ = tmpF.Close()
 		return fmt.Errorf("write tmp file for session %q: %w", id, writeErr)
 	}
 	if syncErr := tmpF.Sync(); syncErr != nil {
-		tmpF.Close() //nolint:errcheck
+		_ = tmpF.Close()
 		return fmt.Errorf("sync tmp file for session %q: %w", id, syncErr)
 	}
-	tmpF.Close() //nolint:errcheck
+	_ = tmpF.Close()
 
 	// Acquire exclusive flock on the original file WITHOUT truncating it.
 	// O_RDONLY is sufficient for flock semantics and does not require write permission.
 	// If the file does not exist, Update semantics require an error (Create must precede Update).
-	origF, err := os.OpenFile(path, os.O_RDONLY, 0)
+	origF, err := os.OpenFile(path, os.O_RDONLY, 0) // #nosec G304 -- path is d.dir + regex-validated session id, no traversal possible
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return fmt.Errorf("open session file %q: %w", id, err)
 		}
 		return fmt.Errorf("open session file %q: %w", id, err)
 	}
-	defer origF.Close() //nolint:errcheck
+	defer func() { _ = origF.Close() }()
 
 	if lockErr := flockExclusive(origF); lockErr != nil {
 		if errors.Is(lockErr, syscall.EWOULDBLOCK) {
@@ -247,5 +247,5 @@ func (d *DiskStore) writeSessionUpdate(ctx context.Context, id, path string, dat
 // flockExclusive acquires a non-blocking exclusive advisory lock on f.
 // Returns syscall.EWOULDBLOCK if the file is already locked by another process.
 func flockExclusive(f *os.File) error {
-	return syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+	return syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB) // #nosec G115 -- file descriptors are small non-negative ints; uintptr → int conversion is safe
 }

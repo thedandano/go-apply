@@ -41,7 +41,7 @@ Writes {"status":"error","code":"...","message":"..."} to stderr and exits non-z
 }
 
 func runSubmitTailoredResume(ctx context.Context, sessionID, tailoredTextFile, changelogFile string) error {
-	tailoredBytes, err := os.ReadFile(tailoredTextFile)
+	tailoredBytes, err := os.ReadFile(tailoredTextFile) // #nosec G304 -- path explicitly provided by the user via --tailored-text-file flag
 	if err != nil {
 		return writeError("file_read_error", fmt.Sprintf("read tailored text file: %v", err))
 	}
@@ -49,7 +49,7 @@ func runSubmitTailoredResume(ctx context.Context, sessionID, tailoredTextFile, c
 
 	changelogJSON := ""
 	if changelogFile != "" {
-		changelogBytes, err := os.ReadFile(changelogFile)
+		changelogBytes, err := os.ReadFile(changelogFile) // #nosec G304 -- path explicitly provided by the user via --changelog-file flag
 		if err != nil {
 			return writeError("file_read_error", fmt.Sprintf("read changelog file: %v", err))
 		}
