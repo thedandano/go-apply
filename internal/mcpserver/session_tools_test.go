@@ -241,6 +241,35 @@ func stubApplyConfigWithSkillsLoader() pipeline.ApplyConfig {
 	return cfg
 }
 
+// stubResumeRepoWithExperienceSections returns sections with both skills and experience entries.
+type stubResumeRepoWithExperienceSections struct {
+	stubResumeRepo
+}
+
+func (s *stubResumeRepoWithExperienceSections) LoadSections(_ string) (model.SectionMap, error) {
+	return model.SectionMap{
+		SchemaVersion: model.CurrentSchemaVersion,
+		Skills: &model.SkillsSection{
+			Kind: model.SkillsKindFlat,
+			Flat: "Go, Python",
+		},
+		Experience: []model.ExperienceEntry{
+			{
+				Company:   "Acme Corp",
+				Role:      "Engineer",
+				StartDate: "2020-01",
+				Bullets:   []string{"Built distributed systems in Go", "Led migration to Kubernetes"},
+			},
+		},
+	}, nil
+}
+
+func stubApplyConfigWithExperienceSections() pipeline.ApplyConfig {
+	cfg := stubApplyConfigForSession()
+	cfg.Resumes = &stubResumeRepoWithExperienceSections{}
+	return cfg
+}
+
 // T010: submit_keywords includes skills_section field when best resume has a Skills header.
 func TestHandleSubmitKeywordsWithConfig_ReturnsSkillsSection(t *testing.T) {
 	cfg := stubApplyConfigWithSkillsLoader()
@@ -614,8 +643,8 @@ func TestNextActionAfterT1(t *testing.T) {
 func TestHandleSubmitTailorT1_SessionNotFound_ReturnsError(t *testing.T) {
 	cfg := stubApplyConfigForSession()
 	req := callToolRequest("submit_tailor_t1", map[string]any{
-		"session_id":     "no-such-session",
-		"skill_rewrites": `[{"original":"Docker","replacement":"Docker, K8s"}]`,
+		"session_id": "no-such-session",
+		"edits":      `[{"section":"skills","op":"add","value":"K8s"}]`,
 	})
 	result := mcpserver.HandleSubmitTailorT1WithConfig(context.Background(), &req, &cfg, &config.Config{})
 	text := extractText(t, result)
@@ -638,8 +667,8 @@ func TestHandleSubmitTailorT1_WrongState_ReturnsError(t *testing.T) {
 	sessionID, _ := loadEnv["session_id"].(string)
 
 	req := callToolRequest("submit_tailor_t1", map[string]any{
-		"session_id":     sessionID,
-		"skill_rewrites": `[{"original":"Go","replacement":"Go, Rust"}]`,
+		"session_id": sessionID,
+		"edits":      `[{"section":"skills","op":"add","value":"Rust"}]`,
 	})
 	result := mcpserver.HandleSubmitTailorT1WithConfig(context.Background(), &req, &cfg, &config.Config{})
 	text := extractText(t, result)
@@ -648,8 +677,8 @@ func TestHandleSubmitTailorT1_WrongState_ReturnsError(t *testing.T) {
 	}
 }
 
-func TestHandleSubmitTailorT1_HappyPath_ReturnsSubstitutionsMade(t *testing.T) {
-	cfg := stubApplyConfigForSession()
+func TestHandleSubmitTailorT1_HappyPath_ReturnsEditsApplied(t *testing.T) {
+	cfg := stubApplyConfigWithSkillsLoader() // has sections sidecar with flat skills
 
 	// load_jd
 	loadReq := callToolRequest("load_jd", map[string]any{"jd_raw_text": "Senior Go engineer. Skills: go, kubernetes."})
@@ -663,10 +692,10 @@ func TestHandleSubmitTailorT1_HappyPath_ReturnsSubstitutionsMade(t *testing.T) {
 	kwReq := callToolRequest("submit_keywords", map[string]any{"session_id": sessionID, "jd_json": jdJSON})
 	mcpserver.HandleSubmitKeywordsWithConfig(context.Background(), &kwReq, &cfg, &config.Config{})
 
-	// submit_tailor_t1 with skill_rewrites
+	// submit_tailor_t1 with structured edits
 	t1Req := callToolRequest("submit_tailor_t1", map[string]any{
-		"session_id":     sessionID,
-		"skill_rewrites": `[{"original":"Kubernetes","replacement":"Kubernetes, EKS"}]`,
+		"session_id": sessionID,
+		"edits":      `[{"section":"skills","op":"add","value":"EKS"}]`,
 	})
 	result := mcpserver.HandleSubmitTailorT1WithConfig(context.Background(), &t1Req, &cfg, &config.Config{})
 	text := extractText(t, result)
@@ -685,67 +714,67 @@ func TestHandleSubmitTailorT1_HappyPath_ReturnsSubstitutionsMade(t *testing.T) {
 	if data["previous_score"] == nil {
 		t.Errorf("expected previous_score in data, got: %s", text)
 	}
-	if _, ok := data["substitutions_made"]; !ok {
-		t.Errorf("expected substitutions_made key in data, got: %s", text)
+	if _, ok := data["edits_applied"]; !ok {
+		t.Errorf("expected edits_applied key in data, got: %s", text)
 	}
-	if _, ok := data["skills_section_found"]; !ok {
-		t.Errorf("expected skills_section_found key in data, got: %s", text)
+	if _, ok := data["edits_rejected"]; !ok {
+		t.Errorf("expected edits_rejected key in data, got: %s", text)
 	}
 }
 
-func TestHandleSubmitTailorT1_MissingSkillRewrites_ReturnsError(t *testing.T) {
+func TestHandleSubmitTailorT1_MissingEdits_ReturnsError(t *testing.T) {
 	cfg := stubApplyConfigForSession()
 	req := callToolRequest("submit_tailor_t1", map[string]any{
 		"session_id": "any-id",
-		// skill_rewrites absent
+		// edits absent
 	})
 	result := mcpserver.HandleSubmitTailorT1WithConfig(context.Background(), &req, &cfg, &config.Config{})
 	text := extractText(t, result)
-	if !strings.Contains(text, "missing_skill_rewrites") {
-		t.Errorf("expected missing_skill_rewrites error, got: %s", text)
+	if !strings.Contains(text, "missing_edits") {
+		t.Errorf("expected missing_edits error, got: %s", text)
 	}
 }
 
-func TestHandleSubmitTailorT1_InvalidSkillRewritesJSON_ReturnsError(t *testing.T) {
+func TestHandleSubmitTailorT1_InvalidEditsJSON_ReturnsError(t *testing.T) {
 	cfg := stubApplyConfigForSession()
 	req := callToolRequest("submit_tailor_t1", map[string]any{
-		"session_id":     "any-id",
-		"skill_rewrites": `not-valid-json`,
+		"session_id": "any-id",
+		"edits":      `not-valid-json`,
 	})
 	result := mcpserver.HandleSubmitTailorT1WithConfig(context.Background(), &req, &cfg, &config.Config{})
 	text := extractText(t, result)
-	if !strings.Contains(text, "invalid_skill_rewrites") {
-		t.Errorf("expected invalid_skill_rewrites error, got: %s", text)
+	if !strings.Contains(text, "invalid_edits") {
+		t.Errorf("expected invalid_edits error, got: %s", text)
 	}
 }
 
-func TestHandleSubmitTailorT1_EmptySkillRewrites_ReturnsError(t *testing.T) {
+func TestHandleSubmitTailorT1_EmptyEdits_ReturnsError(t *testing.T) {
 	cfg := stubApplyConfigForSession()
 	req := callToolRequest("submit_tailor_t1", map[string]any{
-		"session_id":     "any-id",
-		"skill_rewrites": `[]`,
+		"session_id": "any-id",
+		"edits":      `[]`,
 	})
 	result := mcpserver.HandleSubmitTailorT1WithConfig(context.Background(), &req, &cfg, &config.Config{})
 	text := extractText(t, result)
-	if !strings.Contains(text, "empty_skill_rewrites") {
-		t.Errorf("expected empty_skill_rewrites error, got: %s", text)
+	if !strings.Contains(text, "empty_edits") {
+		t.Errorf("expected empty_edits error, got: %s", text)
 	}
 }
 
-func TestHandleSubmitTailorT1_AllEmptyOriginalEntries_ReturnsError(t *testing.T) {
+func TestHandleSubmitTailorT1_WrongSection_ReturnsError(t *testing.T) {
 	cfg := stubApplyConfigForSession()
 	req := callToolRequest("submit_tailor_t1", map[string]any{
-		"session_id":     "any-id",
-		"skill_rewrites": `[{"original":"","replacement":"x"},{"original":"","replacement":"y"}]`,
+		"session_id": "any-id",
+		"edits":      `[{"section":"experience","op":"add","value":"x"}]`,
 	})
 	result := mcpserver.HandleSubmitTailorT1WithConfig(context.Background(), &req, &cfg, &config.Config{})
 	text := extractText(t, result)
-	if !strings.Contains(text, "empty_skill_rewrites") {
-		t.Errorf("expected empty_skill_rewrites error, got: %s", text)
+	if !strings.Contains(text, "invalid_section") {
+		t.Errorf("expected invalid_section error, got: %s", text)
 	}
 }
 
-func TestHandleSubmitTailorT1_TooManyRewrites_ReturnsError(t *testing.T) {
+func TestHandleSubmitTailorT1_TooManyEdits_ReturnsError(t *testing.T) {
 	cfg := stubApplyConfigForSession()
 	cfg.Defaults = &config.AppDefaults{
 		Tailor: config.TailorDefaults{MaxTier1SkillRewrites: 2},
@@ -761,15 +790,17 @@ func TestHandleSubmitTailorT1_TooManyRewrites_ReturnsError(t *testing.T) {
 	kwReq := callToolRequest("submit_keywords", map[string]any{"session_id": sessionID, "jd_json": jdJSON})
 	mcpserver.HandleSubmitKeywordsWithConfig(context.Background(), &kwReq, &cfg, &config.Config{})
 
-	// 3 rewrites exceeds cap of 2.
+	// 3 edits exceeds cap of 2.
 	t1Req := callToolRequest("submit_tailor_t1", map[string]any{
-		"session_id":     sessionID,
-		"skill_rewrites": `[{"original":"A","replacement":"B"},{"original":"C","replacement":"D"},{"original":"E","replacement":"F"}]`,
+		"session_id": sessionID,
+		"edits": `[{"section":"skills","op":"add","value":"A"},` +
+			`{"section":"skills","op":"add","value":"B"},` +
+			`{"section":"skills","op":"add","value":"C"}]`,
 	})
 	result := mcpserver.HandleSubmitTailorT1WithConfig(context.Background(), &t1Req, &cfg, &config.Config{})
 	text := extractText(t, result)
-	if !strings.Contains(text, "too_many_rewrites") {
-		t.Errorf("expected too_many_rewrites error, got: %s", text)
+	if !strings.Contains(text, "too_many_edits") {
+		t.Errorf("expected too_many_edits error, got: %s", text)
 	}
 }
 
@@ -778,8 +809,8 @@ func TestHandleSubmitTailorT1_TooManyRewrites_ReturnsError(t *testing.T) {
 func TestHandleSubmitTailorT2_SessionNotFound_ReturnsError(t *testing.T) {
 	cfg := stubApplyConfigForSession()
 	req := callToolRequest("submit_tailor_t2", map[string]any{
-		"session_id":      "no-such-session",
-		"bullet_rewrites": `[{"original":"old","replacement":"new"}]`,
+		"session_id": "no-such-session",
+		"edits":      `[{"section":"experience","op":"replace","target":"exp-0-b0","value":"new bullet"}]`,
 	})
 	result := mcpserver.HandleSubmitTailorT2WithConfig(context.Background(), &req, &cfg, &config.Config{})
 	text := extractText(t, result)
@@ -806,8 +837,8 @@ func TestHandleSubmitTailorT2_WrongState_ReturnsError(t *testing.T) {
 	sessionID, _ := loadEnv["session_id"].(string)
 
 	req := callToolRequest("submit_tailor_t2", map[string]any{
-		"session_id":      sessionID,
-		"bullet_rewrites": `[{"original":"old","replacement":"new"}]`,
+		"session_id": sessionID,
+		"edits":      `[{"section":"experience","op":"replace","target":"exp-0-b0","value":"new bullet"}]`,
 	})
 	result := mcpserver.HandleSubmitTailorT2WithConfig(context.Background(), &req, &cfg, &config.Config{})
 	text := extractText(t, result)
@@ -816,47 +847,60 @@ func TestHandleSubmitTailorT2_WrongState_ReturnsError(t *testing.T) {
 	}
 }
 
-func TestHandleSubmitTailorT2_MissingBulletRewrites_ReturnsError(t *testing.T) {
+func TestHandleSubmitTailorT2_MissingEdits_ReturnsError(t *testing.T) {
 	cfg := stubApplyConfigForSession()
 	req := callToolRequest("submit_tailor_t2", map[string]any{
 		"session_id": "any-id",
-		// bullet_rewrites missing
+		// edits missing
 	})
 	result := mcpserver.HandleSubmitTailorT2WithConfig(context.Background(), &req, &cfg, &config.Config{})
 	text := extractText(t, result)
-	if !strings.Contains(text, "missing_bullet_rewrites") {
-		t.Errorf("expected missing_bullet_rewrites error, got: %s", text)
+	if !strings.Contains(text, "missing_edits") {
+		t.Errorf("expected missing_edits error, got: %s", text)
 	}
 }
 
-func TestHandleSubmitTailorT2_InvalidBulletRewritesJSON_ReturnsError(t *testing.T) {
+func TestHandleSubmitTailorT2_InvalidEditsJSON_ReturnsError(t *testing.T) {
 	cfg := stubApplyConfigForSession()
 	req := callToolRequest("submit_tailor_t2", map[string]any{
-		"session_id":      "any-id",
-		"bullet_rewrites": `not-valid-json`,
+		"session_id": "any-id",
+		"edits":      `not-valid-json`,
 	})
 	result := mcpserver.HandleSubmitTailorT2WithConfig(context.Background(), &req, &cfg, &config.Config{})
 	text := extractText(t, result)
-	if !strings.Contains(text, "invalid_bullet_rewrites") {
-		t.Errorf("expected invalid_bullet_rewrites error, got: %s", text)
+	if !strings.Contains(text, "invalid_edits") {
+		t.Errorf("expected invalid_edits error, got: %s", text)
 	}
 }
 
-func TestHandleSubmitTailorT2_EmptyBulletRewrites_ReturnsError(t *testing.T) {
+func TestHandleSubmitTailorT2_EmptyEdits_ReturnsError(t *testing.T) {
 	cfg := stubApplyConfigForSession()
 	req := callToolRequest("submit_tailor_t2", map[string]any{
-		"session_id":      "any-id",
-		"bullet_rewrites": `[]`,
+		"session_id": "any-id",
+		"edits":      `[]`,
 	})
 	result := mcpserver.HandleSubmitTailorT2WithConfig(context.Background(), &req, &cfg, &config.Config{})
 	text := extractText(t, result)
-	if !strings.Contains(text, "empty_bullet_rewrites") {
-		t.Errorf("expected empty_bullet_rewrites error, got: %s", text)
+	if !strings.Contains(text, "empty_edits") {
+		t.Errorf("expected empty_edits error, got: %s", text)
+	}
+}
+
+func TestHandleSubmitTailorT2_WrongSection_ReturnsError(t *testing.T) {
+	cfg := stubApplyConfigForSession()
+	req := callToolRequest("submit_tailor_t2", map[string]any{
+		"session_id": "any-id",
+		"edits":      `[{"section":"skills","op":"add","value":"x"}]`,
+	})
+	result := mcpserver.HandleSubmitTailorT2WithConfig(context.Background(), &req, &cfg, &config.Config{})
+	text := extractText(t, result)
+	if !strings.Contains(text, "invalid_section") {
+		t.Errorf("expected invalid_section error, got: %s", text)
 	}
 }
 
 func TestHandleSubmitTailorT2_HappyPath_ReturnsNewScore(t *testing.T) {
-	cfg := stubApplyConfigForSession()
+	cfg := stubApplyConfigWithExperienceSections() // has sections with experience bullets
 
 	// load_jd
 	loadReq := callToolRequest("load_jd", map[string]any{"jd_raw_text": "Senior Go engineer. Skills: go."})
@@ -871,8 +915,10 @@ func TestHandleSubmitTailorT2_HappyPath_ReturnsNewScore(t *testing.T) {
 	mcpserver.HandleSubmitKeywordsWithConfig(context.Background(), &kwReq, &cfg, &config.Config{})
 
 	// submit_tailor_t2 (directly after scored, skipping T1)
-	rewrites := `[{"original":"golang experience senior engineer 5 years","replacement":"golang experience senior engineer 5 years, Kubernetes"}]`
-	t2Req := callToolRequest("submit_tailor_t2", map[string]any{"session_id": sessionID, "bullet_rewrites": rewrites})
+	t2Req := callToolRequest("submit_tailor_t2", map[string]any{
+		"session_id": sessionID,
+		"edits":      `[{"section":"experience","op":"replace","target":"exp-0-b0","value":"Built distributed systems in Go and Kubernetes"}]`,
+	})
 	result := mcpserver.HandleSubmitTailorT2WithConfig(context.Background(), &t2Req, &cfg, &config.Config{})
 	text := extractText(t, result)
 
@@ -887,8 +933,14 @@ func TestHandleSubmitTailorT2_HappyPath_ReturnsNewScore(t *testing.T) {
 		t.Errorf("next_action = %v, want cover_letter", env["next_action"])
 	}
 	data, _ := env["data"].(map[string]any)
-	if data == nil || data["new_score"] == nil || data["substitutions_made"] == nil {
-		t.Errorf("expected new_score and substitutions_made in data, got: %s", text)
+	if data == nil || data["new_score"] == nil {
+		t.Errorf("expected new_score in data, got: %s", text)
+	}
+	if _, ok := data["edits_applied"]; !ok {
+		t.Errorf("expected edits_applied key in data, got: %s", text)
+	}
+	if _, ok := data["edits_rejected"]; !ok {
+		t.Errorf("expected edits_rejected key in data, got: %s", text)
 	}
 }
 

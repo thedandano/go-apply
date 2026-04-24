@@ -17,9 +17,8 @@ You handle reasoning: extract keywords from JD text, interpret scores, drive tai
 |------|---------|------------|
 | load_jd | Fetch JD + start session | jd_url OR jd_raw_text |
 | submit_keywords | Score resumes against extracted JD | session_id (req), jd_json (req) |
-| submit_tailor_t1 | Apply skill rewrites scoped to the Skills section | session_id (req), skill_rewrites (array of {original, replacement}, req) |
-| submit_tailor_t2 | Rewrite resume bullets to surface missing keywords | session_id (req), bullet_rewrites (array of {original, rewritten}, req) |
-| submit_edits | Apply structured edits to resume sections | session_id (req), edits (JSON array of {section, op, target?, value?}, req) |
+| submit_tailor_t1 | Apply structured edits to the Skills section and rescore | session_id (req), edits (JSON array of {section:"skills", op, value}, req) |
+| submit_tailor_t2 | Apply structured edits to Experience bullets and rescore | session_id (req), edits (JSON array of {section:"experience", op, target, value?}, req) |
 | preview_ats_extraction | Return constructed ATS text for the best resume | session_id (req) |
 | finalize | Persist record + close session | session_id (req), cover_letter (opt) |
 | onboard_user | Store resume + skills + accomplishments | resume_content, resume_label, skills, accomplishments |
@@ -68,30 +67,22 @@ next_action values:
 Draft a cover letter, then call finalize with cover_letter.
 
 **next_action == "tailor_t1"** (40 ≤ score < 70):
-1. Identify required/preferred keywords missing from the best resume. Use skills_section from the submit_keywords response to see exactly what is in the Skills section and write precise {original, replacement} pairs.
-2. Call submit_tailor_t1 with skill_rewrites: [{"original": "AWS", "replacement": "AWS, GCP"}, ...] (max 5 items). Use prefer one-for-one swaps over pure appends to keep section length stable (e.g. replace "AWS" with "AWS, GCP" rather than appending a new line).
+1. Identify required/preferred keywords missing from the best resume. Use skills_section from the submit_keywords response to see what is in the Skills section.
+2. Call submit_tailor_t1 with edits: [{"section":"skills","op":"replace","value":"AWS, GCP"}, ...] (max 5 items). Use prefer one-for-one replace over pure add to keep section length stable (e.g. replace "AWS" with "AWS, GCP"). Section must be "skills".
 3. Read the new next_action from the T1 response — do NOT wait for the user:
    - "tailor_t2" → immediately proceed to T2 below.
    - "cover_letter" → draft cover letter and call finalize.
+Returns: edits_applied (count), edits_rejected (array with reasons), previous_score, new_score.
 
 **next_action == "tailor_t2"** (always follows T1 — never skip T1 to reach T2):
-1. Identify 1–4 bullets in the best resume that could be rewritten to surface missing keywords.
-2. Call submit_tailor_t2 with bullet_rewrites: [{"original": "...", "rewritten": "..."}, ...].
+1. Identify 1–4 bullets in the best resume that could be rewritten to surface missing keywords. Use sections.experience from the submit_keywords response to see bullet targets ("exp-<i>-b<j>", 0-indexed).
+2. Call submit_tailor_t2 with edits: [{"section":"experience","op":"replace","target":"exp-0-b2","value":"Led migration to Kubernetes, reducing ops toil by 30%"}, ...]. Section must be "experience".
 3. Read the new next_action from the T2 response — do NOT wait for the user:
    - "cover_letter" → draft cover letter and call finalize.
+Returns: edits_applied (count), edits_rejected (array with reasons), previous_score, new_score.
 
 **next_action == "advise_skip"** (score < 40):
 Tell the user: "Structural mismatch — tailoring cannot close this gap. Score: NN/100." Do not proceed to tailoring.
-
-### Structured edits (optional — when sections available)
-
-If submit_keywords returns skills_section_found: true, you may call submit_edits as an alternative or supplement to T1/T2.
-Each edit is an object with: section ("skills" or "experience"), op ("add"|"replace"|"remove"), target (required for replace/remove on bullets: "exp-<i>-b<j>", 0-indexed), value (required for add/replace).
-
-Example: [{"section":"skills","op":"replace","target":"exp-0-b1","value":"Rewrote bullet with keyword"}]
-
-Returns: edits_applied, edits_rejected (with reasons), new_sections.
-After submitting edits you may rescore by calling submit_keywords again.
 
 ### ATS preview (optional)
 

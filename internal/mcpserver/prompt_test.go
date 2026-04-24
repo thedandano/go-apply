@@ -62,21 +62,24 @@ func TestWorkflowPromptHandler_ContainsSkillRewriteGuidance(t *testing.T) {
 	text := result.Messages[0].Content.(mcp.TextContent).Text
 
 	if !strings.Contains(text, "prefer one-for-one") {
-		t.Error("workflow prompt missing 'prefer one-for-one' skill_rewrites guidance (FR-006)")
+		t.Error("workflow prompt missing 'prefer one-for-one' tailoring guidance (FR-006)")
 	}
-	if !strings.Contains(text, "skill_rewrites") {
-		t.Error("workflow prompt must reference skill_rewrites parameter")
+	if !strings.Contains(text, "edits") {
+		t.Error("workflow prompt must reference edits parameter")
 	}
 }
 
-func TestWorkflowPromptHandler_ContainsStructuredEditTools(t *testing.T) {
+func TestWorkflowPromptHandler_ContainsTailoringTools(t *testing.T) {
 	result, _ := mcpserver.HandleWorkflowPrompt(context.Background(), mcp.GetPromptRequest{})
 	text := result.Messages[0].Content.(mcp.TextContent).Text
 
-	for _, want := range []string{"submit_edits", "preview_ats_extraction"} {
+	for _, want := range []string{"submit_tailor_t1", "submit_tailor_t2", "preview_ats_extraction"} {
 		if !strings.Contains(text, want) {
-			t.Errorf("workflow prompt missing new tool %q", want)
+			t.Errorf("workflow prompt missing tool %q", want)
 		}
+	}
+	if strings.Contains(text, "submit_edits") {
+		t.Error("workflow prompt must not reference removed tool submit_edits")
 	}
 }
 

@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -376,40 +377,30 @@ func HandleSubmitTailorT1WithConfig(ctx context.Context, req *mcp.CallToolReques
 		return envelopeResult(stageErrorEnvelope("", "submit_tailor_t1", "missing_session", "session_id is required", false))
 	}
 
-	// Validation gate 1: param present.
-	skillRewritesStr := req.GetString("skill_rewrites", "")
+	editsStr := req.GetString("edits", "")
 	slog.DebugContext(ctx, "mcp tool invoked",
 		slog.String("tool", "submit_tailor_t1"),
 		slog.String("session_id", sessionID),
-		logger.PayloadAttr("skill_rewrites", skillRewritesStr, logger.Verbose()),
+		logger.PayloadAttr("edits", editsStr, logger.Verbose()),
 	)
-	if skillRewritesStr == "" {
-		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t1", "missing_skill_rewrites", "skill_rewrites is required", false))
+	if editsStr == "" {
+		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t1", "missing_edits", "edits is required", false))
 	}
 
-	// Validation gate 2: valid JSON.
-	var rewrites []port.BulletRewrite
-	if err := json.Unmarshal([]byte(skillRewritesStr), &rewrites); err != nil {
-		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t1", "invalid_skill_rewrites",
-			fmt.Sprintf("skill_rewrites parse failed: %v", err), false))
+	var edits []port.Edit
+	if err := json.Unmarshal([]byte(editsStr), &edits); err != nil {
+		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t1", "invalid_edits",
+			fmt.Sprintf("edits parse failed: %v", err), false))
 	}
-
-	// Validation gate 3: non-empty array.
-	if len(rewrites) == 0 {
-		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t1", "empty_skill_rewrites",
-			"skill_rewrites must contain at least one entry", false))
+	if len(edits) == 0 {
+		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t1", "empty_edits",
+			"edits must contain at least one entry", false))
 	}
-
-	// Validation gate 4: at least one entry with a non-empty Original after filtering.
-	var filtered []port.BulletRewrite
-	for _, rw := range rewrites {
-		if rw.Original != "" {
-			filtered = append(filtered, rw)
+	for _, e := range edits {
+		if e.Section != "skills" {
+			return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t1", "invalid_section",
+				fmt.Sprintf("submit_tailor_t1 only accepts section %q; got %q", "skills", e.Section), false))
 		}
-	}
-	if len(filtered) == 0 {
-		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t1", "empty_skill_rewrites",
-			"skill_rewrites must contain at least one entry with a non-empty original", false))
 	}
 
 	sess := sessions.Get(sessionID)
@@ -436,23 +427,22 @@ func HandleSubmitTailorT1WithConfig(ctx context.Context, req *mcp.CallToolReques
 		cfg = &config.Config{}
 	}
 
-	// Validation gate 5: cap check.
 	if deps.Defaults != nil {
-		maxRewrites := deps.Defaults.Tailor.MaxTier1SkillRewrites
-		if maxRewrites > 0 && len(filtered) > maxRewrites {
-			return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t1", "too_many_rewrites",
-				fmt.Sprintf("skill_rewrites length %d exceeds maximum %d", len(filtered), maxRewrites), false))
+		maxEdits := deps.Defaults.Tailor.MaxTier1SkillRewrites
+		if maxEdits > 0 && len(edits) > maxEdits {
+			return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t1", "too_many_edits",
+				fmt.Sprintf("edits length %d exceeds maximum %d", len(edits), maxEdits), false))
 		}
 	}
 
-	baseText := sess.TailoredText
-	if baseText == "" {
-		text, err := loadBestResumeText(deps, sess.ScoreResult.BestLabel)
-		if err != nil {
-			slog.ErrorContext(ctx, "submit_tailor_t1: load resume failed", "session_id", sessionID, "error", err)
-			return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t1", "load_resume_failed", err.Error(), false))
+	sections, err := deps.Resumes.LoadSections(sess.ScoreResult.BestLabel)
+	if err != nil {
+		if errors.Is(err, model.ErrSectionsMissing) {
+			return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t1", "sections_missing",
+				"no sections found for this resume — re-onboard with sections field", false))
 		}
-		baseText = text
+		slog.ErrorContext(ctx, "submit_tailor_t1: load sections failed", "session_id", sessionID, "error", err)
+		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t1", "load_sections_failed", err.Error(), false))
 	}
 
 	pres := mcppres.New()
@@ -460,36 +450,28 @@ func HandleSubmitTailorT1WithConfig(ctx context.Context, req *mcp.CallToolReques
 	pl := pipeline.NewApplyPipeline(deps)
 
 	logger.Banner(ctx, slog.Default(), "Tailor", "T1")
-	// Apply skill rewrites: structured sections path when available, text fallback for rescoring.
-	tailored := baseText
-	substitutionsMade := 0
-	skillsSectionFound := false
+	svc := tailor.New(nil, deps.Defaults, slog.Default())
+	editResult, editErr := svc.ApplyEdits(ctx, sections, edits)
+	if editErr != nil {
+		slog.ErrorContext(ctx, "submit_tailor_t1: apply edits failed", "session_id", sessionID, "error", editErr)
+		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t1", "apply_edits_failed", editErr.Error(), false))
+	}
 
-	if sections, sectErr := deps.Resumes.LoadSections(sess.ScoreResult.BestLabel); sectErr == nil && sections.Skills != nil {
-		skillsSectionFound = true
-		for _, rw := range filtered {
-			if rw.Original != "" && strings.Contains(sections.Skills.Flat, rw.Original) {
-				sections.Skills.Flat = strings.ReplaceAll(sections.Skills.Flat, rw.Original, rw.Replacement)
-				substitutionsMade++
-			}
-		}
-		if saveErr := deps.Resumes.SaveSections(sess.ScoreResult.BestLabel, sections); saveErr != nil {
-			slog.WarnContext(ctx, "submit_tailor_t1: skills edits applied but sidecar not persisted",
-				slog.String("session_id", sessionID), slog.Any("error", saveErr))
-		}
+	tailored, renderErr := renderSvc.Render(&editResult.NewSections)
+	if renderErr != nil {
+		slog.ErrorContext(ctx, "submit_tailor_t1: render failed", "session_id", sessionID, "error", renderErr)
+		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t1", "render_failed", renderErr.Error(), false))
 	}
-	for _, rw := range filtered {
-		if rw.Original != "" && strings.Contains(tailored, rw.Original) {
-			tailored = strings.ReplaceAll(tailored, rw.Original, rw.Replacement)
-			if !skillsSectionFound {
-				substitutionsMade++
-			}
-		}
+
+	if saveErr := deps.Resumes.SaveSections(sess.ScoreResult.BestLabel, editResult.NewSections); saveErr != nil {
+		slog.WarnContext(ctx, "submit_tailor_t1: edits applied but sidecar not persisted",
+			slog.String("session_id", sessionID), slog.Any("error", saveErr))
 	}
+
 	slog.InfoContext(ctx, "tailor T1 complete",
 		slog.String("session_id", sessionID),
-		slog.Int("substitutions_made", substitutionsMade),
-		slog.Bool("skills_section_found", skillsSectionFound),
+		slog.Int("edits_applied", len(editResult.EditsApplied)),
+		slog.Int("edits_rejected", len(editResult.EditsRejected)),
 	)
 	sess.TailoredText = tailored
 	sess.State = stateT1Applied
@@ -510,16 +492,16 @@ func HandleSubmitTailorT1WithConfig(ctx context.Context, req *mcp.CallToolReques
 	sess.ScoreResult.BestScore = newScoreTotal
 
 	type t1Data struct {
-		PreviousScore      float64           `json:"previous_score"`
-		NewScore           model.ScoreResult `json:"new_score"`
-		SubstitutionsMade  int               `json:"substitutions_made"`
-		SkillsSectionFound bool              `json:"skills_section_found"`
+		PreviousScore float64              `json:"previous_score"`
+		NewScore      model.ScoreResult    `json:"new_score"`
+		EditsApplied  int                  `json:"edits_applied"`
+		EditsRejected []port.EditRejection `json:"edits_rejected"`
 	}
 	resultData := t1Data{
-		PreviousScore:      previousScore,
-		NewScore:           newScore,
-		SubstitutionsMade:  substitutionsMade,
-		SkillsSectionFound: skillsSectionFound,
+		PreviousScore: previousScore,
+		NewScore:      newScore,
+		EditsApplied:  len(editResult.EditsApplied),
+		EditsRejected: editResult.EditsRejected,
 	}
 	resultBytes, _ := json.Marshal(resultData)
 	slog.DebugContext(ctx, "mcp tool result",
@@ -543,23 +525,29 @@ func HandleSubmitTailorT2WithConfig(ctx context.Context, req *mcp.CallToolReques
 	if sessionID == "" {
 		return envelopeResult(stageErrorEnvelope("", "submit_tailor_t2", "missing_session", "session_id is required", false))
 	}
-	bulletRewritesStr := req.GetString("bullet_rewrites", "")
+	editsStr := req.GetString("edits", "")
 	slog.DebugContext(ctx, "mcp tool invoked",
 		slog.String("tool", "submit_tailor_t2"),
 		slog.String("session_id", sessionID),
-		logger.PayloadAttr("bullet_rewrites", bulletRewritesStr, logger.Verbose()),
+		logger.PayloadAttr("edits", editsStr, logger.Verbose()),
 	)
-	if bulletRewritesStr == "" {
-		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t2", "missing_bullet_rewrites", "bullet_rewrites is required", false))
+	if editsStr == "" {
+		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t2", "missing_edits", "edits is required", false))
 	}
-	var rewrites []port.BulletRewrite
-	if err := json.Unmarshal([]byte(bulletRewritesStr), &rewrites); err != nil {
-		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t2", "invalid_bullet_rewrites",
-			fmt.Sprintf("bullet_rewrites parse failed: %v", err), false))
+	var edits []port.Edit
+	if err := json.Unmarshal([]byte(editsStr), &edits); err != nil {
+		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t2", "invalid_edits",
+			fmt.Sprintf("edits parse failed: %v", err), false))
 	}
-	if len(rewrites) == 0 {
-		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t2", "empty_bullet_rewrites",
-			"bullet_rewrites must contain at least one entry", false))
+	if len(edits) == 0 {
+		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t2", "empty_edits",
+			"edits must contain at least one entry", false))
+	}
+	for _, e := range edits {
+		if e.Section != "experience" {
+			return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t2", "invalid_section",
+				fmt.Sprintf("submit_tailor_t2 only accepts section %q; got %q", "experience", e.Section), false))
+		}
 	}
 
 	sess := sessions.Get(sessionID)
@@ -586,14 +574,14 @@ func HandleSubmitTailorT2WithConfig(ctx context.Context, req *mcp.CallToolReques
 		cfg = &config.Config{}
 	}
 
-	baseText := sess.TailoredText
-	if baseText == "" {
-		text, err := loadBestResumeText(deps, sess.ScoreResult.BestLabel)
-		if err != nil {
-			slog.ErrorContext(ctx, "submit_tailor_t2: load resume failed", "session_id", sessionID, "error", err)
-			return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t2", "load_resume_failed", err.Error(), false))
+	sections, err := deps.Resumes.LoadSections(sess.ScoreResult.BestLabel)
+	if err != nil {
+		if errors.Is(err, model.ErrSectionsMissing) {
+			return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t2", "sections_missing",
+				"no sections found for this resume — re-onboard with sections field", false))
 		}
-		baseText = text
+		slog.ErrorContext(ctx, "submit_tailor_t2: load sections failed", "session_id", sessionID, "error", err)
+		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t2", "load_sections_failed", err.Error(), false))
 	}
 
 	pres := mcppres.New()
@@ -601,26 +589,31 @@ func HandleSubmitTailorT2WithConfig(ctx context.Context, req *mcp.CallToolReques
 	pl := pipeline.NewApplyPipeline(deps)
 
 	logger.Banner(ctx, slog.Default(), "Tailor", "T2")
-	tailored, substitutionsMade := tailor.ApplyBulletRewrites(baseText, rewrites)
-	slog.InfoContext(ctx, "tailor T2 complete", "substitutions_made", substitutionsMade)
+	svc := tailor.New(nil, deps.Defaults, slog.Default())
+	editResult, editErr := svc.ApplyEdits(ctx, sections, edits)
+	if editErr != nil {
+		slog.ErrorContext(ctx, "submit_tailor_t2: apply edits failed", "session_id", sessionID, "error", editErr)
+		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t2", "apply_edits_failed", editErr.Error(), false))
+	}
+
+	tailored, renderErr := renderSvc.Render(&editResult.NewSections)
+	if renderErr != nil {
+		slog.ErrorContext(ctx, "submit_tailor_t2: render failed", "session_id", sessionID, "error", renderErr)
+		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t2", "render_failed", renderErr.Error(), false))
+	}
+
+	if saveErr := deps.Resumes.SaveSections(sess.ScoreResult.BestLabel, editResult.NewSections); saveErr != nil {
+		slog.WarnContext(ctx, "submit_tailor_t2: edits applied but sidecar not persisted",
+			slog.String("session_id", sessionID), slog.Any("error", saveErr))
+	}
+
+	slog.InfoContext(ctx, "tailor T2 complete",
+		slog.String("session_id", sessionID),
+		slog.Int("edits_applied", len(editResult.EditsApplied)),
+		slog.Int("edits_rejected", len(editResult.EditsRejected)),
+	)
 	sess.TailoredText = tailored
 	sess.State = stateT2Applied
-
-	if sections, sectErr := deps.Resumes.LoadSections(sess.ScoreResult.BestLabel); sectErr == nil {
-		for i := range sections.Experience {
-			for j, bullet := range sections.Experience[i].Bullets {
-				for _, rw := range rewrites {
-					if rw.Original != "" && rw.Replacement != "" && bullet == rw.Original {
-						sections.Experience[i].Bullets[j] = rw.Replacement
-					}
-				}
-			}
-		}
-		if saveErr := deps.Resumes.SaveSections(sess.ScoreResult.BestLabel, sections); saveErr != nil {
-			slog.WarnContext(ctx, "submit_tailor_t2: bullet edits applied but sidecar not persisted",
-				slog.String("session_id", sessionID), slog.Any("error", saveErr))
-		}
-	}
 
 	logger.Banner(ctx, slog.Default(), "Score", "After T2")
 	newScore, err := pl.ScoreResume(ctx, tailored, sess.ScoreResult.BestLabel, &sess.JD, cfg)
@@ -638,14 +631,16 @@ func HandleSubmitTailorT2WithConfig(ctx context.Context, req *mcp.CallToolReques
 	sess.ScoreResult.BestScore = newScoreTotal
 
 	type t2Data struct {
-		PreviousScore     float64           `json:"previous_score"`
-		NewScore          model.ScoreResult `json:"new_score"`
-		SubstitutionsMade int               `json:"substitutions_made"`
+		PreviousScore float64              `json:"previous_score"`
+		NewScore      model.ScoreResult    `json:"new_score"`
+		EditsApplied  int                  `json:"edits_applied"`
+		EditsRejected []port.EditRejection `json:"edits_rejected"`
 	}
 	resultData := t2Data{
-		PreviousScore:     previousScore,
-		NewScore:          newScore,
-		SubstitutionsMade: substitutionsMade,
+		PreviousScore: previousScore,
+		NewScore:      newScore,
+		EditsApplied:  len(editResult.EditsApplied),
+		EditsRejected: editResult.EditsRejected,
 	}
 	resultBytes, _ := json.Marshal(resultData)
 	slog.DebugContext(ctx, "mcp tool result",
