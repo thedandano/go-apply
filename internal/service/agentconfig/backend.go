@@ -69,22 +69,25 @@ func newHermesBackend(ops *fileOps) *hermesBackend     { return &hermesBackend{o
 
 // ---- Path resolution --------------------------------------------------------
 
-// configPath returns the Claude config file path:
-//  1. ~/.claude/settings.json if it exists
-//  2. ~/Library/Application Support/Claude/claude_desktop_config.json (macOS only, if exists)
-//  3. ~/.claude/settings.json as default
+// configPath returns the Claude Code user-scope config file (~/.claude.json).
+// User-scope MCP servers live under the top-level "mcpServers" key and load
+// across every project. See https://code.claude.com/docs/en/mcp#user-scope.
 func (b *claudeBackend) configPath() string {
-	cliPath := filepath.Join(b.ops.homeDir, ".claude", "settings.json")
-	if b.ops.exists(cliPath) {
-		return cliPath
-	}
-	if b.ops.goos == "darwin" {
-		desktopPath := filepath.Join(b.ops.homeDir, "Library", "Application Support", "Claude", "claude_desktop_config.json")
-		if b.ops.exists(desktopPath) {
-			return desktopPath
-		}
-	}
-	return cliPath
+	return filepath.Join(b.ops.homeDir, ".claude.json")
+}
+
+// legacyConfigPath returns the old settings.json path written by earlier
+// versions of go-apply. Claude Code does not read MCP servers from this file;
+// it is kept only for cleanup.
+func (b *claudeBackend) legacyConfigPath() string {
+	return filepath.Join(b.ops.homeDir, ".claude", "settings.json")
+}
+
+// sweepLegacy removes serverName from the legacy settings.json location so
+// stale entries left by older go-apply releases do not confuse users.
+// Errors are silently ignored — cleanup must not fail the primary operation.
+func (b *claudeBackend) sweepLegacy(serverName string) {
+	_, _ = unregisterWith(b.ops, b.legacyConfigPath(), []string{"mcpServers"}, serverName, RemoveJSON)
 }
 
 // configPath returns the OpenClaw config file path, checking in priority order:
@@ -185,15 +188,18 @@ func unregisterWith(ops *fileOps, path string, keyPath []string, serverName stri
 // ---- claudeBackend implementation ------------------------------------------
 
 func (b *claudeBackend) Register(serverName string, entry port.MCPServerEntry) (port.RegistrationResult, error) {
+	b.sweepLegacy(serverName)
 	return registerWith(b.ops, b.configPath(), []string{"mcpServers"}, serverName, entry, MergeJSON, false)
 }
 
 // RegisterForce overwrites an existing Claude MCP server registration unconditionally.
 func (b *claudeBackend) RegisterForce(serverName string, entry port.MCPServerEntry) (port.RegistrationResult, error) {
+	b.sweepLegacy(serverName)
 	return registerWith(b.ops, b.configPath(), []string{"mcpServers"}, serverName, entry, MergeJSON, true)
 }
 
 func (b *claudeBackend) Unregister(serverName string) (port.RegistrationResult, error) {
+	b.sweepLegacy(serverName)
 	return unregisterWith(b.ops, b.configPath(), []string{"mcpServers"}, serverName, RemoveJSON)
 }
 
