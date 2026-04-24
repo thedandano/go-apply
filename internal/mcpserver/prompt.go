@@ -17,7 +17,7 @@ You handle reasoning: extract keywords from JD text, interpret scores, drive tai
 |------|---------|------------|
 | load_jd | Fetch JD + start session | jd_url OR jd_raw_text |
 | submit_keywords | Score resumes against extracted JD | session_id (req), jd_json (req) |
-| submit_tailor_t1 | Inject missing keywords into the skills section | session_id (req), skill_adds (string array, req) |
+| submit_tailor_t1 | Apply skill rewrites scoped to the Skills section | session_id (req), skill_rewrites (array of {original, replacement}, req) |
 | submit_tailor_t2 | Rewrite resume bullets to surface missing keywords | session_id (req), bullet_rewrites (array of {original, rewritten}, req) |
 | finalize | Persist record + close session | session_id (req), cover_letter (opt) |
 | onboard_user | Store resume + skills + accomplishments | resume_content, resume_label, skills, accomplishments |
@@ -66,8 +66,8 @@ next_action values:
 Draft a cover letter, then call finalize with cover_letter.
 
 **next_action == "tailor_t1"** (40 ≤ score < 70):
-1. Identify required/preferred keywords that are missing from the best resume.
-2. Call submit_tailor_t1 with skill_adds: ["keyword1", "keyword2", ...] (3–8 items).
+1. Identify required/preferred keywords missing from the best resume. Use skills_section from the submit_keywords response to see exactly what is in the Skills section and write precise {original, replacement} pairs.
+2. Call submit_tailor_t1 with skill_rewrites: [{"original": "AWS", "replacement": "AWS, GCP"}, ...] (max 5 items). Use prefer one-for-one swaps over pure appends to keep section length stable (e.g. replace "AWS" with "AWS, GCP" rather than appending a new line).
 3. Read the new next_action from the T1 response — do NOT wait for the user:
    - "tailor_t2" → immediately proceed to T2 below.
    - "cover_letter" → draft cover letter and call finalize.

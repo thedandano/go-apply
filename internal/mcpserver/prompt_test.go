@@ -56,6 +56,19 @@ func TestWorkflowPromptHandler_ContainsTailorTools(t *testing.T) {
 	}
 }
 
+// T013a: FR-006 testability requirement — prompt must contain "prefer one-for-one" guidance.
+func TestWorkflowPromptHandler_ContainsSkillRewriteGuidance(t *testing.T) {
+	result, _ := mcpserver.HandleWorkflowPrompt(context.Background(), mcp.GetPromptRequest{})
+	text := result.Messages[0].Content.(mcp.TextContent).Text
+
+	if !strings.Contains(text, "prefer one-for-one") {
+		t.Error("workflow prompt missing 'prefer one-for-one' skill_rewrites guidance (FR-006)")
+	}
+	if !strings.Contains(text, "skill_rewrites") {
+		t.Error("workflow prompt must reference skill_rewrites parameter")
+	}
+}
+
 func TestWorkflowPromptHandler_ScoreThresholdsAre0To100(t *testing.T) {
 	result, _ := mcpserver.HandleWorkflowPrompt(context.Background(), mcp.GetPromptRequest{})
 	text := result.Messages[0].Content.(mcp.TextContent).Text

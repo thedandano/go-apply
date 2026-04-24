@@ -134,3 +134,75 @@ Python, Docker
 		t.Error("modified resume does not contain injected keyword Kubernetes")
 	}
 }
+
+// ── ExtractSkillsSection tests ────────────────────────────────────────────────
+
+func TestExtractSkillsSection_CategorisedSection(t *testing.T) {
+	resume := "# Experience\n- Led team\n\n## Technical Skills\nCloud: AWS, Docker\nLanguages: Go, Python\n\n# Education\nBSc CS"
+	section, start, end, found := ExtractSkillsSection(resume)
+	if !found {
+		t.Fatal("expected Skills section to be found")
+	}
+	lines := strings.Split(resume, "\n")
+	if !skillsHeaderRe.MatchString(strings.TrimSpace(lines[start])) {
+		t.Errorf("lines[start=%d] = %q is not a Skills header", start, lines[start])
+	}
+	if start >= end {
+		t.Errorf("start(%d) >= end(%d): invalid range", start, end)
+	}
+	if strings.Contains(section, "Technical Skills") {
+		t.Error("section body must not contain the header line")
+	}
+	wantBody := strings.Join(lines[start+1:end], "\n")
+	if section != wantBody {
+		t.Errorf("section = %q, want %q", section, wantBody)
+	}
+	if !strings.Contains(section, "Cloud: AWS, Docker") {
+		t.Errorf("section body missing expected content; got: %q", section)
+	}
+}
+
+func TestExtractSkillsSection_FlatSection(t *testing.T) {
+	resume := "## Skills\nPython, Go, Docker\n"
+	section, start, end, found := ExtractSkillsSection(resume)
+	if !found {
+		t.Fatal("expected found=true for flat Skills section")
+	}
+	lines := strings.Split(resume, "\n")
+	if start >= end {
+		t.Errorf("start(%d) >= end(%d)", start, end)
+	}
+	wantBody := strings.Join(lines[start+1:end], "\n")
+	if section != wantBody {
+		t.Errorf("section = %q, want %q", section, wantBody)
+	}
+	if !strings.Contains(section, "Python") {
+		t.Errorf("section body missing content; got: %q", section)
+	}
+}
+
+func TestExtractSkillsSection_NotFound(t *testing.T) {
+	resume := "# Experience\n- Built systems\n\n# Education\nBSc CS"
+	_, _, _, found := ExtractSkillsSection(resume)
+	if found {
+		t.Error("expected found=false when no Skills header present")
+	}
+}
+
+func TestExtractSkillsSection_IndicesCorrect(t *testing.T) {
+	resume := "# Experience\n- Led team\n\n## Skills\nGo: 1.21\nDocker\n\n# Education\nBSc CS"
+	_, start, end, found := ExtractSkillsSection(resume)
+	if !found {
+		t.Fatal("expected found=true")
+	}
+	lines := strings.Split(resume, "\n")
+	if !skillsHeaderRe.MatchString(strings.TrimSpace(lines[start])) {
+		t.Errorf("lines[start=%d] = %q: not a Skills header", start, lines[start])
+	}
+	if end > len(lines) {
+		t.Errorf("end=%d exceeds len(lines)=%d", end, len(lines))
+	}
+	if start+1 > end {
+		t.Errorf("body range [%d:%d] is invalid", start+1, end)
+	}
+}

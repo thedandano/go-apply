@@ -96,9 +96,9 @@ func NewServer() *server.MCPServer {
 
 	srv.AddTool(
 		mcp.NewTool("submit_tailor_t1",
-			mcp.WithDescription("Apply T1 tailoring: inject skill keywords into the resume's Skills section and rescore. Call after submit_keywords when next_action is 'tailor_t1'. Provide skill_adds as a JSON array of strings."),
+			mcp.WithDescription("Apply T1 tailoring: apply string replacements scoped to the Skills section and rescore. Call after submit_keywords when next_action is 'tailor_t1'. Provide skill_rewrites as a JSON array of {original, replacement} objects (max 5 per call). Prefer one-for-one swaps over pure appends to keep the section length stable."),
 			mcp.WithString("session_id", mcp.Description("Session ID from load_jd"), mcp.Required()),
-			mcp.WithString("skill_adds", mcp.Description("JSON array of skill strings to inject, e.g. [\"Kubernetes\",\"Terraform\"]"), mcp.Required()),
+			mcp.WithString("skill_rewrites", mcp.Description("JSON array of {original, replacement} pairs scoped to Skills section, e.g. [{\"original\":\"AWS\",\"replacement\":\"AWS, GCP\"}]. Max 5 entries."), mcp.Required()),
 		),
 		requireOnboarded(func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			return HandleSubmitTailorT1(ctx, &req), nil
