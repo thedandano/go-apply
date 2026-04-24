@@ -20,3 +20,7 @@ coverage.out
 # Local retros (never committed)
 docs/retros/
 openspec/
+
+# Claude local tooling (skills, commands — not project source)
+.claude/commands/
+.claude/skills/
