@@ -1,7 +1,6 @@
 package agentconfig
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -15,15 +14,14 @@ import (
 // fileOps bundles all filesystem and environment operations so they can be
 // injected by tests without requiring real OS state.
 type fileOps struct {
-	readFile   func(string) ([]byte, error)
-	writeFile  func(string, []byte, fs.FileMode) error
-	stat       func(string) (fs.FileInfo, error)
-	mkdirAll   func(string, fs.FileMode) error
-	removeAll  func(string) error     // os.RemoveAll in production
-	executable func() (string, error) // os.Executable in production
-	getenv     func(string) string
-	homeDir    string
-	goos       string // runtime.GOOS in production; overrideable in tests
+	readFile  func(string) ([]byte, error)
+	writeFile func(string, []byte, fs.FileMode) error
+	stat      func(string) (fs.FileInfo, error)
+	mkdirAll  func(string, fs.FileMode) error
+	removeAll func(string) error // os.RemoveAll in production
+	getenv    func(string) string
+	homeDir   string
+	goos      string // runtime.GOOS in production; overrideable in tests
 }
 
 // newProdFileOps builds a fileOps using real OS functions. It resolves
@@ -35,15 +33,14 @@ func newProdFileOps() (*fileOps, error) {
 		return nil, fmt.Errorf("resolve home directory: %w", err)
 	}
 	return &fileOps{
-		readFile:   os.ReadFile,
-		writeFile:  os.WriteFile,
-		stat:       os.Stat,
-		mkdirAll:   os.MkdirAll,
-		removeAll:  os.RemoveAll,
-		executable: os.Executable,
-		getenv:     os.Getenv,
-		homeDir:    home,
-		goos:       runtime.GOOS,
+		readFile:  os.ReadFile,
+		writeFile: os.WriteFile,
+		stat:      os.Stat,
+		mkdirAll:  os.MkdirAll,
+		removeAll: os.RemoveAll,
+		getenv:    os.Getenv,
+		homeDir:   home,
+		goos:      runtime.GOOS,
 	}, nil
 }
 
@@ -187,99 +184,17 @@ func unregisterWith(ops *fileOps, path string, keyPath []string, serverName stri
 
 // ---- claudeBackend implementation ------------------------------------------
 
-const claudePluginsDir = ".claude/plugins"
-
-func (b *claudeBackend) pluginDir(serverName string) string {
-	return filepath.Join(b.ops.homeDir, claudePluginsDir, serverName)
+func (b *claudeBackend) Register(serverName string, entry port.MCPServerEntry) (port.RegistrationResult, error) {
+	return registerWith(b.ops, b.configPath(), []string{"mcpServers"}, serverName, entry, MergeJSON, false)
 }
 
-// writeClaudePlugin writes the plugin.json and .mcp.json files for the given server.
-func (b *claudeBackend) writeClaudePlugin(serverName, pluginJSONPath, mcpJSONPath string) (string, error) {
-	pluginDir := b.pluginDir(serverName)
-
-	binPath, err := b.ops.executable()
-	if err != nil {
-		binPath = "go-apply"
-	}
-
-	// Create .claude-plugin/ directory.
-	if err := b.ops.mkdirAll(filepath.Dir(pluginJSONPath), 0o700); err != nil {
-		return "", fmt.Errorf("mkdir plugin dir: %w", err)
-	}
-
-	pluginContent, _ := json.MarshalIndent(map[string]any{
-		"name":        serverName,
-		"description": "Score resumes against job postings, tailor resumes, and generate cover letters",
-		"author":      map[string]any{"name": "Dan Sedano"},
-	}, "", "  ")
-	if err := b.ops.writeFile(pluginJSONPath, pluginContent, 0o600); err != nil {
-		return "", fmt.Errorf("write plugin.json: %w", err)
-	}
-
-	mcpContent, _ := json.MarshalIndent(map[string]any{
-		serverName: map[string]any{
-			"command": binPath,
-			"args":    []string{"serve"},
-		},
-	}, "", "  ")
-	if err := b.ops.writeFile(mcpJSONPath, mcpContent, 0o600); err != nil {
-		return "", fmt.Errorf("write .mcp.json: %w", err)
-	}
-
-	return pluginDir, nil
-}
-
-func (b *claudeBackend) Register(serverName string, _ port.MCPServerEntry) (port.RegistrationResult, error) {
-	pluginDir := b.pluginDir(serverName)
-	mcpJSONPath := filepath.Join(pluginDir, ".mcp.json")
-	pluginJSONPath := filepath.Join(pluginDir, ".claude-plugin", "plugin.json")
-
-	if b.ops.exists(mcpJSONPath) {
-		return port.RegistrationResult{ConfigPath: pluginDir, Action: port.ActionAlreadyRegistered}, nil
-	}
-
-	dir, err := b.writeClaudePlugin(serverName, pluginJSONPath, mcpJSONPath)
-	if err != nil {
-		return port.RegistrationResult{}, err
-	}
-	return port.RegistrationResult{ConfigPath: dir, Action: port.ActionCreated}, nil
-}
-
-// RegisterForce overwrites an existing Claude plugin registration unconditionally.
-func (b *claudeBackend) RegisterForce(serverName string, _ port.MCPServerEntry) (port.RegistrationResult, error) {
-	pluginDir := b.pluginDir(serverName)
-	mcpJSONPath := filepath.Join(pluginDir, ".mcp.json")
-	pluginJSONPath := filepath.Join(pluginDir, ".claude-plugin", "plugin.json")
-
-	dir, err := b.writeClaudePlugin(serverName, pluginJSONPath, mcpJSONPath)
-	if err != nil {
-		return port.RegistrationResult{}, err
-	}
-	return port.RegistrationResult{ConfigPath: dir, Action: port.ActionCreated}, nil
+// RegisterForce overwrites an existing Claude MCP server registration unconditionally.
+func (b *claudeBackend) RegisterForce(serverName string, entry port.MCPServerEntry) (port.RegistrationResult, error) {
+	return registerWith(b.ops, b.configPath(), []string{"mcpServers"}, serverName, entry, MergeJSON, true)
 }
 
 func (b *claudeBackend) Unregister(serverName string) (port.RegistrationResult, error) {
-	pluginDir := b.pluginDir(serverName)
-
-	pluginRemoved := false
-	if b.ops.exists(pluginDir) {
-		if err := b.ops.removeAll(pluginDir); err != nil {
-			return port.RegistrationResult{}, fmt.Errorf("remove plugin dir: %w", err)
-		}
-		pluginRemoved = true
-	}
-
-	// Clean up any stale mcpServers entry in settings.json.
-	staleResult, err := unregisterWith(b.ops, b.configPath(), []string{"mcpServers"}, serverName, RemoveJSON)
-	if err != nil {
-		return port.RegistrationResult{}, err
-	}
-	_ = staleResult // used only for side-effect cleanup
-
-	if !pluginRemoved {
-		return port.RegistrationResult{ConfigPath: pluginDir, Action: port.ActionNotFound}, nil
-	}
-	return port.RegistrationResult{ConfigPath: pluginDir, Action: port.ActionRemoved}, nil
+	return unregisterWith(b.ops, b.configPath(), []string{"mcpServers"}, serverName, RemoveJSON)
 }
 
 // ---- openclawBackend implementation ----------------------------------------
