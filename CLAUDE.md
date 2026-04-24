@@ -32,3 +32,9 @@ A Go CLI that scores resumes against job postings, tailors them via a two-tier c
 - Config loaded from `~/.config/go-apply/config.yaml`
 - API key from `GO_APPLY_API_KEY` env var takes precedence over config file
 - Data (resumes in `inputs/`, jd_cache/) stored in `~/.local/share/go-apply/`
+
+<!-- SPECKIT START -->
+For additional context about technologies to be used, project structure,
+shell commands, and other important information, read the current plan at
+`specs/002-preserve-finalize-logs/plan.md`
+<!-- SPECKIT END -->
