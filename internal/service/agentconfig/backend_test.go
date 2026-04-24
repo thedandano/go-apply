@@ -119,7 +119,7 @@ func navJSON(t *testing.T, root map[string]any, keyPath []string) map[string]any
 
 // ---- Claude backend ---------------------------------------------------------
 
-func TestClaudeBackend_Register_WritesToSettingsJSON(t *testing.T) {
+func TestClaudeBackend_Register_WritesToClaudeJSON(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	b := newClaudeBackend(newTestOps(dir))
@@ -131,12 +131,12 @@ func TestClaudeBackend_Register_WritesToSettingsJSON(t *testing.T) {
 	if res.Action != port.ActionCreated {
 		t.Errorf("Action = %v, want ActionCreated", res.Action)
 	}
-	settingsPath := filepath.Join(dir, ".claude", "settings.json")
-	if res.ConfigPath != settingsPath {
-		t.Errorf("ConfigPath = %q, want %q", res.ConfigPath, settingsPath)
+	claudeJSONPath := filepath.Join(dir, ".claude.json")
+	if res.ConfigPath != claudeJSONPath {
+		t.Errorf("ConfigPath = %q, want %q", res.ConfigPath, claudeJSONPath)
 	}
 
-	root := readJSON(t, settingsPath)
+	root := readJSON(t, claudeJSONPath)
 	leaf := navJSON(t, root, []string{"mcpServers"})
 	server, ok := leaf["go-apply"].(map[string]any)
 	if !ok {
@@ -152,9 +152,8 @@ func TestClaudeBackend_Register_AlreadyRegistered(t *testing.T) {
 	dir := t.TempDir()
 	ops := newTestOps(dir)
 
-	// Pre-create settings.json with go-apply in mcpServers.
-	settingsPath := filepath.Join(dir, ".claude", "settings.json")
-	writeJSON(t, settingsPath, map[string]any{
+	claudeJSONPath := filepath.Join(dir, ".claude.json")
+	writeJSON(t, claudeJSONPath, map[string]any{
 		"mcpServers": map[string]any{
 			"go-apply": map[string]any{"command": "go-apply", "args": []string{"serve"}},
 		},
@@ -170,13 +169,13 @@ func TestClaudeBackend_Register_AlreadyRegistered(t *testing.T) {
 	}
 }
 
-func TestClaudeBackend_Unregister_RemovesFromSettingsJSON(t *testing.T) {
+func TestClaudeBackend_Unregister_RemovesFromClaudeJSON(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	ops := newTestOps(dir)
 
-	settingsPath := filepath.Join(dir, ".claude", "settings.json")
-	writeJSON(t, settingsPath, map[string]any{
+	claudeJSONPath := filepath.Join(dir, ".claude.json")
+	writeJSON(t, claudeJSONPath, map[string]any{
 		"mcpServers": map[string]any{
 			"go-apply": map[string]any{"command": "go-apply", "args": []string{"serve"}},
 		},
@@ -191,10 +190,10 @@ func TestClaudeBackend_Unregister_RemovesFromSettingsJSON(t *testing.T) {
 		t.Errorf("Action = %v, want ActionRemoved", res.Action)
 	}
 
-	root := readJSON(t, settingsPath)
+	root := readJSON(t, claudeJSONPath)
 	if servers, ok := root["mcpServers"].(map[string]any); ok {
 		if _, found := servers["go-apply"]; found {
-			t.Error("go-apply should be removed from settings.json mcpServers")
+			t.Error("go-apply should be removed from .claude.json mcpServers")
 		}
 	}
 }
@@ -215,7 +214,7 @@ func TestClaudeBackend_Unregister_NotRegistered(t *testing.T) {
 
 // ---- Claude config path resolution ------------------------------------------
 
-func TestClaudeBackend_Register_UsesSettingsJSONPath(t *testing.T) {
+func TestClaudeBackend_Register_UsesClaudeJSONPath(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	b := newClaudeBackend(newTestOps(dir))
@@ -224,9 +223,80 @@ func TestClaudeBackend_Register_UsesSettingsJSONPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	wantPath := filepath.Join(dir, ".claude", "settings.json")
+	wantPath := filepath.Join(dir, ".claude.json")
 	if res.ConfigPath != wantPath {
 		t.Errorf("ConfigPath = %q, want %q", res.ConfigPath, wantPath)
+	}
+}
+
+// ---- Claude legacy sweep ----------------------------------------------------
+
+// TestClaudeBackend_Register_SweepsLegacySettingsJSON verifies that Register
+// removes a stale go-apply entry from ~/.claude/settings.json left by the old
+// code, while writing the canonical entry to ~/.claude.json.
+func TestClaudeBackend_Register_SweepsLegacySettingsJSON(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	ops := newTestOps(dir)
+
+	legacyPath := filepath.Join(dir, ".claude", "settings.json")
+	writeJSON(t, legacyPath, map[string]any{
+		"mcpServers": map[string]any{
+			"go-apply": map[string]any{"command": "go-apply", "args": []string{"serve"}},
+		},
+		"other": true,
+	})
+
+	b := newClaudeBackend(ops)
+	if _, err := b.Register("go-apply", testEntry); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	legacy := readJSON(t, legacyPath)
+	if servers, ok := legacy["mcpServers"].(map[string]any); ok {
+		if _, found := servers["go-apply"]; found {
+			t.Error("go-apply should be swept from legacy settings.json mcpServers")
+		}
+	}
+	if _, ok := legacy["other"]; !ok {
+		t.Error("unrelated keys in legacy settings.json must be preserved")
+	}
+}
+
+// TestClaudeBackend_Unregister_SweepsLegacySettingsJSON verifies that Unregister
+// also removes a stale go-apply entry from the legacy settings.json location.
+func TestClaudeBackend_Unregister_SweepsLegacySettingsJSON(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	ops := newTestOps(dir)
+
+	claudeJSONPath := filepath.Join(dir, ".claude.json")
+	writeJSON(t, claudeJSONPath, map[string]any{
+		"mcpServers": map[string]any{
+			"go-apply": map[string]any{"command": "go-apply", "args": []string{"serve"}},
+		},
+	})
+	legacyPath := filepath.Join(dir, ".claude", "settings.json")
+	writeJSON(t, legacyPath, map[string]any{
+		"mcpServers": map[string]any{
+			"go-apply": map[string]any{"command": "go-apply", "args": []string{"serve"}},
+		},
+		"other": true,
+	})
+
+	b := newClaudeBackend(ops)
+	if _, err := b.Unregister("go-apply"); err != nil {
+		t.Fatalf("Unregister: %v", err)
+	}
+
+	legacy := readJSON(t, legacyPath)
+	if servers, ok := legacy["mcpServers"].(map[string]any); ok {
+		if _, found := servers["go-apply"]; found {
+			t.Error("go-apply should be swept from legacy settings.json mcpServers")
+		}
+	}
+	if _, ok := legacy["other"]; !ok {
+		t.Error("unrelated keys in legacy settings.json must be preserved")
 	}
 }
 
@@ -608,9 +678,8 @@ func TestClaudeBackend_RegisterForce_OverwritesExisting(t *testing.T) {
 	dir := t.TempDir()
 	ops := newTestOps(dir)
 
-	// Pre-create settings.json with stale command path.
-	settingsPath := filepath.Join(dir, ".claude", "settings.json")
-	writeJSON(t, settingsPath, map[string]any{
+	claudeJSONPath := filepath.Join(dir, ".claude.json")
+	writeJSON(t, claudeJSONPath, map[string]any{
 		"mcpServers": map[string]any{
 			"go-apply": map[string]any{"command": "/old/path/go-apply", "args": []string{"serve"}},
 		},
@@ -625,8 +694,7 @@ func TestClaudeBackend_RegisterForce_OverwritesExisting(t *testing.T) {
 		t.Errorf("Action = %v, want ActionAdded", res.Action)
 	}
 
-	// Verify settings.json was overwritten with the new entry.
-	root := readJSON(t, settingsPath)
+	root := readJSON(t, claudeJSONPath)
 	leaf := navJSON(t, root, []string{"mcpServers"})
 	server, ok := leaf["go-apply"].(map[string]any)
 	if !ok {
