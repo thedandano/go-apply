@@ -25,6 +25,7 @@ func NewServer() *server.MCPServer {
 			mcp.WithString("resume_label", mcp.Description("Short identifier for the resume, e.g. 'backend' (required when resume_content is provided)")),
 			mcp.WithString("skills", mcp.Description("Skills reference text (optional)")),
 			mcp.WithString("accomplishments", mcp.Description("Accomplishments text (optional)")),
+			mcp.WithString("sections", mcp.Description("Optional JSON-encoded SectionMap (schema_version, contact, experience, …). When provided, validated and persisted as a sidecar alongside the resume.")),
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			return HandleOnboardUser(ctx, &req, newOnboardSvc()), nil
@@ -36,6 +37,7 @@ func NewServer() *server.MCPServer {
 			mcp.WithDescription("Add or replace a single resume in the profile database."),
 			mcp.WithString("resume_content", mcp.Description("Resume text"), mcp.Required()),
 			mcp.WithString("resume_label", mcp.Description("Short identifier, e.g. 'backend'"), mcp.Required()),
+			mcp.WithString("sections", mcp.Description("Optional JSON-encoded SectionMap (schema_version, contact, experience, …). When provided, validated and persisted as a sidecar alongside the resume.")),
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			return HandleAddResume(ctx, &req, newOnboardSvc()), nil
@@ -113,6 +115,27 @@ func NewServer() *server.MCPServer {
 		),
 		requireOnboarded(func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			return HandleSubmitTailorT2(ctx, &req), nil
+		}),
+	)
+
+	srv.AddTool(
+		mcp.NewTool("submit_edits",
+			mcp.WithDescription("Apply structured edits (add/remove/replace) to the best resume's sections. Edits are applied in order; per-edit failures are reported in edits_rejected. Call after submit_keywords."),
+			mcp.WithString("session_id", mcp.Description("Session ID from load_jd"), mcp.Required()),
+			mcp.WithString("edits", mcp.Description(`JSON array of {"section":"skills|experience","op":"add|remove|replace","target":"exp-<i>-b<j>","value":"..."} objects. target required for replace/remove on experience bullets.`), mcp.Required()),
+		),
+		requireOnboarded(func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return HandleSubmitEdits(ctx, &req), nil
+		}),
+	)
+
+	srv.AddTool(
+		mcp.NewTool("preview_ats_extraction",
+			mcp.WithDescription("Return the constructed resume text as it would be seen by an ATS. Today an identity pass-through (raw text); the seam exists for future PDF render + extraction. Call after submit_keywords."),
+			mcp.WithString("session_id", mcp.Description("Session ID from load_jd"), mcp.Required()),
+		),
+		requireOnboarded(func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return HandlePreviewATSExtraction(ctx, &req), nil
 		}),
 	)
 

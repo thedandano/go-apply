@@ -69,6 +69,28 @@ func TestWorkflowPromptHandler_ContainsSkillRewriteGuidance(t *testing.T) {
 	}
 }
 
+func TestWorkflowPromptHandler_ContainsStructuredEditTools(t *testing.T) {
+	result, _ := mcpserver.HandleWorkflowPrompt(context.Background(), mcp.GetPromptRequest{})
+	text := result.Messages[0].Content.(mcp.TextContent).Text
+
+	for _, want := range []string{"submit_edits", "preview_ats_extraction"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("workflow prompt missing new tool %q", want)
+		}
+	}
+}
+
+func TestWorkflowPromptHandler_SubmitKeywordsDescribesSectionsFields(t *testing.T) {
+	result, _ := mcpserver.HandleWorkflowPrompt(context.Background(), mcp.GetPromptRequest{})
+	text := result.Messages[0].Content.(mcp.TextContent).Text
+
+	for _, want := range []string{"skills_section_found", "sections"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("workflow prompt submit_keywords section missing response field %q", want)
+		}
+	}
+}
+
 func TestWorkflowPromptHandler_ScoreThresholdsAre0To100(t *testing.T) {
 	result, _ := mcpserver.HandleWorkflowPrompt(context.Background(), mcp.GetPromptRequest{})
 	text := result.Messages[0].Content.(mcp.TextContent).Text

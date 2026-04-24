@@ -19,6 +19,8 @@ You handle reasoning: extract keywords from JD text, interpret scores, drive tai
 | submit_keywords | Score resumes against extracted JD | session_id (req), jd_json (req) |
 | submit_tailor_t1 | Apply skill rewrites scoped to the Skills section | session_id (req), skill_rewrites (array of {original, replacement}, req) |
 | submit_tailor_t2 | Rewrite resume bullets to surface missing keywords | session_id (req), bullet_rewrites (array of {original, rewritten}, req) |
+| submit_edits | Apply structured edits to resume sections | session_id (req), edits (JSON array of {section, op, target?, value?}, req) |
+| preview_ats_extraction | Return constructed ATS text for the best resume | session_id (req) |
 | finalize | Persist record + close session | session_id (req), cover_letter (opt) |
 | onboard_user | Store resume + skills + accomplishments | resume_content, resume_label, skills, accomplishments |
 | add_resume | Add/replace a single resume | resume_content (req), resume_label (req) |
@@ -51,7 +53,7 @@ Encode as compact JSON with no extra whitespace:
 
 ### Step 4 — submit_keywords
 Send session_id + jd_json. Never show session_id to the user.
-Returns: extracted_keywords (echo), scores per resume, best_resume, best_score (0–100), next_action.
+Returns: extracted_keywords (echo), scores per resume, best_resume, best_score (0–100), next_action, skills_section (current Skills text, always present), skills_section_found (bool — true when a structured sections sidecar exists), sections (full SectionMap, present only when sidecar exists).
 
 Scores are 0–100. Do NOT rescale or convert to a different denominator. Always display as NN/100.
 
@@ -80,6 +82,20 @@ Draft a cover letter, then call finalize with cover_letter.
 
 **next_action == "advise_skip"** (score < 40):
 Tell the user: "Structural mismatch — tailoring cannot close this gap. Score: NN/100." Do not proceed to tailoring.
+
+### Structured edits (optional — when sections available)
+
+If submit_keywords returns skills_section_found: true, you may call submit_edits as an alternative or supplement to T1/T2.
+Each edit is an object with: section ("skills" or "experience"), op ("add"|"replace"|"remove"), target (required for replace/remove on bullets: "exp-<i>-b<j>", 0-indexed), value (required for add/replace).
+
+Example: [{"section":"skills","op":"replace","target":"exp-0-b1","value":"Rewrote bullet with keyword"}]
+
+Returns: edits_applied, edits_rejected (with reasons), new_sections.
+After submitting edits you may rescore by calling submit_keywords again.
+
+### ATS preview (optional)
+
+Call preview_ats_extraction at any point after scoring to see the exact plain-text the ATS would process from the best resume. Useful for spotting formatting issues or verifying that edits landed correctly before finalizing.
 
 ### Step 6 — finalize
 Send session_id and optional cover_letter text.

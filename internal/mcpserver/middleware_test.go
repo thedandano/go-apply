@@ -19,6 +19,12 @@ func (s *stubEmptyResumeRepo) ListResumes() ([]model.ResumeFile, error) {
 	return nil, nil
 }
 
+func (s *stubEmptyResumeRepo) LoadSections(_ string) (model.SectionMap, error) {
+	return model.SectionMap{}, model.ErrSectionsMissing
+}
+
+func (s *stubEmptyResumeRepo) SaveSections(_ string, _ model.SectionMap) error { return nil } //nolint:gocritic // hugeParam: interface constraint
+
 // ── CheckOnboarded unit tests ─────────────────────────────────────────────────
 
 func TestCheckOnboarded_NoResumes_ReturnsError(t *testing.T) {

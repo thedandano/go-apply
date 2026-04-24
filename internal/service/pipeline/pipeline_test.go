@@ -26,6 +26,12 @@ func (s *stubResumeRepo) ListResumes() ([]model.ResumeFile, error) {
 	return []model.ResumeFile{{Label: "test", Path: "/fake/resume.txt"}}, nil
 }
 
+func (s *stubResumeRepo) LoadSections(_ string) (model.SectionMap, error) {
+	return model.SectionMap{}, model.ErrSectionsMissing
+}
+
+func (s *stubResumeRepo) SaveSections(_ string, _ model.SectionMap) error { return nil } //nolint:gocritic // hugeParam: interface constraint
+
 // stubDocumentLoader satisfies port.DocumentLoader.
 type stubDocumentLoader struct{}
 
@@ -75,6 +81,10 @@ func (s *stubTailorForApply) TailorResume(_ context.Context, _ *model.TailorInpu
 	}, nil
 }
 
+func (s *stubTailorForApply) ApplyEdits(_ context.Context, _ model.SectionMap, _ []port.Edit) (port.EditResult, error) { //nolint:gocritic // hugeParam: interface constraint
+	return port.EditResult{}, nil
+}
+
 // stubTailorWithTier1Text satisfies port.Tailor and returns a non-empty Tier1Text so
 // the pipeline can rescore it and set Tier1Score (M5.4c).
 type stubTailorWithTier1Text struct{}
@@ -90,6 +100,10 @@ func (s *stubTailorWithTier1Text) TailorResume(_ context.Context, _ *model.Tailo
 	}, nil
 }
 
+func (s *stubTailorWithTier1Text) ApplyEdits(_ context.Context, _ model.SectionMap, _ []port.Edit) (port.EditResult, error) { //nolint:gocritic // hugeParam: interface constraint
+	return port.EditResult{}, nil
+}
+
 // stubTailorError satisfies port.Tailor and always returns an error to exercise degradation.
 type stubTailorError struct{}
 
@@ -97,6 +111,10 @@ var _ port.Tailor = (*stubTailorError)(nil)
 
 func (s *stubTailorError) TailorResume(_ context.Context, _ *model.TailorInput) (model.TailorResult, error) {
 	return model.TailorResult{}, fmt.Errorf("llm unavailable")
+}
+
+func (s *stubTailorError) ApplyEdits(_ context.Context, _ model.SectionMap, _ []port.Edit) (port.EditResult, error) { //nolint:gocritic // hugeParam: interface constraint
+	return port.EditResult{}, nil
 }
 
 func TestApplyPipeline_HeadlessE2E(t *testing.T) {
@@ -398,6 +416,10 @@ func (s *stubOrchestrator) PlanT2(_ context.Context, _ *port.PlanT2Input) (port.
 }
 func (s *stubOrchestrator) GenerateCoverLetter(_ context.Context, _ *port.CoverLetterInput) (string, error) {
 	return "", nil
+}
+
+func (s *stubOrchestrator) ParseSections(_ context.Context, _ string) (model.SectionMap, error) {
+	return model.SectionMap{}, nil
 }
 
 // TestApplyPipeline_WithOrchestrator verifies that Run delegates keyword extraction

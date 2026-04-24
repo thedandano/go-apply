@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -14,7 +15,9 @@ import (
 	"github.com/thedandano/go-apply/internal/model"
 	"github.com/thedandano/go-apply/internal/port"
 	mcppres "github.com/thedandano/go-apply/internal/presenter/mcp"
+	extractPkg "github.com/thedandano/go-apply/internal/service/extract"
 	"github.com/thedandano/go-apply/internal/service/pipeline"
+	renderPkg "github.com/thedandano/go-apply/internal/service/render"
 	"github.com/thedandano/go-apply/internal/service/tailor"
 )
 
@@ -169,11 +172,13 @@ func HandleSubmitKeywordsWithConfig(ctx context.Context, req *mcp.CallToolReques
 		RequiredYears float64              `json:"required_years,omitempty"`
 	}
 	type submitKeywordsData struct {
-		ExtractedKeywords extractedKeywordsData        `json:"extracted_keywords"`
-		Scores            map[string]model.ScoreResult `json:"scores"`
-		BestResume        string                       `json:"best_resume"`
-		BestScore         float64                      `json:"best_score"`
-		SkillsSection     string                       `json:"skills_section,omitempty"`
+		ExtractedKeywords  extractedKeywordsData        `json:"extracted_keywords"`
+		Scores             map[string]model.ScoreResult `json:"scores"`
+		BestResume         string                       `json:"best_resume"`
+		BestScore          float64                      `json:"best_score"`
+		SkillsSection      string                       `json:"skills_section"`
+		SkillsSectionFound bool                         `json:"skills_section_found"`
+		Sections           *model.SectionMap            `json:"sections,omitempty"`
 	}
 	resultData := submitKeywordsData{
 		ExtractedKeywords: extractedKeywordsData{
@@ -190,19 +195,27 @@ func HandleSubmitKeywordsWithConfig(ctx context.Context, req *mcp.CallToolReques
 		BestScore:  scored.BestScore,
 	}
 
-	if resumeText, loadErr := loadBestResumeText(deps, scored.BestLabel); loadErr == nil {
-		if section, _, _, found := tailor.ExtractSkillsSection(resumeText); found {
-			resultData.SkillsSection = section
-			slog.InfoContext(ctx, "submit_keywords: skills_section extracted",
-				slog.String("session_id", sessionID),
-				slog.Bool("skills_section_found", true),
-			)
-		} else {
-			slog.InfoContext(ctx, "submit_keywords: no skills section in best resume",
-				slog.String("session_id", sessionID),
-				slog.Bool("skills_section_found", false),
-			)
+	if sections, loadErr := deps.Resumes.LoadSections(scored.BestLabel); loadErr == nil {
+		if sections.Skills != nil {
+			resultData.SkillsSectionFound = true
+			resultData.SkillsSection = sections.Skills.Flat
+			if resultData.SkillsSection == "" && len(sections.Skills.Categorized) > 0 {
+				var cats []string
+				for cat := range sections.Skills.Categorized {
+					cats = append(cats, cat)
+				}
+				sort.Strings(cats)
+				for _, cat := range cats {
+					resultData.SkillsSection += cat + ": " + strings.Join(sections.Skills.Categorized[cat], ", ") + "\n"
+				}
+				resultData.SkillsSection = strings.TrimRight(resultData.SkillsSection, "\n")
+			}
 		}
+		resultData.Sections = &sections
+		slog.InfoContext(ctx, "submit_keywords: skills_section processed",
+			slog.String("session_id", sessionID),
+			slog.Bool("skills_section_found", resultData.SkillsSectionFound),
+		)
 	}
 
 	resultBytes, _ := json.Marshal(resultData)
@@ -447,7 +460,32 @@ func HandleSubmitTailorT1WithConfig(ctx context.Context, req *mcp.CallToolReques
 	pl := pipeline.NewApplyPipeline(deps)
 
 	logger.Banner(ctx, slog.Default(), "Tailor", "T1")
-	tailored, substitutionsMade, skillsSectionFound := tailor.ApplySkillsRewrites(baseText, filtered)
+	// Apply skill rewrites: structured sections path when available, text fallback for rescoring.
+	tailored := baseText
+	substitutionsMade := 0
+	skillsSectionFound := false
+
+	if sections, sectErr := deps.Resumes.LoadSections(sess.ScoreResult.BestLabel); sectErr == nil && sections.Skills != nil {
+		skillsSectionFound = true
+		for _, rw := range filtered {
+			if rw.Original != "" && strings.Contains(sections.Skills.Flat, rw.Original) {
+				sections.Skills.Flat = strings.ReplaceAll(sections.Skills.Flat, rw.Original, rw.Replacement)
+				substitutionsMade++
+			}
+		}
+		if saveErr := deps.Resumes.SaveSections(sess.ScoreResult.BestLabel, sections); saveErr != nil {
+			slog.WarnContext(ctx, "submit_tailor_t1: skills edits applied but sidecar not persisted",
+				slog.String("session_id", sessionID), slog.Any("error", saveErr))
+		}
+	}
+	for _, rw := range filtered {
+		if rw.Original != "" && strings.Contains(tailored, rw.Original) {
+			tailored = strings.ReplaceAll(tailored, rw.Original, rw.Replacement)
+			if !skillsSectionFound {
+				substitutionsMade++
+			}
+		}
+	}
 	slog.InfoContext(ctx, "tailor T1 complete",
 		slog.String("session_id", sessionID),
 		slog.Int("substitutions_made", substitutionsMade),
@@ -568,6 +606,22 @@ func HandleSubmitTailorT2WithConfig(ctx context.Context, req *mcp.CallToolReques
 	sess.TailoredText = tailored
 	sess.State = stateT2Applied
 
+	if sections, sectErr := deps.Resumes.LoadSections(sess.ScoreResult.BestLabel); sectErr == nil {
+		for i := range sections.Experience {
+			for j, bullet := range sections.Experience[i].Bullets {
+				for _, rw := range rewrites {
+					if rw.Original != "" && rw.Replacement != "" && bullet == rw.Original {
+						sections.Experience[i].Bullets[j] = rw.Replacement
+					}
+				}
+			}
+		}
+		if saveErr := deps.Resumes.SaveSections(sess.ScoreResult.BestLabel, sections); saveErr != nil {
+			slog.WarnContext(ctx, "submit_tailor_t2: bullet edits applied but sidecar not persisted",
+				slog.String("session_id", sessionID), slog.Any("error", saveErr))
+		}
+	}
+
 	logger.Banner(ctx, slog.Default(), "Score", "After T2")
 	newScore, err := pl.ScoreResume(ctx, tailored, sess.ScoreResult.BestLabel, &sess.JD, cfg)
 	if err != nil {
@@ -602,4 +656,101 @@ func HandleSubmitTailorT2WithConfig(ctx context.Context, req *mcp.CallToolReques
 		logger.PayloadAttr("result", string(resultBytes), logger.Verbose()),
 	)
 	return envelopeResult(okEnvelope(sessionID, "cover_letter", resultData))
+}
+
+// HandlePreviewATSExtraction is the exported handler for the "preview_ats_extraction" MCP tool.
+func HandlePreviewATSExtraction(ctx context.Context, req *mcp.CallToolRequest) *mcp.CallToolResult {
+	return HandlePreviewATSExtractionWithConfig(ctx, req, nil)
+}
+
+// renderSvc and extractSvc are package-level to allow future injection in tests.
+// Both are stateless; identity implementations today.
+var (
+	renderSvc  = renderPkg.New()
+	extractSvc = extractPkg.New()
+)
+
+// HandlePreviewATSExtractionWithConfig is the full handler with optional injected deps (for tests).
+// Returns the constructed text for the best resume in the session — today an identity pass-through;
+// the seam exists for when the render/extract packages gain real implementations.
+func HandlePreviewATSExtractionWithConfig(ctx context.Context, req *mcp.CallToolRequest, deps *pipeline.ApplyConfig) *mcp.CallToolResult {
+	sessionID := req.GetString("session_id", "")
+	if sessionID == "" {
+		return envelopeResult(stageErrorEnvelope("", "preview_ats_extraction", "missing_session", "session_id is required", false))
+	}
+	slog.DebugContext(ctx, "mcp tool invoked",
+		slog.String("tool", "preview_ats_extraction"),
+		slog.String("session_id", sessionID),
+	)
+
+	sess := sessions.Get(sessionID)
+	if sess == nil {
+		return envelopeResult(stageErrorEnvelope(sessionID, "preview_ats_extraction", "session_not_found",
+			"session not found — call load_jd first", false))
+	}
+	if sess.State < stateScored {
+		return envelopeResult(stageErrorEnvelope(sessionID, "preview_ats_extraction", "invalid_state",
+			"session must be scored before previewing — call submit_keywords first", false))
+	}
+
+	if deps == nil {
+		_, liveDeps, err := loadDeps()
+		if err != nil {
+			return envelopeResult(stageErrorEnvelope(sessionID, "preview_ats_extraction", "config_error", err.Error(), true))
+		}
+		deps = &liveDeps
+	}
+
+	label := sess.ScoreResult.BestLabel
+
+	type previewData struct {
+		Label           string `json:"label"`
+		ConstructedText string `json:"constructed_text"`
+		SectionsUsed    bool   `json:"sections_used"`
+	}
+	pd := previewData{Label: label}
+
+	// Prefer sections → render → extract pipeline when a sidecar exists.
+	// Both render and extract are identity today; swapping in real implementations
+	// requires no changes here.
+	if sections, sectErr := deps.Resumes.LoadSections(label); sectErr == nil {
+		rendered, renderErr := renderSvc.Render(&sections)
+		if renderErr != nil {
+			slog.WarnContext(ctx, "preview_ats_extraction: render failed, falling back to raw text",
+				slog.String("session_id", sessionID), slog.Any("error", renderErr))
+		} else {
+			extracted, extErr := extractSvc.Extract(rendered)
+			if extErr != nil {
+				slog.WarnContext(ctx, "preview_ats_extraction: extract failed, falling back to raw text",
+					slog.String("session_id", sessionID), slog.Any("error", extErr))
+			} else {
+				pd.ConstructedText = extracted
+				pd.SectionsUsed = true
+			}
+		}
+	}
+
+	// Fall back to raw resume text when no sections sidecar exists or render/extract fails.
+	if pd.ConstructedText == "" {
+		rawText, loadErr := loadBestResumeText(deps, label)
+		if loadErr != nil {
+			slog.ErrorContext(ctx, "preview_ats_extraction: load resume failed", "session_id", sessionID, "error", loadErr)
+			return envelopeResult(stageErrorEnvelope(sessionID, "preview_ats_extraction", "load_resume_failed", loadErr.Error(), false))
+		}
+		extracted, extErr := extractSvc.Extract(rawText)
+		if extErr != nil {
+			slog.ErrorContext(ctx, "preview_ats_extraction: extract on raw text failed", "session_id", sessionID, "error", extErr)
+			return envelopeResult(stageErrorEnvelope(sessionID, "preview_ats_extraction", "extract_failed", extErr.Error(), false))
+		}
+		pd.ConstructedText = extracted
+	}
+
+	resultBytes, _ := json.Marshal(pd)
+	slog.DebugContext(ctx, "mcp tool result",
+		slog.String("tool", "preview_ats_extraction"),
+		slog.String("session_id", sessionID),
+		slog.String("label", label),
+		slog.Int("result_bytes", len(resultBytes)),
+	)
+	return envelopeResult(okEnvelope(sessionID, "", pd))
 }

@@ -8,6 +8,7 @@ import (
 
 	"github.com/thedandano/go-apply/internal/config"
 	"github.com/thedandano/go-apply/internal/mcpserver"
+	"github.com/thedandano/go-apply/internal/model"
 	"github.com/thedandano/go-apply/internal/service/pipeline"
 )
 
@@ -218,9 +219,25 @@ func (s *stubDocumentLoaderWithSkills) Load(_ string) (string, error) {
 }
 func (s *stubDocumentLoaderWithSkills) Supports(_ string) bool { return true }
 
+// stubResumeRepoWithSkillsSections extends stubResumeRepo to return sections with a skills flat field.
+type stubResumeRepoWithSkillsSections struct {
+	stubResumeRepo
+}
+
+func (s *stubResumeRepoWithSkillsSections) LoadSections(_ string) (model.SectionMap, error) {
+	return model.SectionMap{
+		SchemaVersion: model.CurrentSchemaVersion,
+		Skills: &model.SkillsSection{
+			Kind: model.SkillsKindFlat,
+			Flat: "Cloud: AWS, GCP\nLanguages: Go, Python",
+		},
+	}, nil
+}
+
 func stubApplyConfigWithSkillsLoader() pipeline.ApplyConfig {
 	cfg := stubApplyConfigForSession()
 	cfg.Loader = &stubDocumentLoaderWithSkills{}
+	cfg.Resumes = &stubResumeRepoWithSkillsSections{}
 	return cfg
 }
 
@@ -264,9 +281,9 @@ func TestHandleSubmitKeywordsWithConfig_ReturnsSkillsSection(t *testing.T) {
 	}
 }
 
-// T010: skills_section absent (omitempty) when best resume has no Skills header.
-func TestHandleSubmitKeywordsWithConfig_NoSkillsSection_FieldAbsent(t *testing.T) {
-	cfg := stubApplyConfigForSession() // loader returns text with no Skills header
+// T010: skills_section is always present in the envelope (empty string when no sections sidecar).
+func TestHandleSubmitKeywordsWithConfig_NoSkillsSection_FieldAlwaysPresent(t *testing.T) {
+	cfg := stubApplyConfigForSession() // stubResumeRepo.LoadSections returns ErrSectionsMissing
 
 	loadReq := callToolRequest("load_jd", map[string]any{"jd_raw_text": "Senior Go engineer."})
 	loadText := extractText(t, mcpserver.HandleLoadJDWithConfig(context.Background(), &loadReq, &cfg))
@@ -292,8 +309,125 @@ func TestHandleSubmitKeywordsWithConfig_NoSkillsSection_FieldAbsent(t *testing.T
 	if data == nil {
 		t.Fatal("expected data in response")
 	}
-	if _, present := data["skills_section"]; present {
-		t.Error("skills_section must be absent (omitempty) when resume has no Skills header")
+	// skills_section is always present now (no omitempty).
+	if _, present := data["skills_section"]; !present {
+		t.Error("skills_section must always be present in the envelope")
+	}
+	if ss := data["skills_section"].(string); ss != "" {
+		t.Errorf("skills_section must be empty when no sections sidecar, got: %q", ss)
+	}
+	// skills_section_found must be explicit false.
+	if found, _ := data["skills_section_found"].(bool); found {
+		t.Error("skills_section_found must be false when no sections sidecar")
+	}
+	// sections must be absent (omitempty) when no sidecar.
+	if _, present := data["sections"]; present {
+		t.Error("sections must be absent when no sidecar exists")
+	}
+}
+
+// US3: submit_keywords includes sections + skills_section_found when sidecar exists.
+func TestHandleSubmitKeywordsWithConfig_Sections_PresentWhenSidecarExists(t *testing.T) {
+	cfg := stubApplyConfigWithSkillsLoader() // uses stubResumeRepoWithSkillsSections
+
+	loadReq := callToolRequest("load_jd", map[string]any{"jd_raw_text": "Senior Go engineer."})
+	loadText := extractText(t, mcpserver.HandleLoadJDWithConfig(context.Background(), &loadReq, &cfg))
+	var loadEnv map[string]any
+	if err := json.Unmarshal([]byte(loadText), &loadEnv); err != nil {
+		t.Fatalf("load_jd not JSON: %v", err)
+	}
+	sessionID, _ := loadEnv["session_id"].(string)
+
+	const jdJSON = `{"title":"Go Engineer","company":"Acme","required":["go"],"preferred":[]}`
+	kwReq := callToolRequest("submit_keywords", map[string]any{"session_id": sessionID, "jd_json": jdJSON})
+	kwResult := mcpserver.HandleSubmitKeywordsWithConfig(context.Background(), &kwReq, &cfg, &config.Config{YearsOfExperience: 5})
+	kwText := extractText(t, kwResult)
+
+	var env map[string]any
+	if err := json.Unmarshal([]byte(kwText), &env); err != nil {
+		t.Fatalf("submit_keywords not JSON: %v", err)
+	}
+	if env["status"] != "ok" {
+		t.Fatalf("status = %v, want ok — full: %s", env["status"], kwText)
+	}
+	data, _ := env["data"].(map[string]any)
+
+	if found, _ := data["skills_section_found"].(bool); !found {
+		t.Error("skills_section_found must be true when sidecar has skills")
+	}
+	if sections, present := data["sections"]; !present || sections == nil {
+		t.Error("sections must be present and non-nil when sidecar exists")
+	}
+}
+
+// US3: preview_ats_extraction returns constructed text for the best resume in the session.
+func TestHandlePreviewATSExtraction_ReturnsConstructedText(t *testing.T) {
+	cfg := stubApplyConfigForSession()
+
+	loadReq := callToolRequest("load_jd", map[string]any{"jd_raw_text": "Senior Go engineer."})
+	loadText := extractText(t, mcpserver.HandleLoadJDWithConfig(context.Background(), &loadReq, &cfg))
+	var loadEnv map[string]any
+	if err := json.Unmarshal([]byte(loadText), &loadEnv); err != nil {
+		t.Fatalf("load_jd not JSON: %v", err)
+	}
+	sessionID, _ := loadEnv["session_id"].(string)
+
+	const jdJSON = `{"title":"Go Engineer","company":"Acme","required":["go"],"preferred":[]}`
+	kwReq := callToolRequest("submit_keywords", map[string]any{"session_id": sessionID, "jd_json": jdJSON})
+	mcpserver.HandleSubmitKeywordsWithConfig(context.Background(), &kwReq, &cfg, &config.Config{YearsOfExperience: 5})
+
+	previewReq := callToolRequest("preview_ats_extraction", map[string]any{"session_id": sessionID})
+	result := mcpserver.HandlePreviewATSExtractionWithConfig(context.Background(), &previewReq, &cfg)
+	text := extractText(t, result)
+
+	var env map[string]any
+	if err := json.Unmarshal([]byte(text), &env); err != nil {
+		t.Fatalf("preview_ats_extraction not JSON: %v — raw: %s", err, text)
+	}
+	if env["status"] != "ok" {
+		t.Fatalf("status = %v, want ok — full: %s", env["status"], text)
+	}
+	data, _ := env["data"].(map[string]any)
+	if data == nil {
+		t.Fatal("expected data in response")
+	}
+	if data["constructed_text"] == nil || data["constructed_text"] == "" {
+		t.Errorf("constructed_text must be non-empty, got: %v", data["constructed_text"])
+	}
+	if data["label"] == nil || data["label"] == "" {
+		t.Errorf("label must be non-empty, got: %v", data["label"])
+	}
+}
+
+// US3: preview_ats_extraction returns error when session not found.
+func TestHandlePreviewATSExtraction_SessionNotFound(t *testing.T) {
+	cfg := stubApplyConfigForSession()
+	req := callToolRequest("preview_ats_extraction", map[string]any{"session_id": "nonexistent"})
+	result := mcpserver.HandlePreviewATSExtractionWithConfig(context.Background(), &req, &cfg)
+	text := extractText(t, result)
+
+	var env map[string]any
+	if err := json.Unmarshal([]byte(text), &env); err != nil {
+		t.Fatalf("response not JSON: %v", err)
+	}
+	if env["status"] != "error" {
+		t.Errorf("status = %v, want error", env["status"])
+	}
+}
+
+// US3: preview_ats_extraction returns error when session_id missing.
+func TestHandlePreviewATSExtraction_MissingSessionID(t *testing.T) {
+	cfg := stubApplyConfigForSession()
+	req := callToolRequest("preview_ats_extraction", map[string]any{})
+	result := mcpserver.HandlePreviewATSExtractionWithConfig(context.Background(), &req, &cfg)
+	text := extractText(t, result)
+
+	var env map[string]any
+	if err := json.Unmarshal([]byte(text), &env); err != nil {
+		t.Fatalf("response not JSON: %v", err)
+	}
+	if env["status"] != "error" {
+		t.Errorf("status = %v, want error", env["status"])
 	}
 }
 

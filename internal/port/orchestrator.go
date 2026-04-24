@@ -57,4 +57,5 @@ type Orchestrator interface {
 	PlanT1(ctx context.Context, input *PlanT1Input) (PlanT1Output, error)
 	PlanT2(ctx context.Context, input *PlanT2Input) (PlanT2Output, error)
 	GenerateCoverLetter(ctx context.Context, input *CoverLetterInput) (string, error)
+	ParseSections(ctx context.Context, rawResume string) (model.SectionMap, error)
 }
