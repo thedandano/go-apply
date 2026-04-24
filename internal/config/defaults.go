@@ -42,6 +42,7 @@ type CoverLetterDefaults struct {
 
 type TailorDefaults struct {
 	MaxTier2BulletRewrites          int     `json:"max_tier2_bullet_rewrites"`
+	MaxTier1SkillRewrites           int     `json:"max_tier1_skill_rewrites"`
 	MinBlendDelta                   float64 `json:"min_blend_delta"`
 	KeywordRelevanceRequiredWeight  float64 `json:"keyword_relevance_required_weight"`
 	KeywordRelevancePreferredWeight float64 `json:"keyword_relevance_preferred_weight"`

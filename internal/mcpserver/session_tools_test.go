@@ -210,6 +210,93 @@ func TestHandleSubmitKeywordsWithConfig_HappyPath_ReturnsScores(t *testing.T) {
 	}
 }
 
+// stubDocumentLoaderWithSkills returns a resume that has a ## Skills section.
+type stubDocumentLoaderWithSkills struct{}
+
+func (s *stubDocumentLoaderWithSkills) Load(_ string) (string, error) {
+	return "# Experience\n- Built distributed systems\n\n## Skills\nCloud: AWS, GCP\nLanguages: Go, Python\n\n# Education\nBSc CS", nil
+}
+func (s *stubDocumentLoaderWithSkills) Supports(_ string) bool { return true }
+
+func stubApplyConfigWithSkillsLoader() pipeline.ApplyConfig {
+	cfg := stubApplyConfigForSession()
+	cfg.Loader = &stubDocumentLoaderWithSkills{}
+	return cfg
+}
+
+// T010: submit_keywords includes skills_section field when best resume has a Skills header.
+func TestHandleSubmitKeywordsWithConfig_ReturnsSkillsSection(t *testing.T) {
+	cfg := stubApplyConfigWithSkillsLoader()
+
+	loadReq := callToolRequest("load_jd", map[string]any{"jd_raw_text": "Senior Go engineer."})
+	loadText := extractText(t, mcpserver.HandleLoadJDWithConfig(context.Background(), &loadReq, &cfg))
+	var loadEnv map[string]any
+	if err := json.Unmarshal([]byte(loadText), &loadEnv); err != nil {
+		t.Fatalf("load_jd not JSON: %v", err)
+	}
+	sessionID, _ := loadEnv["session_id"].(string)
+
+	const jdJSON = `{"title":"Go Engineer","company":"Acme","required":["go"],"preferred":[],"location":"Remote","seniority":"senior","required_years":3}`
+	kwReq := callToolRequest("submit_keywords", map[string]any{"session_id": sessionID, "jd_json": jdJSON})
+	kwResult := mcpserver.HandleSubmitKeywordsWithConfig(context.Background(), &kwReq, &cfg, &config.Config{YearsOfExperience: 5})
+	kwText := extractText(t, kwResult)
+
+	var env map[string]any
+	if err := json.Unmarshal([]byte(kwText), &env); err != nil {
+		t.Fatalf("submit_keywords not JSON: %v — raw: %s", err, kwText)
+	}
+	if env["status"] != "ok" {
+		t.Fatalf("status = %v, want ok — full: %s", env["status"], kwText)
+	}
+	data, _ := env["data"].(map[string]any)
+	if data == nil {
+		t.Fatal("expected data in response")
+	}
+	skillsSection, ok := data["skills_section"].(string)
+	if !ok || skillsSection == "" {
+		t.Errorf("expected non-empty skills_section in data, got: %v", data["skills_section"])
+	}
+	if strings.Contains(skillsSection, "## Skills") {
+		t.Error("skills_section must not include the header line")
+	}
+	if !strings.Contains(skillsSection, "Go, Python") {
+		t.Errorf("skills_section body missing expected content, got: %q", skillsSection)
+	}
+}
+
+// T010: skills_section absent (omitempty) when best resume has no Skills header.
+func TestHandleSubmitKeywordsWithConfig_NoSkillsSection_FieldAbsent(t *testing.T) {
+	cfg := stubApplyConfigForSession() // loader returns text with no Skills header
+
+	loadReq := callToolRequest("load_jd", map[string]any{"jd_raw_text": "Senior Go engineer."})
+	loadText := extractText(t, mcpserver.HandleLoadJDWithConfig(context.Background(), &loadReq, &cfg))
+	var loadEnv map[string]any
+	if err := json.Unmarshal([]byte(loadText), &loadEnv); err != nil {
+		t.Fatalf("load_jd not JSON: %v", err)
+	}
+	sessionID, _ := loadEnv["session_id"].(string)
+
+	const jdJSON = `{"title":"Go Engineer","company":"Acme","required":["go"],"preferred":[],"location":"Remote","seniority":"senior","required_years":3}`
+	kwReq := callToolRequest("submit_keywords", map[string]any{"session_id": sessionID, "jd_json": jdJSON})
+	kwResult := mcpserver.HandleSubmitKeywordsWithConfig(context.Background(), &kwReq, &cfg, &config.Config{YearsOfExperience: 5})
+	kwText := extractText(t, kwResult)
+
+	var env map[string]any
+	if err := json.Unmarshal([]byte(kwText), &env); err != nil {
+		t.Fatalf("submit_keywords not JSON: %v — raw: %s", err, kwText)
+	}
+	if env["status"] != "ok" {
+		t.Fatalf("status = %v, want ok — full: %s", env["status"], kwText)
+	}
+	data, _ := env["data"].(map[string]any)
+	if data == nil {
+		t.Fatal("expected data in response")
+	}
+	if _, present := data["skills_section"]; present {
+		t.Error("skills_section must be absent (omitempty) when resume has no Skills header")
+	}
+}
+
 // ── HandleFinalize tests ──────────────────────────────────────────────────────
 
 func TestHandleFinalizeWithConfig_MissingSession_ReturnsError(t *testing.T) {
@@ -393,8 +480,8 @@ func TestNextActionAfterT1(t *testing.T) {
 func TestHandleSubmitTailorT1_SessionNotFound_ReturnsError(t *testing.T) {
 	cfg := stubApplyConfigForSession()
 	req := callToolRequest("submit_tailor_t1", map[string]any{
-		"session_id": "no-such-session",
-		"skill_adds": `["Go","Kubernetes"]`,
+		"session_id":     "no-such-session",
+		"skill_rewrites": `[{"original":"Docker","replacement":"Docker, K8s"}]`,
 	})
 	result := mcpserver.HandleSubmitTailorT1WithConfig(context.Background(), &req, &cfg, &config.Config{})
 	text := extractText(t, result)
@@ -409,7 +496,7 @@ func TestHandleSubmitTailorT1_SessionNotFound_ReturnsError(t *testing.T) {
 
 func TestHandleSubmitTailorT1_WrongState_ReturnsError(t *testing.T) {
 	cfg := stubApplyConfigForSession()
-	// load_jd only — state stays stateLoaded
+	// load_jd only — state stays stateLoaded (not stateScored)
 	loadReq := callToolRequest("load_jd", map[string]any{"jd_raw_text": "Go engineer role"})
 	loadText := extractText(t, mcpserver.HandleLoadJDWithConfig(context.Background(), &loadReq, &cfg))
 	var loadEnv map[string]any
@@ -417,8 +504,8 @@ func TestHandleSubmitTailorT1_WrongState_ReturnsError(t *testing.T) {
 	sessionID, _ := loadEnv["session_id"].(string)
 
 	req := callToolRequest("submit_tailor_t1", map[string]any{
-		"session_id": sessionID,
-		"skill_adds": `["Go"]`,
+		"session_id":     sessionID,
+		"skill_rewrites": `[{"original":"Go","replacement":"Go, Rust"}]`,
 	})
 	result := mcpserver.HandleSubmitTailorT1WithConfig(context.Background(), &req, &cfg, &config.Config{})
 	text := extractText(t, result)
@@ -427,7 +514,7 @@ func TestHandleSubmitTailorT1_WrongState_ReturnsError(t *testing.T) {
 	}
 }
 
-func TestHandleSubmitTailorT1_HappyPath_ReturnsNewScore(t *testing.T) {
+func TestHandleSubmitTailorT1_HappyPath_ReturnsSubstitutionsMade(t *testing.T) {
 	cfg := stubApplyConfigForSession()
 
 	// load_jd
@@ -442,10 +529,10 @@ func TestHandleSubmitTailorT1_HappyPath_ReturnsNewScore(t *testing.T) {
 	kwReq := callToolRequest("submit_keywords", map[string]any{"session_id": sessionID, "jd_json": jdJSON})
 	mcpserver.HandleSubmitKeywordsWithConfig(context.Background(), &kwReq, &cfg, &config.Config{})
 
-	// submit_tailor_t1
+	// submit_tailor_t1 with skill_rewrites
 	t1Req := callToolRequest("submit_tailor_t1", map[string]any{
-		"session_id": sessionID,
-		"skill_adds": `["Terraform","gRPC"]`,
+		"session_id":     sessionID,
+		"skill_rewrites": `[{"original":"Kubernetes","replacement":"Kubernetes, EKS"}]`,
 	})
 	result := mcpserver.HandleSubmitTailorT1WithConfig(context.Background(), &t1Req, &cfg, &config.Config{})
 	text := extractText(t, result)
@@ -461,48 +548,94 @@ func TestHandleSubmitTailorT1_HappyPath_ReturnsNewScore(t *testing.T) {
 	if data == nil || data["new_score"] == nil {
 		t.Errorf("expected new_score in data, got: %s", text)
 	}
-	// added_keywords may be null when the stub resume has no Skills section header
-	if _, ok := data["added_keywords"]; !ok {
-		t.Errorf("expected added_keywords key in data, got: %s", text)
+	if data["previous_score"] == nil {
+		t.Errorf("expected previous_score in data, got: %s", text)
+	}
+	if _, ok := data["substitutions_made"]; !ok {
+		t.Errorf("expected substitutions_made key in data, got: %s", text)
+	}
+	if _, ok := data["skills_section_found"]; !ok {
+		t.Errorf("expected skills_section_found key in data, got: %s", text)
 	}
 }
 
-func TestHandleSubmitTailorT1_MissingSkillAdds_ReturnsError(t *testing.T) {
+func TestHandleSubmitTailorT1_MissingSkillRewrites_ReturnsError(t *testing.T) {
 	cfg := stubApplyConfigForSession()
 	req := callToolRequest("submit_tailor_t1", map[string]any{
 		"session_id": "any-id",
-		// skill_adds missing
+		// skill_rewrites absent
 	})
 	result := mcpserver.HandleSubmitTailorT1WithConfig(context.Background(), &req, &cfg, &config.Config{})
 	text := extractText(t, result)
-	if !strings.Contains(text, "missing_skill_adds") {
-		t.Errorf("expected missing_skill_adds error, got: %s", text)
+	if !strings.Contains(text, "missing_skill_rewrites") {
+		t.Errorf("expected missing_skill_rewrites error, got: %s", text)
 	}
 }
 
-func TestHandleSubmitTailorT1_InvalidSkillAddsJSON_ReturnsError(t *testing.T) {
+func TestHandleSubmitTailorT1_InvalidSkillRewritesJSON_ReturnsError(t *testing.T) {
 	cfg := stubApplyConfigForSession()
 	req := callToolRequest("submit_tailor_t1", map[string]any{
-		"session_id": "any-id",
-		"skill_adds": `not-valid-json`,
+		"session_id":     "any-id",
+		"skill_rewrites": `not-valid-json`,
 	})
 	result := mcpserver.HandleSubmitTailorT1WithConfig(context.Background(), &req, &cfg, &config.Config{})
 	text := extractText(t, result)
-	if !strings.Contains(text, "invalid_skill_adds") {
-		t.Errorf("expected invalid_skill_adds error, got: %s", text)
+	if !strings.Contains(text, "invalid_skill_rewrites") {
+		t.Errorf("expected invalid_skill_rewrites error, got: %s", text)
 	}
 }
 
-func TestHandleSubmitTailorT1_EmptySkillAdds_ReturnsError(t *testing.T) {
+func TestHandleSubmitTailorT1_EmptySkillRewrites_ReturnsError(t *testing.T) {
 	cfg := stubApplyConfigForSession()
 	req := callToolRequest("submit_tailor_t1", map[string]any{
-		"session_id": "any-id",
-		"skill_adds": `[]`,
+		"session_id":     "any-id",
+		"skill_rewrites": `[]`,
 	})
 	result := mcpserver.HandleSubmitTailorT1WithConfig(context.Background(), &req, &cfg, &config.Config{})
 	text := extractText(t, result)
-	if !strings.Contains(text, "empty_skill_adds") {
-		t.Errorf("expected empty_skill_adds error, got: %s", text)
+	if !strings.Contains(text, "empty_skill_rewrites") {
+		t.Errorf("expected empty_skill_rewrites error, got: %s", text)
+	}
+}
+
+func TestHandleSubmitTailorT1_AllEmptyOriginalEntries_ReturnsError(t *testing.T) {
+	cfg := stubApplyConfigForSession()
+	req := callToolRequest("submit_tailor_t1", map[string]any{
+		"session_id":     "any-id",
+		"skill_rewrites": `[{"original":"","replacement":"x"},{"original":"","replacement":"y"}]`,
+	})
+	result := mcpserver.HandleSubmitTailorT1WithConfig(context.Background(), &req, &cfg, &config.Config{})
+	text := extractText(t, result)
+	if !strings.Contains(text, "empty_skill_rewrites") {
+		t.Errorf("expected empty_skill_rewrites error, got: %s", text)
+	}
+}
+
+func TestHandleSubmitTailorT1_TooManyRewrites_ReturnsError(t *testing.T) {
+	cfg := stubApplyConfigForSession()
+	cfg.Defaults = &config.AppDefaults{
+		Tailor: config.TailorDefaults{MaxTier1SkillRewrites: 2},
+	}
+
+	// Build a valid scored session.
+	loadReq := callToolRequest("load_jd", map[string]any{"jd_raw_text": "Go engineer role."})
+	loadText := extractText(t, mcpserver.HandleLoadJDWithConfig(context.Background(), &loadReq, &cfg))
+	var loadEnv map[string]any
+	_ = json.Unmarshal([]byte(loadText), &loadEnv)
+	sessionID, _ := loadEnv["session_id"].(string)
+	const jdJSON = `{"title":"Go Engineer","company":"Acme","required":["go"]}`
+	kwReq := callToolRequest("submit_keywords", map[string]any{"session_id": sessionID, "jd_json": jdJSON})
+	mcpserver.HandleSubmitKeywordsWithConfig(context.Background(), &kwReq, &cfg, &config.Config{})
+
+	// 3 rewrites exceeds cap of 2.
+	t1Req := callToolRequest("submit_tailor_t1", map[string]any{
+		"session_id":     sessionID,
+		"skill_rewrites": `[{"original":"A","replacement":"B"},{"original":"C","replacement":"D"},{"original":"E","replacement":"F"}]`,
+	})
+	result := mcpserver.HandleSubmitTailorT1WithConfig(context.Background(), &t1Req, &cfg, &config.Config{})
+	text := extractText(t, result)
+	if !strings.Contains(text, "too_many_rewrites") {
+		t.Errorf("expected too_many_rewrites error, got: %s", text)
 	}
 }
 

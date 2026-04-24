@@ -173,6 +173,7 @@ func HandleSubmitKeywordsWithConfig(ctx context.Context, req *mcp.CallToolReques
 		Scores            map[string]model.ScoreResult `json:"scores"`
 		BestResume        string                       `json:"best_resume"`
 		BestScore         float64                      `json:"best_score"`
+		SkillsSection     string                       `json:"skills_section,omitempty"`
 	}
 	resultData := submitKeywordsData{
 		ExtractedKeywords: extractedKeywordsData{
@@ -188,6 +189,22 @@ func HandleSubmitKeywordsWithConfig(ctx context.Context, req *mcp.CallToolReques
 		BestResume: scored.BestLabel,
 		BestScore:  scored.BestScore,
 	}
+
+	if resumeText, loadErr := loadBestResumeText(deps, scored.BestLabel); loadErr == nil {
+		if section, _, _, found := tailor.ExtractSkillsSection(resumeText); found {
+			resultData.SkillsSection = section
+			slog.InfoContext(ctx, "submit_keywords: skills_section extracted",
+				slog.String("session_id", sessionID),
+				slog.Bool("skills_section_found", true),
+			)
+		} else {
+			slog.InfoContext(ctx, "submit_keywords: no skills section in best resume",
+				slog.String("session_id", sessionID),
+				slog.Bool("skills_section_found", false),
+			)
+		}
+	}
+
 	resultBytes, _ := json.Marshal(resultData)
 	slog.DebugContext(ctx, "mcp tool result",
 		slog.String("tool", "submit_keywords"),
@@ -345,23 +362,41 @@ func HandleSubmitTailorT1WithConfig(ctx context.Context, req *mcp.CallToolReques
 	if sessionID == "" {
 		return envelopeResult(stageErrorEnvelope("", "submit_tailor_t1", "missing_session", "session_id is required", false))
 	}
-	skillAddsStr := req.GetString("skill_adds", "")
+
+	// Validation gate 1: param present.
+	skillRewritesStr := req.GetString("skill_rewrites", "")
 	slog.DebugContext(ctx, "mcp tool invoked",
 		slog.String("tool", "submit_tailor_t1"),
 		slog.String("session_id", sessionID),
-		logger.PayloadAttr("skill_adds", skillAddsStr, logger.Verbose()),
+		logger.PayloadAttr("skill_rewrites", skillRewritesStr, logger.Verbose()),
 	)
-	if skillAddsStr == "" {
-		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t1", "missing_skill_adds", "skill_adds is required", false))
+	if skillRewritesStr == "" {
+		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t1", "missing_skill_rewrites", "skill_rewrites is required", false))
 	}
-	var skillAdds []string
-	if err := json.Unmarshal([]byte(skillAddsStr), &skillAdds); err != nil {
-		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t1", "invalid_skill_adds",
-			fmt.Sprintf("skill_adds parse failed: %v", err), false))
+
+	// Validation gate 2: valid JSON.
+	var rewrites []port.BulletRewrite
+	if err := json.Unmarshal([]byte(skillRewritesStr), &rewrites); err != nil {
+		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t1", "invalid_skill_rewrites",
+			fmt.Sprintf("skill_rewrites parse failed: %v", err), false))
 	}
-	if len(skillAdds) == 0 {
-		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t1", "empty_skill_adds",
-			"skill_adds must contain at least one skill", false))
+
+	// Validation gate 3: non-empty array.
+	if len(rewrites) == 0 {
+		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t1", "empty_skill_rewrites",
+			"skill_rewrites must contain at least one entry", false))
+	}
+
+	// Validation gate 4: at least one entry with a non-empty Original after filtering.
+	var filtered []port.BulletRewrite
+	for _, rw := range rewrites {
+		if rw.Original != "" {
+			filtered = append(filtered, rw)
+		}
+	}
+	if len(filtered) == 0 {
+		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t1", "empty_skill_rewrites",
+			"skill_rewrites must contain at least one entry with a non-empty original", false))
 	}
 
 	sess := sessions.Get(sessionID)
@@ -388,6 +423,15 @@ func HandleSubmitTailorT1WithConfig(ctx context.Context, req *mcp.CallToolReques
 		cfg = &config.Config{}
 	}
 
+	// Validation gate 5: cap check.
+	if deps.Defaults != nil {
+		maxRewrites := deps.Defaults.Tailor.MaxTier1SkillRewrites
+		if maxRewrites > 0 && len(filtered) > maxRewrites {
+			return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t1", "too_many_rewrites",
+				fmt.Sprintf("skill_rewrites length %d exceeds maximum %d", len(filtered), maxRewrites), false))
+		}
+	}
+
 	baseText := sess.TailoredText
 	if baseText == "" {
 		text, err := loadBestResumeText(deps, sess.ScoreResult.BestLabel)
@@ -403,8 +447,12 @@ func HandleSubmitTailorT1WithConfig(ctx context.Context, req *mcp.CallToolReques
 	pl := pipeline.NewApplyPipeline(deps)
 
 	logger.Banner(ctx, slog.Default(), "Tailor", "T1")
-	tailored, addedKeywords := tailor.AddKeywordsToSkillsSection(baseText, skillAdds)
-	slog.InfoContext(ctx, "tailor T1 complete", "added_keywords", len(addedKeywords), "keywords", addedKeywords)
+	tailored, substitutionsMade, skillsSectionFound := tailor.ApplySkillsRewrites(baseText, filtered)
+	slog.InfoContext(ctx, "tailor T1 complete",
+		slog.String("session_id", sessionID),
+		slog.Int("substitutions_made", substitutionsMade),
+		slog.Bool("skills_section_found", skillsSectionFound),
+	)
 	sess.TailoredText = tailored
 	sess.State = stateT1Applied
 
@@ -424,14 +472,16 @@ func HandleSubmitTailorT1WithConfig(ctx context.Context, req *mcp.CallToolReques
 	sess.ScoreResult.BestScore = newScoreTotal
 
 	type t1Data struct {
-		PreviousScore float64           `json:"previous_score"`
-		NewScore      model.ScoreResult `json:"new_score"`
-		AddedKeywords []string          `json:"added_keywords"`
+		PreviousScore      float64           `json:"previous_score"`
+		NewScore           model.ScoreResult `json:"new_score"`
+		SubstitutionsMade  int               `json:"substitutions_made"`
+		SkillsSectionFound bool              `json:"skills_section_found"`
 	}
 	resultData := t1Data{
-		PreviousScore: previousScore,
-		NewScore:      newScore,
-		AddedKeywords: addedKeywords,
+		PreviousScore:      previousScore,
+		NewScore:           newScore,
+		SubstitutionsMade:  substitutionsMade,
+		SkillsSectionFound: skillsSectionFound,
 	}
 	resultBytes, _ := json.Marshal(resultData)
 	slog.DebugContext(ctx, "mcp tool result",

@@ -46,6 +46,7 @@
   },
   "tailor": {
     "max_tier2_bullet_rewrites": 4,
+    "max_tier1_skill_rewrites": 5,
     "min_blend_delta":           5.0,
     "keyword_relevance_required_weight":  0.7,
     "keyword_relevance_preferred_weight": 0.3,

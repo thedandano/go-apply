@@ -10,6 +10,33 @@ import (
 // "## Skills", "Skills:", "SKILLS", "## Technical Skills", "Core Skills:", etc.
 var skillsHeaderRe = regexp.MustCompile(`(?im)^(#{0,3}\s*)((technical|core|key|professional|additional)?\s*skills[:\s]*)$`)
 
+// ExtractSkillsSection locates the Skills section in resumeText and returns its body text
+// (lines after the header line), the line index of the header (start), the exclusive end
+// index (end), and whether a Skills header was found. The caller can splice a modified body
+// back with: strings.Join(lines[:start+1], "\n") + "\n" + newBody + "\n" + strings.Join(lines[end:], "\n").
+func ExtractSkillsSection(resumeText string) (section string, start, end int, found bool) {
+	lines := strings.Split(resumeText, "\n")
+	start = -1
+	for i, line := range lines {
+		if skillsHeaderRe.MatchString(strings.TrimSpace(line)) {
+			start = i
+			break
+		}
+	}
+	if start == -1 {
+		return "", 0, 0, false
+	}
+	end = len(lines)
+	for i := start + 1; i < len(lines); i++ {
+		trimmed := strings.TrimSpace(lines[i])
+		if isHeaderLine(trimmed) && !skillsHeaderRe.MatchString(trimmed) {
+			end = i
+			break
+		}
+	}
+	return strings.Join(lines[start+1:end], "\n"), start, end, true
+}
+
 // AddKeywordsToSkillsSection injects missing keywords into the Skills section of resumeText.
 // Deduplication is case-insensitive — keywords already present anywhere in the Skills section
 // are not re-added. Returns the modified resume text and the list of keywords that were added.
