@@ -25,6 +25,7 @@ func NewServer() *server.MCPServer {
 			mcp.WithString("resume_label", mcp.Description("Short identifier for the resume, e.g. 'backend' (required when resume_content is provided)")),
 			mcp.WithString("skills", mcp.Description("Skills reference text (optional)")),
 			mcp.WithString("accomplishments", mcp.Description("Accomplishments text (optional)")),
+			mcp.WithString("sections", mcp.Description("Optional JSON-encoded SectionMap (schema_version, contact, experience, …). When provided, validated and persisted as a sidecar alongside the resume.")),
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			return HandleOnboardUser(ctx, &req, newOnboardSvc()), nil
@@ -36,6 +37,7 @@ func NewServer() *server.MCPServer {
 			mcp.WithDescription("Add or replace a single resume in the profile database."),
 			mcp.WithString("resume_content", mcp.Description("Resume text"), mcp.Required()),
 			mcp.WithString("resume_label", mcp.Description("Short identifier, e.g. 'backend'"), mcp.Required()),
+			mcp.WithString("sections", mcp.Description("Optional JSON-encoded SectionMap (schema_version, contact, experience, …). When provided, validated and persisted as a sidecar alongside the resume.")),
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			return HandleAddResume(ctx, &req, newOnboardSvc()), nil
@@ -96,9 +98,9 @@ func NewServer() *server.MCPServer {
 
 	srv.AddTool(
 		mcp.NewTool("submit_tailor_t1",
-			mcp.WithDescription("Apply T1 tailoring: apply string replacements scoped to the Skills section and rescore. Call after submit_keywords when next_action is 'tailor_t1'. Provide skill_rewrites as a JSON array of {original, replacement} objects (max 5 per call). Prefer one-for-one swaps over pure appends to keep the section length stable."),
+			mcp.WithDescription("Apply T1 tailoring: apply structured edits scoped to the Skills section and rescore. Call after submit_keywords when next_action is 'tailor_t1'. Provide edits as a JSON array of {section, op, value} objects (max 5). Use op=replace or op=add; section must be 'skills'."),
 			mcp.WithString("session_id", mcp.Description("Session ID from load_jd"), mcp.Required()),
-			mcp.WithString("skill_rewrites", mcp.Description("JSON array of {original, replacement} pairs scoped to Skills section, e.g. [{\"original\":\"AWS\",\"replacement\":\"AWS, GCP\"}]. Max 5 entries."), mcp.Required()),
+			mcp.WithString("edits", mcp.Description(`JSON array of {"section":"skills","op":"replace|add","value":"..."} objects. Max 5 entries. e.g. [{"section":"skills","op":"add","value":"GCP"}]`), mcp.Required()),
 		),
 		requireOnboarded(func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			return HandleSubmitTailorT1(ctx, &req), nil
@@ -107,12 +109,22 @@ func NewServer() *server.MCPServer {
 
 	srv.AddTool(
 		mcp.NewTool("submit_tailor_t2",
-			mcp.WithDescription("Apply T2 tailoring: substitute Experience bullet points and rescore. Call after submit_tailor_t1. Provide bullet_rewrites as JSON array of {original, replacement} objects."),
+			mcp.WithDescription("Apply T2 tailoring: rewrite Experience bullets and rescore. Call after submit_tailor_t1. Provide edits as a JSON array of {section, op, target, value} objects; section must be 'experience'."),
 			mcp.WithString("session_id", mcp.Description("Session ID from load_jd"), mcp.Required()),
-			mcp.WithString("bullet_rewrites", mcp.Description("JSON array of {\"original\":\"...\",\"replacement\":\"...\"} objects"), mcp.Required()),
+			mcp.WithString("edits", mcp.Description(`JSON array of {"section":"experience","op":"replace|remove","target":"exp-<i>-b<j>","value":"..."} objects. e.g. [{"section":"experience","op":"replace","target":"exp-0-b2","value":"Led migration to Kubernetes"}]`), mcp.Required()),
 		),
 		requireOnboarded(func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			return HandleSubmitTailorT2(ctx, &req), nil
+		}),
+	)
+
+	srv.AddTool(
+		mcp.NewTool("preview_ats_extraction",
+			mcp.WithDescription("Return the constructed resume text as it would be seen by an ATS. Today an identity pass-through (raw text); the seam exists for future PDF render + extraction. Call after submit_keywords."),
+			mcp.WithString("session_id", mcp.Description("Session ID from load_jd"), mcp.Required()),
+		),
+		requireOnboarded(func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return HandlePreviewATSExtraction(ctx, &req), nil
 		}),
 	)
 

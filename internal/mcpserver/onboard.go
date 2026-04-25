@@ -44,6 +44,18 @@ func HandleOnboardUser(ctx context.Context, req *mcp.CallToolRequest, svc port.O
 		return errorResult("resume is required")
 	}
 
+	// Parse and validate sections before running the onboarder (fail fast).
+	var parsedSections *model.SectionMap
+	if sm, hasSections, parseErr := parseSectionsArg(req); hasSections {
+		if parseErr != nil {
+			return errorResult(parseErr.Error())
+		}
+		if valErr := model.ValidateSectionMap(sm); valErr != nil {
+			return errorResult(valErr.Error())
+		}
+		parsedSections = sm
+	}
+
 	var resumes []model.ResumeEntry
 	if resumeContent != "" {
 		resumes = append(resumes, model.ResumeEntry{Label: resumeLabel, Text: resumeContent})
@@ -56,6 +68,19 @@ func HandleOnboardUser(ctx context.Context, req *mcp.CallToolRequest, svc port.O
 	})
 	if err != nil {
 		return errorResult(fmt.Sprintf("onboard: %v", err))
+	}
+
+	// Save sections after svc.Run so the inputs/ directory exists.
+	if parsedSections != nil {
+		repo := fs.NewResumeRepository(config.DataDir())
+		if saveErr := repo.SaveSections(resumeLabel, *parsedSections); saveErr != nil {
+			slog.ErrorContext(ctx, "onboard_user: save sections failed",
+				slog.String("label", resumeLabel),
+				slog.String("error", saveErr.Error()),
+			)
+			return errorResult(fmt.Sprintf("save sections: %v", saveErr))
+		}
+		slog.DebugContext(ctx, "onboard_user: sections saved", slog.String("label", resumeLabel))
 	}
 
 	data, _ := json.Marshal(result)
@@ -85,11 +110,36 @@ func HandleAddResume(ctx context.Context, req *mcp.CallToolRequest, svc port.Onb
 		return errorResult("resume_content and resume_label are both required")
 	}
 
+	// Parse and validate sections before running the onboarder (fail fast).
+	var parsedSections *model.SectionMap
+	if sm, hasSections, parseErr := parseSectionsArg(req); hasSections {
+		if parseErr != nil {
+			return errorResult(parseErr.Error())
+		}
+		if valErr := model.ValidateSectionMap(sm); valErr != nil {
+			return errorResult(valErr.Error())
+		}
+		parsedSections = sm
+	}
+
 	result, err := svc.Run(ctx, model.OnboardInput{
 		Resumes: []model.ResumeEntry{{Label: resumeLabel, Text: resumeContent}},
 	})
 	if err != nil {
 		return errorResult(fmt.Sprintf("add resume: %v", err))
+	}
+
+	// Save sections after svc.Run so the inputs/ directory exists.
+	if parsedSections != nil {
+		repo := fs.NewResumeRepository(config.DataDir())
+		if saveErr := repo.SaveSections(resumeLabel, *parsedSections); saveErr != nil {
+			slog.ErrorContext(ctx, "add_resume: save sections failed",
+				slog.String("label", resumeLabel),
+				slog.String("error", saveErr.Error()),
+			)
+			return errorResult(fmt.Sprintf("save sections: %v", saveErr))
+		}
+		slog.DebugContext(ctx, "add_resume: sections saved", slog.String("label", resumeLabel))
 	}
 
 	data, _ := json.Marshal(result)
@@ -230,4 +280,33 @@ func buildProfileStatus(dataDir string) map[string]interface{} {
 // It is a simple constructor with no external dependencies to wire.
 func newOnboardSvc() port.Onboarder {
 	return onboarding.New(config.DataDir(), slog.Default())
+}
+
+// parseSectionsArg reads the optional "sections" argument from req.
+// Returns (sm, true, nil) when sections are present and parse succeeds.
+// Returns (nil, true, err) when sections are present but malformed.
+// Returns (nil, false, nil) when sections are absent (backward-compat path).
+func parseSectionsArg(req *mcp.CallToolRequest) (*model.SectionMap, bool, error) {
+	raw, ok := req.GetArguments()["sections"]
+	if !ok || raw == nil {
+		return nil, false, nil
+	}
+	var data []byte
+	switch v := raw.(type) {
+	case string:
+		data = []byte(v)
+	case map[string]any:
+		b, err := json.Marshal(v)
+		if err != nil {
+			return nil, true, fmt.Errorf("sections: marshal object form: %w", err)
+		}
+		data = b
+	default:
+		return nil, true, fmt.Errorf("sections: unexpected type %T; must be a JSON string or object", raw)
+	}
+	var sm model.SectionMap
+	if err := json.Unmarshal(data, &sm); err != nil {
+		return nil, true, fmt.Errorf("sections: parse failed: %w", err)
+	}
+	return &sm, true, nil
 }

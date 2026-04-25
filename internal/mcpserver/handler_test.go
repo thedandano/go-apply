@@ -79,6 +79,12 @@ func (s *stubResumeRepo) ListResumes() ([]model.ResumeFile, error) {
 	return []model.ResumeFile{{Label: "main", Path: "/fake/main.txt"}}, nil
 }
 
+func (s *stubResumeRepo) LoadSections(_ string) (model.SectionMap, error) {
+	return model.SectionMap{}, model.ErrSectionsMissing
+}
+
+func (s *stubResumeRepo) SaveSections(_ string, _ model.SectionMap) error { return nil } //nolint:gocritic // hugeParam: interface constraint
+
 type stubDocumentLoader struct{}
 
 var _ port.DocumentLoader = (*stubDocumentLoader)(nil)
