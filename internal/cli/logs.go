@@ -106,7 +106,9 @@ func runLogs(cmd *cobra.Command, logDir string, n int, follow bool) error {
 		return fmt.Errorf("read log: %w", err)
 	}
 	for _, line := range tail {
-		fmt.Fprintln(cmd.OutOrStdout(), line)
+		if err := renderLine(cmd.OutOrStdout(), line); err != nil {
+			return fmt.Errorf("render line: %w", err)
+		}
 	}
 
 	if !follow {
@@ -134,7 +136,9 @@ func runLogs(cmd *cobra.Command, logDir string, n int, follow bool) error {
 			}
 			scanner := bufio.NewScanner(f)
 			for scanner.Scan() {
-				fmt.Fprintln(cmd.OutOrStdout(), scanner.Text())
+				if err := renderLine(cmd.OutOrStdout(), scanner.Text()); err != nil {
+					return fmt.Errorf("render line: %w", err)
+				}
 			}
 			offset, _ = f.Seek(0, io.SeekCurrent)
 		}
