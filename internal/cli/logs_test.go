@@ -167,3 +167,101 @@ func TestLogsCommand_NegativeLines(t *testing.T) {
 		t.Errorf("expected empty output for -n 0, got: %q", out)
 	}
 }
+
+// T004: TestLogsCommand_RawFileUnchangedAfterDisplay verifies that the logs
+// command is read-only: the fixture file's bytes are identical before and after
+// the command runs.
+func TestLogsCommand_RawFileUnchangedAfterDisplay(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "go-apply-2025-01-01.log")
+	content := []byte(`2026-04-25 10:30:58 INFO mcp tool result tool=submit_tailor_t2 status=ok result="{\"score\":75}"` + "\n")
+	if err := os.WriteFile(logPath, content, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	before, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read before: %v", err)
+	}
+
+	if _, err := executeLogsCmd(t, dir); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	after, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read after: %v", err)
+	}
+
+	if !bytes.Equal(before, after) {
+		t.Errorf("file was modified by the logs command\nbefore: %q\nafter:  %q", before, after)
+	}
+}
+
+// T005: TestLogsCommand_ConsistentFormattingAcrossEntries verifies that two
+// log lines each containing a different JSON-valued field are both rendered
+// with the same indentation style: 2-space label indent and 4-space JSON body indent.
+func TestLogsCommand_ConsistentFormattingAcrossEntries(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "go-apply-2025-01-01.log")
+	content := `2026-04-25 10:00:00 INFO action one result="{\"score\":75}"` + "\n" +
+		`2026-04-25 10:00:01 WARN action two payload="{\"items\":[1,2,3]}"` + "\n"
+	if err := os.WriteFile(logPath, []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := executeLogsCmd(t, dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for _, label := range []string{"  result:", "  payload:"} {
+		if !strings.Contains(out, label) {
+			t.Errorf("expected %q in output, got:\n%s", label, out)
+		}
+	}
+
+	// Both JSON blocks must open with a 4-space-indented brace.
+	// MarshalIndent(parsed, "    ", "  ") places the opening { at the prefix level.
+	if strings.Count(out, "    {") < 2 {
+		t.Errorf("expected at least 2 occurrences of '    {' (4-space indent), got:\n%s", out)
+	}
+}
+
+// T005a: TestLogsCommand_FollowPrettyPrintsJSON verifies that --follow mode
+// also pretty-prints JSON-valued fields as new lines are appended to the file.
+func TestLogsCommand_FollowPrettyPrintsJSON(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "go-apply-2025-01-01.log")
+	if err := os.WriteFile(logPath, []byte("existing line\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	root := &cobra.Command{Use: "root"}
+	cmd := cli.NewLogsCommand()
+	root.AddCommand(cmd)
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	root.SetArgs([]string{"logs", "--log-dir", dir, "--follow"})
+
+	done := make(chan error, 1)
+	go func() {
+		cmd.SetContext(ctx)
+		done <- root.Execute()
+	}()
+
+	time.Sleep(200 * time.Millisecond)
+	f, _ := os.OpenFile(logPath, os.O_APPEND|os.O_WRONLY, 0600)
+	fmt.Fprintln(f, `2026-04-25 10:00:00 INFO scored result="{\"score\":99}"`)
+	f.Close()
+
+	time.Sleep(700 * time.Millisecond)
+	cancel()
+	<-done
+
+	if !strings.Contains(buf.String(), "  result:") {
+		t.Errorf("expected '  result:' in follow output, got: %q", buf.String())
+	}
+}
