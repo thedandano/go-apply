@@ -37,8 +37,18 @@ var builtinPatterns = []patternReplacement{
 	{regexp.MustCompile(`[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}`), "«EMAIL»"},
 	// E.164: +15555551234 — must come before NANP
 	{regexp.MustCompile(`\+1?\d{10,14}`), "«PHONE»"},
-	// NANP: (555) 555-1234 / 555-555-1234 / 5555551234
-	{regexp.MustCompile(`\(?\d{3}\)?[\s.\-]?\d{3}[\s.\-]?\d{4}`), "«PHONE»"},
+	// NANP explicit parens: (555)555-1234 / (555) 555-1234 / (555)5551234
+	// Parens imply phone context so no separator after ) is required.
+	{regexp.MustCompile(`\(\d{3}\)\s?\d{3}[\s.\-]?\d{4}`), "«PHONE»"},
+	// NANP with separator (no parens): 555-555-1234 / 555.555.1234 / 555 555-1234
+	// Separator after area code is required — digit runs in floats never have one.
+	{regexp.MustCompile(`\d{3}[\s.\-]\d{3}[\s.\-]?\d{4}`), "«PHONE»"},
+	// NANP bare 10-digit: 5555551234
+	// Leading boundary excludes digits AND dots so decimal fractions (52.6666666666)
+	// are not matched. Trailing boundary excludes digits only — dots are allowed
+	// there so sentence-terminal phones (5555551234.) are still redacted.
+	// Go regexp has no lookbehind; surrounding chars are captured and restored.
+	{regexp.MustCompile(`([^\d.]|^)\d{10}([^\d]|$)`), "${1}«PHONE»${2}"},
 }
 
 // New constructs a Redactor from a profile. Fields that are empty strings

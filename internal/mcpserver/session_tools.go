@@ -746,6 +746,7 @@ func HandlePreviewATSExtractionWithConfig(ctx context.Context, req *mcp.CallTool
 		slog.String("session_id", sessionID),
 		slog.String("label", label),
 		slog.Int("result_bytes", len(resultBytes)),
+		logger.PayloadAttr("result", string(resultBytes), logger.Verbose()),
 	)
 	return envelopeResult(okEnvelope(sessionID, "", pd))
 }
