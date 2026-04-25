@@ -36,5 +36,5 @@ A Go CLI that scores resumes against job postings, tailors them via a two-tier c
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan at
-`specs/006-pretty-log-output/plan.md`
+`specs/007-tier4-schema-sections/plan.md`
 <!-- SPECKIT END -->

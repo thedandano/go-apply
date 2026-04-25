@@ -155,6 +155,45 @@ type PublicationEntry struct {
 	URL   string `json:"url,omitempty"`
 }
 
+// Tier 4 entry structs — preserve-only sections with no edit primitives.
+
+type LanguageEntry struct {
+	Name        string `json:"name,omitempty"        yaml:"name,omitempty"`
+	Proficiency string `json:"proficiency,omitempty" yaml:"proficiency,omitempty"`
+}
+
+type SpeakingEntry struct {
+	Title string `json:"title,omitempty" yaml:"title,omitempty"`
+	Event string `json:"event,omitempty" yaml:"event,omitempty"`
+	Date  string `json:"date,omitempty"  yaml:"date,omitempty"`
+	URL   string `json:"url,omitempty"   yaml:"url,omitempty"`
+}
+
+type OpenSourceEntry struct {
+	Project     string `json:"project,omitempty"     yaml:"project,omitempty"`
+	Role        string `json:"role,omitempty"        yaml:"role,omitempty"`
+	URL         string `json:"url,omitempty"         yaml:"url,omitempty"`
+	Description string `json:"description,omitempty" yaml:"description,omitempty"`
+}
+
+type PatentEntry struct {
+	Title  string `json:"title,omitempty"  yaml:"title,omitempty"`
+	Number string `json:"number,omitempty" yaml:"number,omitempty"`
+	Date   string `json:"date,omitempty"   yaml:"date,omitempty"`
+	URL    string `json:"url,omitempty"    yaml:"url,omitempty"`
+}
+
+type InterestEntry struct {
+	Name string `json:"name,omitempty" yaml:"name,omitempty"`
+}
+
+type ReferenceEntry struct {
+	Name    string `json:"name,omitempty"    yaml:"name,omitempty"`
+	Title   string `json:"title,omitempty"   yaml:"title,omitempty"`
+	Company string `json:"company,omitempty" yaml:"company,omitempty"`
+	Contact string `json:"contact,omitempty" yaml:"contact,omitempty"`
+}
+
 // SectionMap structured representation of a résumé
 type SectionMap struct {
 	SchemaVersion  int                  `json:"schema_version"`
@@ -168,6 +207,12 @@ type SectionMap struct {
 	Awards         []AwardEntry         `json:"awards,omitempty"`
 	Volunteer      []VolunteerEntry     `json:"volunteer,omitempty"`
 	Publications   []PublicationEntry   `json:"publications,omitempty"`
+	Languages      []LanguageEntry      `json:"languages,omitempty"   yaml:"languages,omitempty"`
+	Speaking       []SpeakingEntry      `json:"speaking,omitempty"    yaml:"speaking,omitempty"`
+	OpenSource     []OpenSourceEntry    `json:"open_source,omitempty" yaml:"open_source,omitempty"`
+	Patents        []PatentEntry        `json:"patents,omitempty"     yaml:"patents,omitempty"`
+	Interests      []InterestEntry      `json:"interests,omitempty"   yaml:"interests,omitempty"`
+	References     []ReferenceEntry     `json:"references,omitempty"  yaml:"references,omitempty"`
 	Order          []string             `json:"order,omitempty"`
 }
 
