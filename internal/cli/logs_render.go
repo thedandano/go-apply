@@ -27,8 +27,8 @@ type jsonField struct {
 func renderLine(w io.Writer, line string) error {
 	matches := quotedFieldRe.FindAllStringSubmatchIndex(line, -1)
 
-	var fields []jsonField
-	removedRanges := make([][2]int, 0)
+	fields := make([]jsonField, 0, len(matches))
+	removedRanges := make([][2]int, 0, len(matches))
 
 	for _, m := range matches {
 		// m[0]:m[1] = full match, m[2]:m[3] = key, m[4]:m[5] = quoted value
