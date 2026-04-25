@@ -17,7 +17,7 @@ You handle reasoning: extract keywords from JD text, interpret scores, drive tai
 |------|---------|------------|
 | load_jd | Fetch JD + start session | jd_url OR jd_raw_text |
 | submit_keywords | Score resumes against extracted JD | session_id (req), jd_json (req) |
-| submit_tailor_t1 | Apply structured edits to the Skills section and rescore | session_id (req), edits (JSON array of {section:"skills", op, value}, req) |
+| submit_tailor_t1 | Apply structured edits to the Skills section and rescore | session_id (req), edits (JSON array of {section:"skills", op, value, category?}, req) |
 | submit_tailor_t2 | Apply structured edits to Experience bullets and rescore | session_id (req), edits (JSON array of {section:"experience", op, target, value?}, req) |
 | preview_ats_extraction | Return constructed ATS text for the best resume | session_id (req) |
 | finalize | Persist record + close session | session_id (req), cover_letter (opt) |
@@ -68,7 +68,13 @@ Draft a cover letter, then call finalize with cover_letter.
 
 **next_action == "tailor_t1"** (40 ≤ score < 70):
 1. Identify required/preferred keywords missing from the best resume. Use skills_section from the submit_keywords response to see what is in the Skills section.
-2. Call submit_tailor_t1 with edits: [{"section":"skills","op":"replace","value":"AWS, GCP"}, ...] (max 5 items). Use prefer one-for-one replace over pure add to keep section length stable (e.g. replace "AWS" with "AWS, GCP"). Section must be "skills".
+2. Call submit_tailor_t1 with edits (max 5 items). Section must be "skills".
+   - Flat skills (skills_section.kind == "flat"): omit category.
+     e.g. {"section":"skills","op":"replace","value":"AWS, GCP"}
+   - Categorized skills (skills_section.kind == "categorized"): include category matching
+     a key from sections.skills.categorized (from submit_keywords response).
+     e.g. {"section":"skills","category":"Cloud","op":"add","value":"AWS, GCP"}
+   prefer one-for-one replace over pure add to keep section length stable.
 3. Read the new next_action from the T1 response — do NOT wait for the user:
    - "tailor_t2" → immediately proceed to T2 below.
    - "cover_letter" → draft cover letter and call finalize.
