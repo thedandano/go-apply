@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"regexp"
-	"strconv"
 	"strings"
 )
 
@@ -35,8 +34,8 @@ func renderLine(w io.Writer, line string) error {
 		key := line[m[2]:m[3]]
 		rawValue := line[m[4]:m[5]]
 
-		unquoted, err := strconv.Unquote(rawValue)
-		if err != nil {
+		unquoted, ok := logfmtUnquote(rawValue)
+		if !ok {
 			continue
 		}
 
@@ -82,6 +81,17 @@ func renderLine(w io.Writer, line string) error {
 	}
 
 	return nil
+}
+
+// logfmtUnquote strips the outer quotes from a charmbracelet/log quoted value and
+// unescapes only \" → ". charmbracelet does not double-escape backslashes (it writes
+// \n as 0x5c 0x6e, not \\n), so strconv.Unquote is wrong here: it would convert \n
+// into a real newline (0x0a), corrupting JSON escape sequences in the inner value.
+func logfmtUnquote(s string) (string, bool) {
+	if len(s) < 2 || s[0] != '"' || s[len(s)-1] != '"' {
+		return "", false
+	}
+	return strings.ReplaceAll(s[1:len(s)-1], `\"`, `"`), true
 }
 
 // removeRanges removes the byte ranges from s and returns the result.

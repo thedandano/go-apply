@@ -259,3 +259,26 @@ func TestRenderLine_HyphenatedFieldKey(t *testing.T) {
 		t.Errorf("non-JSON hyphenated field was removed from header\ngot: %q", got)
 	}
 }
+
+// Test 11: JSON field whose string values contain \n escape sequences.
+// charmbracelet/log writes \n as literal backslash-n (0x5c 0x6e), not as \\n.
+// strconv.Unquote would convert \n to a real newline, making json.Unmarshal fail.
+// The renderer must use logfmt-aware unquoting so JSON escape sequences survive intact.
+func TestRenderLine_JSONWithNewlineEscapes(t *testing.T) {
+	// Raw string literal: \n is backslash+n (two chars), matching charmbracelet output.
+	line := `2026-04-25 10:30:58 DEBU mcp tool result status=ok result="{\"skills_section\":\"AI\nBackend\"}"`
+	var buf bytes.Buffer
+	if err := renderLine(&buf, line); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := buf.String()
+	if strings.Contains(got, `result="`) {
+		t.Errorf("header should not contain result=..., got:\n%s", got)
+	}
+	if !strings.Contains(got, "  result:") {
+		t.Errorf("expected '  result:' label in output, got:\n%s", got)
+	}
+	if !strings.Contains(got, `"skills_section"`) {
+		t.Errorf("expected pretty-printed JSON with skills_section key, got:\n%s", got)
+	}
+}

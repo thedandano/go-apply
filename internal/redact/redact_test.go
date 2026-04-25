@@ -114,6 +114,24 @@ func TestRedactAny_StructWithUnexportedFields_NoPanic(t *testing.T) {
 	}
 }
 
+// TestRedact_FloatScoresNotRedacted verifies that floating-point score values
+// (e.g. 52.666666666666664) are not matched by the phone number patterns.
+// The NANP regex must not treat long digit runs in decimal fractions as phone numbers.
+func TestRedact_FloatScoresNotRedacted(t *testing.T) {
+	r := redact.New(&redact.Profile{})
+	cases := []string{
+		`{"score":52.666666666666664}`,
+		`{"keyword_match":12.99998,"experience_fit":15}`,
+		`{"previous_score":77.99999,"new_score":52.666666666666664}`,
+	}
+	for _, input := range cases {
+		got := r.Redact(input)
+		if got != input {
+			t.Errorf("float score was incorrectly redacted:\n  input: %s\n  got:   %s", input, got)
+		}
+	}
+}
+
 func TestRedact_EmptyProfileNoReplacement(t *testing.T) {
 	r := redact.New(&redact.Profile{})
 	// No literal PII — only regex patterns may fire, but not on this text.

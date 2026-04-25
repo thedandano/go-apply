@@ -37,8 +37,14 @@ var builtinPatterns = []patternReplacement{
 	{regexp.MustCompile(`[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}`), "«EMAIL»"},
 	// E.164: +15555551234 — must come before NANP
 	{regexp.MustCompile(`\+1?\d{10,14}`), "«PHONE»"},
-	// NANP: (555) 555-1234 / 555-555-1234 / 5555551234
-	{regexp.MustCompile(`\(?\d{3}\)?[\s.\-]?\d{3}[\s.\-]?\d{4}`), "«PHONE»"},
+	// NANP with separator: (555) 555-1234 / 555-555-1234 / 555.555.1234
+	// First separator is required so that digit runs in floats (e.g. 52.66666666664)
+	// are not matched — the area code digits are never followed by a separator in a float.
+	{regexp.MustCompile(`\(?\d{3}\)?[\s.\-]\d{3}[\s.\-]?\d{4}`), "«PHONE»"},
+	// NANP bare 10-digit: 5555551234
+	// Word boundaries prevent matching inside float values: \b\d{10}\b fails on
+	// 52.666666666666664 because more digits follow the first 10.
+	{regexp.MustCompile(`\b\d{10}\b`), "«PHONE»"},
 }
 
 // New constructs a Redactor from a profile. Fields that are empty strings
