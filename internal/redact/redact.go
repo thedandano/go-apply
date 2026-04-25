@@ -44,8 +44,9 @@ var builtinPatterns = []patternReplacement{
 	// Separator after area code is required — digit runs in floats never have one.
 	{regexp.MustCompile(`\d{3}[\s.\-]\d{3}[\s.\-]?\d{4}`), "«PHONE»"},
 	// NANP bare 10-digit: 5555551234
-	// Require a non-digit, non-dot boundary on both sides so that digit runs
-	// after a decimal point (e.g. 52.6666666666) are not matched.
+	// Leading boundary excludes digits AND dots so decimal fractions (52.6666666666)
+	// are not matched. Trailing boundary excludes digits only — dots are allowed
+	// there so sentence-terminal phones (5555551234.) are still redacted.
 	// Go regexp has no lookbehind; surrounding chars are captured and restored.
 	{regexp.MustCompile(`([^\d.]|^)\d{10}([^\d]|$)`), "${1}«PHONE»${2}"},
 }
