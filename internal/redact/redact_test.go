@@ -132,6 +132,34 @@ func TestRedact_FloatScoresNotRedacted(t *testing.T) {
 	}
 }
 
+func TestRedact_PhoneCompactParen(t *testing.T) {
+	r := redact.New(&redact.Profile{})
+	cases := []struct{ input, want string }{
+		{"call (555)555-1234 now", "call «PHONE» now"},
+		{"(555)5551234", "«PHONE»"},
+	}
+	for _, c := range cases {
+		got := r.Redact(c.input)
+		if got != c.want {
+			t.Errorf("input %q: got %q, want %q", c.input, got, c.want)
+		}
+	}
+}
+
+func TestRedact_FloatTenDigitFractionNotRedacted(t *testing.T) {
+	r := redact.New(&redact.Profile{})
+	cases := []string{
+		`{"score":52.6666666666}`,
+		`{"score":0.1234567890}`,
+	}
+	for _, input := range cases {
+		got := r.Redact(input)
+		if got != input {
+			t.Errorf("float score was incorrectly redacted:\n  input: %s\n  got:   %s", input, got)
+		}
+	}
+}
+
 func TestRedact_EmptyProfileNoReplacement(t *testing.T) {
 	r := redact.New(&redact.Profile{})
 	// No literal PII — only regex patterns may fire, but not on this text.
