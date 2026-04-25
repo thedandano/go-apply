@@ -3,6 +3,7 @@ package tailor
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -40,13 +41,29 @@ func (s *Service) ApplyEdits(_ context.Context, sections model.SectionMap, edits
 	return result, nil
 }
 
-func applySkillsEdit(sections *model.SectionMap, edit port.Edit) string {
+func applySkillsEdit(sections *model.SectionMap, edit port.Edit) string { //nolint:gocritic // hugeParam: value semantics match ApplyEdits loop, pointer would not reduce allocations
 	if sections.Skills == nil {
 		sections.Skills = &model.SkillsSection{Kind: model.SkillsKindFlat}
 	}
 	if sections.Skills.Kind == model.SkillsKindCategorized {
-		return fmt.Sprintf("op %q on skills requires kind=%q; current kind is %q — re-onboard with flat skills or use section-specific edits",
-			edit.Op, model.SkillsKindFlat, sections.Skills.Kind)
+		cats := sections.Skills.Categorized
+		if edit.Category == "" {
+			return fmt.Sprintf("op %q on categorized skills requires a category; available: [%s]",
+				edit.Op, sortedKeys(cats))
+		}
+		if _, ok := cats[edit.Category]; !ok {
+			return fmt.Sprintf("category %q not found; available: [%s]",
+				edit.Category, sortedKeys(cats))
+		}
+		switch edit.Op {
+		case port.EditOpAdd:
+			cats[edit.Category] = append(cats[edit.Category], splitTrim(edit.Value)...)
+		case port.EditOpReplace:
+			cats[edit.Category] = splitTrim(edit.Value)
+		default:
+			return fmt.Sprintf("unsupported op %q for section %q", edit.Op, edit.Section)
+		}
+		return ""
 	}
 	switch edit.Op {
 	case port.EditOpReplace:
@@ -63,7 +80,7 @@ func applySkillsEdit(sections *model.SectionMap, edit port.Edit) string {
 	return ""
 }
 
-func applyExperienceEdit(sections *model.SectionMap, edit port.Edit) string {
+func applyExperienceEdit(sections *model.SectionMap, edit port.Edit) string { //nolint:gocritic // hugeParam: value semantics match ApplyEdits loop, pointer would not reduce allocations
 	entryIdx, bulletIdx, err := parseBulletTarget(edit.Target)
 	if err != nil {
 		return err.Error()
@@ -87,6 +104,26 @@ func applyExperienceEdit(sections *model.SectionMap, edit port.Edit) string {
 		return fmt.Sprintf("unsupported op %q for section %q", edit.Op, edit.Section)
 	}
 	return ""
+}
+
+func sortedKeys(m map[string][]string) string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return strings.Join(keys, ", ")
+}
+
+func splitTrim(s string) []string {
+	parts := strings.Split(s, ",")
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if t := strings.TrimSpace(p); t != "" {
+			result = append(result, t)
+		}
+	}
+	return result
 }
 
 // parseBulletTarget parses "exp-<i>-b<j>" into (entryIdx, bulletIdx).

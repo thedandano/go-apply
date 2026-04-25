@@ -19,10 +19,11 @@ const (
 // Target is required for "replace"/"remove" on experience bullets (exp-<i>-b<j>).
 // Value is required for "add"/"replace".
 type Edit struct {
-	Section string `json:"section"`
-	Op      EditOp `json:"op"`
-	Target  string `json:"target,omitempty"`
-	Value   string `json:"value,omitempty"`
+	Section  string `json:"section"`
+	Op       EditOp `json:"op"`
+	Target   string `json:"target,omitempty"`
+	Value    string `json:"value,omitempty"`
+	Category string `json:"category,omitempty"`
 }
 
 // EditRejection records a rejected edit with its reason.
