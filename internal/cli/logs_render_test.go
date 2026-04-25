@@ -224,3 +224,38 @@ func TestRenderLine_WARNLevelSameFormattingAsINFO(t *testing.T) {
 		t.Errorf("JSON block formatting differs between INFO and WARN:\nINFO: %q\nWARN: %q", infoBlock, warnBlock)
 	}
 }
+
+// B1 regression: internal whitespace in non-JSON fields must be preserved verbatim.
+// collapseSpaces was incorrectly rewriting "hello   world" to "hello world".
+func TestRenderLine_PreservesInternalSpacesInNonJSONFields(t *testing.T) {
+	line := `level=info msg="found   3  matches" status=ok result="{\"score\":75}"`
+	var buf bytes.Buffer
+	if err := renderLine(&buf, line); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := buf.String()
+	const wantFragment = `msg="found   3  matches"`
+	if !strings.Contains(got, wantFragment) {
+		t.Errorf("internal whitespace was corrupted in header\nwant fragment: %q\ngot: %q", wantFragment, got)
+	}
+}
+
+// B2 regression: hyphenated field keys must be matched by the regex and JSON
+// fields with hyphenated names must be pretty-printed.
+func TestRenderLine_HyphenatedFieldKey(t *testing.T) {
+	line := `2026-04-25 10:00:00 INFO handler request-id=abc123 x-trace="{\"span\":\"abc\"}"`
+	var buf bytes.Buffer
+	if err := renderLine(&buf, line); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "  x-trace:") {
+		t.Errorf("hyphenated JSON field not pretty-printed\ngot: %q", got)
+	}
+	if strings.Contains(got, `x-trace=`) {
+		t.Errorf("hyphenated JSON field still on header line\ngot: %q", got)
+	}
+	if !strings.Contains(got, "request-id=abc123") {
+		t.Errorf("non-JSON hyphenated field was removed from header\ngot: %q", got)
+	}
+}

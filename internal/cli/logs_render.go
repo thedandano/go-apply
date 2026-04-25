@@ -10,13 +10,13 @@ import (
 )
 
 // quotedFieldRe matches logfmt key="value" pairs where the value is a quoted string.
-var quotedFieldRe = regexp.MustCompile(`(\w+)=("[^"\\]*(?:\\.[^"\\]*)*")`)
+// Key characters include letters, digits, underscores, hyphens, and dots.
+var quotedFieldRe = regexp.MustCompile(`([\w.-]+)=("[^"\\]*(?:\\.[^"\\]*)*")`)
 
 // jsonField holds a key and its parsed JSON value extracted from a log line.
 type jsonField struct {
-	key       string
-	fullMatch string // the original key="value" text to remove from header
-	parsed    json.RawMessage
+	key    string
+	parsed json.RawMessage
 }
 
 // renderLine writes a pretty-printed representation of a logfmt log line to w.
@@ -32,7 +32,6 @@ func renderLine(w io.Writer, line string) error {
 
 	for _, m := range matches {
 		// m[0]:m[1] = full match, m[2]:m[3] = key, m[4]:m[5] = quoted value
-		fullMatch := line[m[0]:m[1]]
 		key := line[m[2]:m[3]]
 		rawValue := line[m[4]:m[5]]
 
@@ -46,28 +45,26 @@ func renderLine(w io.Writer, line string) error {
 			continue
 		}
 
-		if len(unquoted) == 0 {
-			continue
-		}
-
 		firstByte := unquoted[0]
 		if firstByte != '{' && firstByte != '[' {
 			// JSON primitive — stays on header
 			continue
 		}
 
-		fields = append(fields, jsonField{
-			key:       key,
-			fullMatch: fullMatch,
-			parsed:    raw,
-		})
-		removedRanges = append(removedRanges, [2]int{m[0], m[1]})
+		fields = append(fields, jsonField{key: key, parsed: raw})
+		// Consume the trailing space after the match (if any) to avoid
+		// double-spaces in the header when the field is removed from
+		// the middle of the line.
+		end := m[1]
+		if end < len(line) && line[end] == ' ' {
+			end++
+		}
+		removedRanges = append(removedRanges, [2]int{m[0], end})
 	}
 
-	// Build header by removing JSON field matches.
-	header := removeRanges(line, removedRanges)
-	// Collapse multiple spaces and trim trailing whitespace.
-	header = collapseSpaces(header)
+	// Build header by excising JSON field matches; trim any trailing whitespace
+	// left by removing a terminal field.
+	header := strings.TrimRight(removeRanges(line, removedRanges), " \t")
 
 	if _, err := fmt.Fprintf(w, "%s\n", header); err != nil {
 		return err
@@ -101,11 +98,4 @@ func removeRanges(s string, ranges [][2]int) string {
 	}
 	b.WriteString(s[prev:])
 	return b.String()
-}
-
-// collapseSpaces replaces runs of spaces with a single space and trims trailing whitespace.
-func collapseSpaces(s string) string {
-	// Collapse multiple consecutive spaces into one.
-	result := strings.Join(strings.Fields(s), " ")
-	return result
 }
