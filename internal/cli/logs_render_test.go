@@ -213,8 +213,13 @@ func TestRenderLine_WARNLevelSameFormattingAsINFO(t *testing.T) {
 	}
 
 	// Strip the level= prefix to compare the JSON block formatting.
-	infoBlock := infoGot[strings.Index(infoGot, "  result:"):]
-	warnBlock := warnGot[strings.Index(warnGot, "  result:"):]
+	infoIdx := strings.Index(infoGot, "  result:")
+	warnIdx := strings.Index(warnGot, "  result:")
+	if infoIdx < 0 || warnIdx < 0 {
+		t.Fatal("result block not found in output; cannot compare formatting")
+	}
+	infoBlock := infoGot[infoIdx:]
+	warnBlock := warnGot[warnIdx:]
 	if infoBlock != warnBlock {
 		t.Errorf("JSON block formatting differs between INFO and WARN:\nINFO: %q\nWARN: %q", infoBlock, warnBlock)
 	}
