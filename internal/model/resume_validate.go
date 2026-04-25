@@ -17,6 +17,12 @@ var knownSections = map[string]struct{}{
 	"awards":         {},
 	"volunteer":      {},
 	"publications":   {},
+	"languages":      {},
+	"speaking":       {},
+	"open_source":    {},
+	"patents":        {},
+	"interests":      {},
+	"references":     {},
 }
 
 // dateRe matches YYYY or YYYY-MM

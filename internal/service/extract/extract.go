@@ -10,4 +10,4 @@ type Service struct{}
 
 func New() *Service { return &Service{} }
 
-func (s *Service) Extract(text string) (string, error) { return text, nil }
+func (s *Service) Extract(data []byte) (string, error) { return string(data), nil }

@@ -714,7 +714,7 @@ func HandlePreviewATSExtractionWithConfig(ctx context.Context, req *mcp.CallTool
 			slog.WarnContext(ctx, "preview_ats_extraction: render failed, falling back to raw text",
 				slog.String("session_id", sessionID), slog.Any("error", renderErr))
 		} else {
-			extracted, extErr := extractSvc.Extract(rendered)
+			extracted, extErr := extractSvc.Extract([]byte(rendered))
 			if extErr != nil {
 				slog.WarnContext(ctx, "preview_ats_extraction: extract failed, falling back to raw text",
 					slog.String("session_id", sessionID), slog.Any("error", extErr))
@@ -732,7 +732,7 @@ func HandlePreviewATSExtractionWithConfig(ctx context.Context, req *mcp.CallTool
 			slog.ErrorContext(ctx, "preview_ats_extraction: load resume failed", "session_id", sessionID, "error", loadErr)
 			return envelopeResult(stageErrorEnvelope(sessionID, "preview_ats_extraction", "load_resume_failed", loadErr.Error(), false))
 		}
-		extracted, extErr := extractSvc.Extract(rawText)
+		extracted, extErr := extractSvc.Extract([]byte(rawText))
 		if extErr != nil {
 			slog.ErrorContext(ctx, "preview_ats_extraction: extract on raw text failed", "session_id", sessionID, "error", extErr)
 			return envelopeResult(stageErrorEnvelope(sessionID, "preview_ats_extraction", "extract_failed", extErr.Error(), false))

@@ -7,6 +7,25 @@ import (
 	"github.com/thedandano/go-apply/internal/model"
 )
 
+// T003: knownSections allowlist must include all 6 Tier 4 keys.
+// This test must FAIL at runtime until T006 adds the keys to knownSections.
+func TestKnownSections_Tier4Keys(t *testing.T) {
+	validContact := model.ContactInfo{Name: "Alice Smith"}
+	validExperience := []model.ExperienceEntry{
+		{Company: "Acme Corp", Role: "Engineer", StartDate: "2020-01", Bullets: []string{}},
+	}
+	tier4Keys := []string{"languages", "speaking", "open_source", "patents", "interests", "references"}
+	sm := &model.SectionMap{
+		SchemaVersion: model.CurrentSchemaVersion,
+		Contact:       validContact,
+		Experience:    validExperience,
+		Order:         tier4Keys,
+	}
+	if err := model.ValidateSectionMap(sm); err != nil {
+		t.Errorf("all Tier 4 keys must be valid in SectionMap.Order; got error: %v", err)
+	}
+}
+
 func TestValidateSectionMap(t *testing.T) {
 	validContact := model.ContactInfo{Name: "Alice Smith"}
 	validExperience := []model.ExperienceEntry{

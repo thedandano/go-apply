@@ -15,26 +15,44 @@ type Service struct{}
 
 func New() *Service { return &Service{} }
 
+// sectionWriter holds the write function for one resume section.
+// Ordered slice index determines render order; SectionMap.Order is validated but not consulted here.
+type sectionWriter struct {
+	write func(b *strings.Builder, s *model.SectionMap)
+}
+
+// sectionRegistry defines canonical render order. Append new sections here.
+var sectionRegistry = []sectionWriter{
+	{func(b *strings.Builder, s *model.SectionMap) { writeContact(b, &s.Contact) }},
+	{func(b *strings.Builder, s *model.SectionMap) {
+		writeSection(b, "SUMMARY", func() { b.WriteString(s.Summary + "\n") }, s.Summary != "")
+	}},
+	{func(b *strings.Builder, s *model.SectionMap) { writeExperience(b, s.Experience) }},
+	{func(b *strings.Builder, s *model.SectionMap) { writeEducation(b, s.Education) }},
+	{func(b *strings.Builder, s *model.SectionMap) { writeSkills(b, s.Skills) }},
+	{func(b *strings.Builder, s *model.SectionMap) { writeProjects(b, s.Projects) }},
+	{func(b *strings.Builder, s *model.SectionMap) { writeCertifications(b, s.Certifications) }},
+	{func(b *strings.Builder, s *model.SectionMap) { writeAwards(b, s.Awards) }},
+	{func(b *strings.Builder, s *model.SectionMap) { writeVolunteer(b, s.Volunteer) }},
+	{func(b *strings.Builder, s *model.SectionMap) { writePublications(b, s.Publications) }},
+	{func(b *strings.Builder, s *model.SectionMap) { writeLanguages(b, s.Languages) }},
+	{func(b *strings.Builder, s *model.SectionMap) { writeSpeaking(b, s.Speaking) }},
+	{func(b *strings.Builder, s *model.SectionMap) { writeOpenSource(b, s.OpenSource) }},
+	{func(b *strings.Builder, s *model.SectionMap) { writePatents(b, s.Patents) }},
+	{func(b *strings.Builder, s *model.SectionMap) { writeInterests(b, s.Interests) }},
+	{func(b *strings.Builder, s *model.SectionMap) { writeReferences(b, s.References) }},
+}
+
 // Render converts sections to plain text. Sections are emitted in canonical order;
 // absent/empty sections are skipped. Returns empty string for nil input.
 func (s *Service) Render(sections *model.SectionMap) (string, error) {
 	if sections == nil {
 		return "", nil
 	}
-
 	var sb strings.Builder
-
-	writeContact(&sb, &sections.Contact)
-	writeSection(&sb, "SUMMARY", func() { sb.WriteString(sections.Summary + "\n") }, sections.Summary != "")
-	writeExperience(&sb, sections.Experience)
-	writeEducation(&sb, sections.Education)
-	writeSkills(&sb, sections.Skills)
-	writeProjects(&sb, sections.Projects)
-	writeCertifications(&sb, sections.Certifications)
-	writeAwards(&sb, sections.Awards)
-	writeVolunteer(&sb, sections.Volunteer)
-	writePublications(&sb, sections.Publications)
-
+	for _, w := range sectionRegistry {
+		w.write(&sb, sections)
+	}
 	return strings.TrimRight(sb.String(), "\n"), nil
 }
 
@@ -180,6 +198,86 @@ func writePublications(sb *strings.Builder, entries []model.PublicationEntry) {
 	sb.WriteString("PUBLICATIONS\n")
 	for _, p := range entries {
 		sb.WriteString(p.Title + "\n")
+	}
+	sb.WriteString("\n")
+}
+
+// Tier 4 writers intentionally emit a minimal plain-text representation (name/title only).
+// Omitted fields (URL, Contact, Date, etc.) are preserved in the SectionMap sidecar
+// and are available for future renderers — this is not a silent failure.
+
+func writeLanguages(sb *strings.Builder, entries []model.LanguageEntry) {
+	if len(entries) == 0 {
+		return
+	}
+	sb.WriteString("LANGUAGES\n")
+	for _, e := range entries {
+		if e.Proficiency != "" {
+			sb.WriteString(e.Name + ": " + e.Proficiency + "\n")
+		} else {
+			sb.WriteString(e.Name + "\n")
+		}
+	}
+	sb.WriteString("\n")
+}
+
+func writeSpeaking(sb *strings.Builder, entries []model.SpeakingEntry) {
+	if len(entries) == 0 {
+		return
+	}
+	sb.WriteString("SPEAKING ENGAGEMENTS\n")
+	for _, e := range entries {
+		sb.WriteString(e.Title + "\n")
+		if e.Event != "" {
+			sb.WriteString(e.Event + "\n")
+		}
+	}
+	sb.WriteString("\n")
+}
+
+func writeOpenSource(sb *strings.Builder, entries []model.OpenSourceEntry) {
+	if len(entries) == 0 {
+		return
+	}
+	sb.WriteString("OPEN SOURCE\n")
+	for _, e := range entries {
+		sb.WriteString(e.Project + "\n")
+		if e.Description != "" {
+			sb.WriteString(e.Description + "\n")
+		}
+	}
+	sb.WriteString("\n")
+}
+
+func writePatents(sb *strings.Builder, entries []model.PatentEntry) {
+	if len(entries) == 0 {
+		return
+	}
+	sb.WriteString("PATENTS\n")
+	for _, e := range entries {
+		sb.WriteString(e.Title + "\n")
+	}
+	sb.WriteString("\n")
+}
+
+func writeInterests(sb *strings.Builder, entries []model.InterestEntry) {
+	if len(entries) == 0 {
+		return
+	}
+	sb.WriteString("INTERESTS\n")
+	for _, e := range entries {
+		sb.WriteString(e.Name + "\n")
+	}
+	sb.WriteString("\n")
+}
+
+func writeReferences(sb *strings.Builder, entries []model.ReferenceEntry) {
+	if len(entries) == 0 {
+		return
+	}
+	sb.WriteString("REFERENCES\n")
+	for _, e := range entries {
+		sb.WriteString(e.Name + "\n")
 	}
 	sb.WriteString("\n")
 }
