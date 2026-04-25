@@ -1,5 +1,9 @@
 package model
 
+import "fmt"
+
+const CurrentSchemaVersion = 1
+
 type ResumeFile struct {
 	Label    string
 	Path     string
@@ -56,4 +60,120 @@ type TailorInput struct {
 	AccomplishmentsText string
 	SkillsRefText       string
 	Options             TailorOptions
+}
+
+// SkillsKind discriminator
+type SkillsKind string
+
+const (
+	SkillsKindFlat        SkillsKind = "flat"
+	SkillsKindCategorized SkillsKind = "categorized"
+)
+
+// SkillsSection discriminated union
+type SkillsSection struct {
+	Kind        SkillsKind          `json:"kind"`
+	Flat        string              `json:"flat,omitempty"`
+	Categorized map[string][]string `json:"categorized,omitempty"`
+}
+
+// ContactInfo
+type ContactInfo struct {
+	Name     string   `json:"name"`
+	Email    string   `json:"email,omitempty"`
+	Phone    string   `json:"phone,omitempty"`
+	Location string   `json:"location,omitempty"`
+	Links    []string `json:"links,omitempty"`
+}
+
+// ExperienceEntry
+type ExperienceEntry struct {
+	Company   string   `json:"company"`
+	Role      string   `json:"role"`
+	StartDate string   `json:"start_date"`
+	EndDate   string   `json:"end_date,omitempty"`
+	Location  string   `json:"location,omitempty"`
+	Bullets   []string `json:"bullets"`
+}
+
+// ID returns the bullet ID prefix for this entry at index i: "exp-<i>"
+func (e *ExperienceEntry) ID(i int) string {
+	return fmt.Sprintf("exp-%d", i)
+}
+
+// BulletID returns "exp-<entryIndex>-b<bulletIndex>"
+func (e *ExperienceEntry) BulletID(entryIndex, bulletIndex int) string {
+	return fmt.Sprintf("exp-%d-b%d", entryIndex, bulletIndex)
+}
+
+// EducationEntry
+type EducationEntry struct {
+	School    string `json:"school"`
+	Degree    string `json:"degree"`
+	StartDate string `json:"start_date,omitempty"`
+	EndDate   string `json:"end_date,omitempty"`
+	Location  string `json:"location,omitempty"`
+	Details   string `json:"details,omitempty"`
+}
+
+// ProjectEntry
+type ProjectEntry struct {
+	Name        string   `json:"name"`
+	Description string   `json:"description,omitempty"`
+	Bullets     []string `json:"bullets,omitempty"`
+	URL         string   `json:"url,omitempty"`
+}
+
+// CertificationEntry
+type CertificationEntry struct {
+	Name   string `json:"name"`
+	Issuer string `json:"issuer,omitempty"`
+	Date   string `json:"date,omitempty"`
+}
+
+// AwardEntry
+type AwardEntry struct {
+	Title   string `json:"title"`
+	Date    string `json:"date,omitempty"`
+	Details string `json:"details,omitempty"`
+}
+
+// VolunteerEntry
+type VolunteerEntry struct {
+	Org       string   `json:"org"`
+	Role      string   `json:"role"`
+	StartDate string   `json:"start_date,omitempty"`
+	EndDate   string   `json:"end_date,omitempty"`
+	Bullets   []string `json:"bullets,omitempty"`
+}
+
+// PublicationEntry
+type PublicationEntry struct {
+	Title string `json:"title"`
+	Venue string `json:"venue,omitempty"`
+	Date  string `json:"date,omitempty"`
+	URL   string `json:"url,omitempty"`
+}
+
+// SectionMap structured representation of a résumé
+type SectionMap struct {
+	SchemaVersion  int                  `json:"schema_version"`
+	Contact        ContactInfo          `json:"contact"`
+	Experience     []ExperienceEntry    `json:"experience"`
+	Summary        string               `json:"summary,omitempty"`
+	Skills         *SkillsSection       `json:"skills,omitempty"`
+	Education      []EducationEntry     `json:"education,omitempty"`
+	Projects       []ProjectEntry       `json:"projects,omitempty"`
+	Certifications []CertificationEntry `json:"certifications,omitempty"`
+	Awards         []AwardEntry         `json:"awards,omitempty"`
+	Volunteer      []VolunteerEntry     `json:"volunteer,omitempty"`
+	Publications   []PublicationEntry   `json:"publications,omitempty"`
+	Order          []string             `json:"order,omitempty"`
+}
+
+// ResumeRecord full resume as stored
+type ResumeRecord struct {
+	Label    string      `json:"label"`
+	RawText  string      `json:"raw_text"`
+	Sections *SectionMap `json:"sections,omitempty"`
 }

@@ -15,12 +15,24 @@ func (s *stubEmptyResumeRepo) ListResumes() ([]model.ResumeFile, error) {
 	return nil, nil
 }
 
+func (s *stubEmptyResumeRepo) LoadSections(_ string) (model.SectionMap, error) {
+	return model.SectionMap{}, model.ErrSectionsMissing
+}
+
+func (s *stubEmptyResumeRepo) SaveSections(_ string, _ model.SectionMap) error { return nil } //nolint:gocritic // hugeParam: interface constraint
+
 // stubResumeRepo returns a populated list, simulating an onboarded user.
 type stubResumeRepo struct{}
 
 func (s *stubResumeRepo) ListResumes() ([]model.ResumeFile, error) {
 	return []model.ResumeFile{{Label: "resume", Path: "/tmp/resume.pdf", FileType: "pdf"}}, nil
 }
+
+func (s *stubResumeRepo) LoadSections(_ string) (model.SectionMap, error) {
+	return model.SectionMap{}, model.ErrSectionsMissing
+}
+
+func (s *stubResumeRepo) SaveSections(_ string, _ model.SectionMap) error { return nil } //nolint:gocritic // hugeParam: interface constraint
 
 func TestCheckOnboarded_NoResumes_ReturnsError(t *testing.T) {
 	err := onboardcheck.CheckOnboarded(&stubEmptyResumeRepo{})
