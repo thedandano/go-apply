@@ -98,7 +98,7 @@ func NewServer() *server.MCPServer {
 
 	srv.AddTool(
 		mcp.NewTool("submit_tailor_t1",
-			mcp.WithDescription("Apply T1 tailoring: apply structured edits scoped to the Skills section and rescore. Call after submit_keywords when next_action is 'tailor_t1'. Provide edits as a JSON array of {section, op, value} objects (max 5). Use op=replace or op=add; section must be 'skills'."),
+			mcp.WithDescription("Apply T1 tailoring: apply structured edits scoped to the Skills section and rescore. Call after submit_keywords when next_action is 'tailor_t1'. Provide edits as a JSON array of {section, op, value, category?} objects (max 5). Use op=replace or op=add; section must be 'skills'."),
 			mcp.WithString("session_id", mcp.Description("Session ID from load_jd"), mcp.Required()),
 			mcp.WithString("edits", mcp.Description(`JSON array of {"section":"skills","op":"replace|add","value":"...","category":"..."} objects. Max 5 entries. "category" is required when skills.kind="categorized" — use a key from sections.skills.categorized returned by submit_keywords. e.g. flat: [{"section":"skills","op":"add","value":"GCP"}] categorized: [{"section":"skills","category":"Cloud","op":"add","value":"GCP, Azure"}]`), mcp.Required()),
 		),

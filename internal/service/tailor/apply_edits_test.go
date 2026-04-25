@@ -209,48 +209,266 @@ func TestApplyEdits(t *testing.T) {
 		},
 	}
 
-	// Categorized kind — skills edits must be rejected (not corrupt the discriminated union).
-	tests = append(tests, struct {
+	type catTest struct {
 		name         string
 		sections     func() model.SectionMap
 		edits        []port.Edit
 		wantApplied  int
 		wantRejected int
 		check        func(t *testing.T, result port.EditResult)
-	}{
-		name: "skills categorized kind rejects flat ops",
-		sections: func() model.SectionMap {
-			return model.SectionMap{
-				Skills: &model.SkillsSection{
-					Kind:        model.SkillsKindCategorized,
-					Categorized: map[string][]string{"Cloud": {"AWS", "GCP"}},
-				},
-			}
+	}
+	catTests := []catTest{
+		{
+			name: "skills categorized rejects ops with missing category",
+			sections: func() model.SectionMap {
+				return model.SectionMap{
+					Skills: &model.SkillsSection{
+						Kind:        model.SkillsKindCategorized,
+						Categorized: map[string][]string{"Cloud": {"AWS", "GCP"}},
+					},
+				}
+			},
+			edits:        []port.Edit{{Section: "skills", Op: port.EditOpReplace, Value: "AWS, GCP, Azure"}},
+			wantApplied:  0,
+			wantRejected: 1,
+			check: func(t *testing.T, result port.EditResult) {
+				t.Helper()
+				if len(result.EditsRejected) == 0 {
+					t.Fatal("expected rejection for missing category, got none")
+				}
+				reason := result.EditsRejected[0].Reason
+				if !strings.Contains(reason, "requires a category") {
+					t.Errorf("rejection reason %q must contain %q", reason, "requires a category")
+				}
+				if !strings.Contains(reason, "available:") {
+					t.Errorf("rejection reason %q must contain %q", reason, "available:")
+				}
+				cats := result.NewSections.Skills.Categorized
+				if items, ok := cats["Cloud"]; !ok || len(items) != 2 {
+					t.Errorf("Categorized map was mutated: Cloud = %v", cats["Cloud"])
+				}
+				if result.NewSections.Skills.Flat != "" {
+					t.Errorf("Skills.Flat must remain empty for Categorized kind, got %q", result.NewSections.Skills.Flat)
+				}
+			},
 		},
-		edits: []port.Edit{
-			{Section: "skills", Op: port.EditOpReplace, Value: "AWS, GCP, Azure"},
+		{
+			name: "skills categorized rejects ops with unknown category",
+			sections: func() model.SectionMap {
+				return model.SectionMap{
+					Skills: &model.SkillsSection{
+						Kind:        model.SkillsKindCategorized,
+						Categorized: map[string][]string{"Cloud": {"AWS", "GCP"}},
+					},
+				}
+			},
+			edits:        []port.Edit{{Section: "skills", Op: port.EditOpAdd, Value: "Spark", Category: "Nonexistent"}},
+			wantApplied:  0,
+			wantRejected: 1,
+			check: func(t *testing.T, result port.EditResult) {
+				t.Helper()
+				if len(result.EditsRejected) == 0 {
+					t.Fatal("expected rejection for unknown category, got none")
+				}
+				reason := result.EditsRejected[0].Reason
+				if !strings.Contains(reason, `category "Nonexistent" not found`) {
+					t.Errorf("rejection reason %q must contain %q", reason, `category "Nonexistent" not found`)
+				}
+				if !strings.Contains(reason, "available:") {
+					t.Errorf("rejection reason %q must contain %q", reason, "available:")
+				}
+				cats := result.NewSections.Skills.Categorized
+				if items, ok := cats["Cloud"]; !ok || len(items) != 2 {
+					t.Errorf("Categorized map was mutated: Cloud = %v", cats["Cloud"])
+				}
+			},
 		},
-		wantApplied:  0,
-		wantRejected: 1,
-		check: func(t *testing.T, result port.EditResult) {
-			t.Helper()
-			if len(result.EditsRejected) == 0 {
-				t.Fatal("expected rejection for Categorized kind, got none")
-			}
-			if result.EditsRejected[0].Reason == "" {
-				t.Error("rejection Reason must not be empty")
-			}
-			// Categorized map must be unmodified.
-			cats := result.NewSections.Skills.Categorized
-			if items, ok := cats["Cloud"]; !ok || len(items) != 2 {
-				t.Errorf("Categorized map was mutated: Cloud = %v", cats["Cloud"])
-			}
-			// Flat must remain empty — discriminated union must not be corrupted.
-			if result.NewSections.Skills.Flat != "" {
-				t.Errorf("Skills.Flat must remain empty for Categorized kind, got %q", result.NewSections.Skills.Flat)
-			}
+		{
+			name: "skills categorized add appends items to named category",
+			sections: func() model.SectionMap {
+				return model.SectionMap{
+					Skills: &model.SkillsSection{
+						Kind:        model.SkillsKindCategorized,
+						Categorized: map[string][]string{"Cloud": {"AWS", "GCP"}},
+					},
+				}
+			},
+			edits:        []port.Edit{{Section: "skills", Op: port.EditOpAdd, Value: "Apache Kafka, Spark", Category: "Cloud"}},
+			wantApplied:  1,
+			wantRejected: 0,
+			check: func(t *testing.T, result port.EditResult) {
+				t.Helper()
+				cloud := result.NewSections.Skills.Categorized["Cloud"]
+				if len(cloud) != 4 {
+					t.Errorf("expected 4 items in Cloud after add, got %d: %v", len(cloud), cloud)
+				}
+				found := map[string]bool{}
+				for _, item := range cloud {
+					found[item] = true
+				}
+				if !found["Apache Kafka"] {
+					t.Errorf("Cloud does not contain %q after add: %v", "Apache Kafka", cloud)
+				}
+				if !found["Spark"] {
+					t.Errorf("Cloud does not contain %q after add: %v", "Spark", cloud)
+				}
+				if result.NewSections.Skills.Kind != model.SkillsKindCategorized {
+					t.Errorf("Kind = %q, want %q", result.NewSections.Skills.Kind, model.SkillsKindCategorized)
+				}
+				if result.NewSections.Skills.Flat != "" {
+					t.Errorf("Skills.Flat must remain empty, got %q", result.NewSections.Skills.Flat)
+				}
+			},
 		},
-	})
+		{
+			name: "skills categorized replace sets named category",
+			sections: func() model.SectionMap {
+				return model.SectionMap{
+					Skills: &model.SkillsSection{
+						Kind:        model.SkillsKindCategorized,
+						Categorized: map[string][]string{"Cloud": {"AWS", "GCP"}},
+					},
+				}
+			},
+			edits:        []port.Edit{{Section: "skills", Op: port.EditOpReplace, Value: "Azure, GCP", Category: "Cloud"}},
+			wantApplied:  1,
+			wantRejected: 0,
+			check: func(t *testing.T, result port.EditResult) {
+				t.Helper()
+				cloud := result.NewSections.Skills.Categorized["Cloud"]
+				if len(cloud) != 2 {
+					t.Errorf("expected 2 items in Cloud after replace, got %d: %v", len(cloud), cloud)
+				}
+				if cloud[0] != "Azure" || cloud[1] != "GCP" {
+					t.Errorf("Cloud = %v, want [Azure GCP]", cloud)
+				}
+				if result.NewSections.Skills.Kind != model.SkillsKindCategorized {
+					t.Errorf("Kind = %q, want %q", result.NewSections.Skills.Kind, model.SkillsKindCategorized)
+				}
+				if result.NewSections.Skills.Flat != "" {
+					t.Errorf("Skills.Flat must remain empty, got %q", result.NewSections.Skills.Flat)
+				}
+			},
+		},
+		{
+			name: "skills categorized add with comma separated value splits items",
+			sections: func() model.SectionMap {
+				return model.SectionMap{
+					Skills: &model.SkillsSection{
+						Kind:        model.SkillsKindCategorized,
+						Categorized: map[string][]string{"Cloud": {}},
+					},
+				}
+			},
+			edits:        []port.Edit{{Section: "skills", Op: port.EditOpAdd, Value: "AWS, GCP", Category: "Cloud"}},
+			wantApplied:  1,
+			wantRejected: 0,
+			check: func(t *testing.T, result port.EditResult) {
+				t.Helper()
+				cloud := result.NewSections.Skills.Categorized["Cloud"]
+				if len(cloud) != 2 {
+					t.Errorf("expected 2 separate items, got %d: %v", len(cloud), cloud)
+				}
+				if len(cloud) == 1 {
+					t.Errorf("value was not split — got single entry %q instead of two", cloud[0])
+				}
+			},
+		},
+		{
+			name: "skills categorized empty map rejection lists no categories",
+			sections: func() model.SectionMap {
+				return model.SectionMap{
+					Skills: &model.SkillsSection{
+						Kind:        model.SkillsKindCategorized,
+						Categorized: map[string][]string{},
+					},
+				}
+			},
+			edits:        []port.Edit{{Section: "skills", Op: port.EditOpAdd, Value: "Go"}},
+			wantApplied:  0,
+			wantRejected: 1,
+			check: func(t *testing.T, result port.EditResult) {
+				t.Helper()
+				if len(result.EditsRejected) == 0 {
+					t.Fatal("expected rejection for empty categorized map, got none")
+				}
+				reason := result.EditsRejected[0].Reason
+				if !strings.Contains(reason, "available:") {
+					t.Errorf("rejection reason %q must contain %q", reason, "available:")
+				}
+			},
+		},
+		{
+			name: "skills flat ignores category field",
+			sections: func() model.SectionMap {
+				return model.SectionMap{
+					Skills: &model.SkillsSection{
+						Kind: model.SkillsKindFlat,
+						Flat: "Go, Python",
+					},
+				}
+			},
+			edits:        []port.Edit{{Section: "skills", Op: port.EditOpAdd, Value: "Rust", Category: "SomeCategory"}},
+			wantApplied:  1,
+			wantRejected: 0,
+			check: func(t *testing.T, result port.EditResult) {
+				t.Helper()
+				if !strings.Contains(result.NewSections.Skills.Flat, "Rust") {
+					t.Errorf("Skills.Flat %q does not contain %q after add with category on flat section", result.NewSections.Skills.Flat, "Rust")
+				}
+			},
+		},
+		{
+			name: "skills categorized mixed call applies valid and rejects invalid",
+			sections: func() model.SectionMap {
+				return model.SectionMap{
+					Skills: &model.SkillsSection{
+						Kind:        model.SkillsKindCategorized,
+						Categorized: map[string][]string{"Cloud": {"AWS"}, "Languages": {"Go"}},
+					},
+				}
+			},
+			edits: []port.Edit{
+				{Section: "skills", Op: port.EditOpAdd, Value: "Azure", Category: "Cloud"},
+				{Section: "skills", Op: port.EditOpAdd, Value: "Spark", Category: "Nonexistent"},
+			},
+			wantApplied:  1,
+			wantRejected: 1,
+			check: func(t *testing.T, result port.EditResult) {
+				t.Helper()
+				cloud := result.NewSections.Skills.Categorized["Cloud"]
+				found := false
+				for _, item := range cloud {
+					if item == "Azure" {
+						found = true
+					}
+				}
+				if !found {
+					t.Errorf("Cloud should contain Azure after valid edit: %v", cloud)
+				}
+				if len(result.EditsRejected) == 0 {
+					t.Fatal("expected rejection for unknown category, got none")
+				}
+				reason := result.EditsRejected[0].Reason
+				if !strings.Contains(reason, "not found") {
+					t.Errorf("rejection reason %q must contain %q", reason, "not found")
+				}
+				if !strings.Contains(reason, "available:") {
+					t.Errorf("rejection reason %q must contain %q", reason, "available:")
+				}
+			},
+		},
+	}
+	for _, ct := range catTests {
+		tests = append(tests, struct {
+			name         string
+			sections     func() model.SectionMap
+			edits        []port.Edit
+			wantApplied  int
+			wantRejected int
+			check        func(t *testing.T, result port.EditResult)
+		}(ct))
+	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
