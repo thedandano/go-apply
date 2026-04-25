@@ -41,7 +41,7 @@ func (s *Service) ApplyEdits(_ context.Context, sections model.SectionMap, edits
 	return result, nil
 }
 
-func applySkillsEdit(sections *model.SectionMap, edit port.Edit) string {
+func applySkillsEdit(sections *model.SectionMap, edit port.Edit) string { //nolint:gocritic // hugeParam: value semantics match ApplyEdits loop, pointer would not reduce allocations
 	if sections.Skills == nil {
 		sections.Skills = &model.SkillsSection{Kind: model.SkillsKindFlat}
 	}
@@ -80,7 +80,7 @@ func applySkillsEdit(sections *model.SectionMap, edit port.Edit) string {
 	return ""
 }
 
-func applyExperienceEdit(sections *model.SectionMap, edit port.Edit) string {
+func applyExperienceEdit(sections *model.SectionMap, edit port.Edit) string { //nolint:gocritic // hugeParam: value semantics match ApplyEdits loop, pointer would not reduce allocations
 	entryIdx, bulletIdx, err := parseBulletTarget(edit.Target)
 	if err != nil {
 		return err.Error()
