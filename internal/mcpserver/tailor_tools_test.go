@@ -16,7 +16,7 @@ type submitEditsRequest struct {
 }
 
 // validateEdit validates a single edit against the unified edit envelope contract.
-func validateEdit(e port.Edit) error {
+func validateEdit(e port.Edit) error { //nolint:gocritic // hugeParam: test helper, pointer indirection adds no benefit here
 	switch e.Op {
 	case port.EditOpAdd, port.EditOpRemove, port.EditOpReplace:
 		// valid op — continue

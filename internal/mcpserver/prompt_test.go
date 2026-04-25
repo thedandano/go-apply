@@ -56,6 +56,18 @@ func TestWorkflowPromptHandler_ContainsTailorTools(t *testing.T) {
 	}
 }
 
+// SC-004: category field must appear in both the tool schema and the workflow prompt.
+func TestWorkflowPromptHandler_ContainsCategoryGuidance(t *testing.T) {
+	result, _ := mcpserver.HandleWorkflowPrompt(context.Background(), mcp.GetPromptRequest{})
+	text := result.Messages[0].Content.(mcp.TextContent).Text
+
+	for _, want := range []string{"category", "categorized", "skills_section.kind"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("workflow prompt missing category guidance %q (SC-004)", want)
+		}
+	}
+}
+
 // T013a: FR-006 testability requirement — prompt must contain "prefer one-for-one" guidance.
 func TestWorkflowPromptHandler_ContainsSkillRewriteGuidance(t *testing.T) {
 	result, _ := mcpserver.HandleWorkflowPrompt(context.Background(), mcp.GetPromptRequest{})
