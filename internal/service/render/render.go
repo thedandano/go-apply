@@ -15,33 +15,32 @@ type Service struct{}
 
 func New() *Service { return &Service{} }
 
-// sectionWriter pairs a section key (reserved for future template dispatch) with
-// its write function. The key field is informational in this spec.
+// sectionWriter holds the write function for one resume section.
+// Ordered slice index determines render order; SectionMap.Order is validated but not consulted here.
 type sectionWriter struct {
-	key   string
 	write func(b *strings.Builder, s *model.SectionMap)
 }
 
 // sectionRegistry defines canonical render order. Append new sections here.
 var sectionRegistry = []sectionWriter{
-	{"contact", func(b *strings.Builder, s *model.SectionMap) { writeContact(b, &s.Contact) }},
-	{"summary", func(b *strings.Builder, s *model.SectionMap) {
+	{func(b *strings.Builder, s *model.SectionMap) { writeContact(b, &s.Contact) }},
+	{func(b *strings.Builder, s *model.SectionMap) {
 		writeSection(b, "SUMMARY", func() { b.WriteString(s.Summary + "\n") }, s.Summary != "")
 	}},
-	{"experience", func(b *strings.Builder, s *model.SectionMap) { writeExperience(b, s.Experience) }},
-	{"education", func(b *strings.Builder, s *model.SectionMap) { writeEducation(b, s.Education) }},
-	{"skills", func(b *strings.Builder, s *model.SectionMap) { writeSkills(b, s.Skills) }},
-	{"projects", func(b *strings.Builder, s *model.SectionMap) { writeProjects(b, s.Projects) }},
-	{"certifications", func(b *strings.Builder, s *model.SectionMap) { writeCertifications(b, s.Certifications) }},
-	{"awards", func(b *strings.Builder, s *model.SectionMap) { writeAwards(b, s.Awards) }},
-	{"volunteer", func(b *strings.Builder, s *model.SectionMap) { writeVolunteer(b, s.Volunteer) }},
-	{"publications", func(b *strings.Builder, s *model.SectionMap) { writePublications(b, s.Publications) }},
-	{"languages", func(b *strings.Builder, s *model.SectionMap) { writeLanguages(b, s.Languages) }},
-	{"speaking", func(b *strings.Builder, s *model.SectionMap) { writeSpeaking(b, s.Speaking) }},
-	{"open_source", func(b *strings.Builder, s *model.SectionMap) { writeOpenSource(b, s.OpenSource) }},
-	{"patents", func(b *strings.Builder, s *model.SectionMap) { writePatents(b, s.Patents) }},
-	{"interests", func(b *strings.Builder, s *model.SectionMap) { writeInterests(b, s.Interests) }},
-	{"references", func(b *strings.Builder, s *model.SectionMap) { writeReferences(b, s.References) }},
+	{func(b *strings.Builder, s *model.SectionMap) { writeExperience(b, s.Experience) }},
+	{func(b *strings.Builder, s *model.SectionMap) { writeEducation(b, s.Education) }},
+	{func(b *strings.Builder, s *model.SectionMap) { writeSkills(b, s.Skills) }},
+	{func(b *strings.Builder, s *model.SectionMap) { writeProjects(b, s.Projects) }},
+	{func(b *strings.Builder, s *model.SectionMap) { writeCertifications(b, s.Certifications) }},
+	{func(b *strings.Builder, s *model.SectionMap) { writeAwards(b, s.Awards) }},
+	{func(b *strings.Builder, s *model.SectionMap) { writeVolunteer(b, s.Volunteer) }},
+	{func(b *strings.Builder, s *model.SectionMap) { writePublications(b, s.Publications) }},
+	{func(b *strings.Builder, s *model.SectionMap) { writeLanguages(b, s.Languages) }},
+	{func(b *strings.Builder, s *model.SectionMap) { writeSpeaking(b, s.Speaking) }},
+	{func(b *strings.Builder, s *model.SectionMap) { writeOpenSource(b, s.OpenSource) }},
+	{func(b *strings.Builder, s *model.SectionMap) { writePatents(b, s.Patents) }},
+	{func(b *strings.Builder, s *model.SectionMap) { writeInterests(b, s.Interests) }},
+	{func(b *strings.Builder, s *model.SectionMap) { writeReferences(b, s.References) }},
 }
 
 // Render converts sections to plain text. Sections are emitted in canonical order;
@@ -202,6 +201,10 @@ func writePublications(sb *strings.Builder, entries []model.PublicationEntry) {
 	}
 	sb.WriteString("\n")
 }
+
+// Tier 4 writers intentionally emit a minimal plain-text representation (name/title only).
+// Omitted fields (URL, Contact, Date, etc.) are preserved in the SectionMap sidecar
+// and are available for future renderers — this is not a silent failure.
 
 func writeLanguages(sb *strings.Builder, entries []model.LanguageEntry) {
 	if len(entries) == 0 {

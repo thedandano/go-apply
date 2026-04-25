@@ -473,10 +473,12 @@ func (s *stubResumeRepoWithTier4Sections) LoadSections(_ string) (model.SectionM
 		Experience: []model.ExperienceEntry{
 			{Company: "Acme", Role: "Engineer", StartDate: "2020-01", Bullets: []string{"Built systems"}},
 		},
-		Languages: []model.LanguageEntry{
-			{Name: "Go", Proficiency: "Fluent"},
-			{Name: "Python", Proficiency: "Proficient"},
-		},
+		Languages:  []model.LanguageEntry{{Name: "Go", Proficiency: "Fluent"}},
+		Speaking:   []model.SpeakingEntry{{Title: "GopherCon", Event: "Conf", Date: "2023"}},
+		OpenSource: []model.OpenSourceEntry{{Project: "go-apply", Role: "Author"}},
+		Patents:    []model.PatentEntry{{Title: "Fast Algorithm", Number: "US123"}},
+		Interests:  []model.InterestEntry{{Name: "Distributed systems"}},
+		References: []model.ReferenceEntry{{Name: "Available upon request"}},
 	}, nil
 }
 
@@ -514,8 +516,10 @@ func TestHandlePreviewATSExtraction_Tier4SectionInConstructedText(t *testing.T) 
 	}
 	data, _ := env["data"].(map[string]any)
 	constructedText, _ := data["constructed_text"].(string)
-	if !strings.Contains(constructedText, "LANGUAGES") {
-		t.Errorf("constructed_text must contain Tier 4 heading LANGUAGES; got:\n%s", constructedText)
+	for _, heading := range []string{"LANGUAGES", "SPEAKING ENGAGEMENTS", "OPEN SOURCE", "PATENTS", "INTERESTS", "REFERENCES"} {
+		if !strings.Contains(constructedText, heading) {
+			t.Errorf("constructed_text missing Tier 4 heading %q; got:\n%s", heading, constructedText)
+		}
 	}
 }
 
