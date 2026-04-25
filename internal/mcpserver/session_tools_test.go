@@ -460,6 +460,65 @@ func TestHandlePreviewATSExtraction_MissingSessionID(t *testing.T) {
 	}
 }
 
+// T021 (SC-002): preview_ats_extraction must include Tier 4 section content when the
+// resume SectionMap contains Tier 4 sections.
+type stubResumeRepoWithTier4Sections struct {
+	stubResumeRepo
+}
+
+func (s *stubResumeRepoWithTier4Sections) LoadSections(_ string) (model.SectionMap, error) {
+	return model.SectionMap{
+		SchemaVersion: model.CurrentSchemaVersion,
+		Contact:       model.ContactInfo{Name: "Alice"},
+		Experience: []model.ExperienceEntry{
+			{Company: "Acme", Role: "Engineer", StartDate: "2020-01", Bullets: []string{"Built systems"}},
+		},
+		Languages: []model.LanguageEntry{
+			{Name: "Go", Proficiency: "Fluent"},
+			{Name: "Python", Proficiency: "Proficient"},
+		},
+	}, nil
+}
+
+func stubApplyConfigWithTier4Sections() pipeline.ApplyConfig {
+	cfg := stubApplyConfigForSession()
+	cfg.Resumes = &stubResumeRepoWithTier4Sections{}
+	return cfg
+}
+
+func TestHandlePreviewATSExtraction_Tier4SectionInConstructedText(t *testing.T) {
+	cfg := stubApplyConfigWithTier4Sections()
+
+	loadReq := callToolRequest("load_jd", map[string]any{"jd_raw_text": "Senior Go engineer."})
+	loadText := extractText(t, mcpserver.HandleLoadJDWithConfig(context.Background(), &loadReq, &cfg))
+	var loadEnv map[string]any
+	if err := json.Unmarshal([]byte(loadText), &loadEnv); err != nil {
+		t.Fatalf("load_jd not JSON: %v", err)
+	}
+	sessionID, _ := loadEnv["session_id"].(string)
+
+	const jdJSON = `{"title":"Go Engineer","company":"Acme","required":["go"],"preferred":[]}`
+	kwReq := callToolRequest("submit_keywords", map[string]any{"session_id": sessionID, "jd_json": jdJSON})
+	mcpserver.HandleSubmitKeywordsWithConfig(context.Background(), &kwReq, &cfg, &config.Config{YearsOfExperience: 5})
+
+	previewReq := callToolRequest("preview_ats_extraction", map[string]any{"session_id": sessionID})
+	result := mcpserver.HandlePreviewATSExtractionWithConfig(context.Background(), &previewReq, &cfg)
+	text := extractText(t, result)
+
+	var env map[string]any
+	if err := json.Unmarshal([]byte(text), &env); err != nil {
+		t.Fatalf("preview_ats_extraction not JSON: %v — raw: %s", err, text)
+	}
+	if env["status"] != "ok" {
+		t.Fatalf("status = %v, want ok — full: %s", env["status"], text)
+	}
+	data, _ := env["data"].(map[string]any)
+	constructedText, _ := data["constructed_text"].(string)
+	if !strings.Contains(constructedText, "LANGUAGES") {
+		t.Errorf("constructed_text must contain Tier 4 heading LANGUAGES; got:\n%s", constructedText)
+	}
+}
+
 // ── HandleFinalize tests ──────────────────────────────────────────────────────
 
 func TestHandleFinalizeWithConfig_MissingSession_ReturnsError(t *testing.T) {

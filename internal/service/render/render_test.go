@@ -145,6 +145,81 @@ func TestRender_AllSections_ContainsKeywords(t *testing.T) {
 	}
 }
 
+// T009: Each non-empty Tier 4 section must produce its canonical heading.
+// These tests must FAIL until T011/T012 add the Tier 4 writers.
+func TestRender_Tier4Headings_AppearWhenNonEmpty(t *testing.T) {
+	base := model.SectionMap{
+		SchemaVersion: model.CurrentSchemaVersion,
+		Contact:       model.ContactInfo{Name: "Test"},
+		Experience:    []model.ExperienceEntry{{Company: "Acme", Role: "Eng", StartDate: "2020-01", Bullets: []string{}}},
+	}
+	cases := []struct {
+		name    string
+		mutate  func(*model.SectionMap)
+		heading string
+	}{
+		{"Languages", func(sm *model.SectionMap) {
+			sm.Languages = []model.LanguageEntry{{Name: "Go", Proficiency: "Fluent"}}
+		}, "LANGUAGES"},
+		{"Speaking", func(sm *model.SectionMap) {
+			sm.Speaking = []model.SpeakingEntry{{Title: "GopherCon", Event: "Conf", Date: "2023"}}
+		}, "SPEAKING ENGAGEMENTS"},
+		{"OpenSource", func(sm *model.SectionMap) {
+			sm.OpenSource = []model.OpenSourceEntry{{Project: "go-apply", Role: "Author"}}
+		}, "OPEN SOURCE"},
+		{"Patents", func(sm *model.SectionMap) {
+			sm.Patents = []model.PatentEntry{{Title: "Algorithm", Number: "US123"}}
+		}, "PATENTS"},
+		{"Interests", func(sm *model.SectionMap) {
+			sm.Interests = []model.InterestEntry{{Name: "Open Source"}}
+		}, "INTERESTS"},
+		{"References", func(sm *model.SectionMap) {
+			sm.References = []model.ReferenceEntry{{Name: "Available upon request"}}
+		}, "REFERENCES"},
+	}
+
+	svc := render.New()
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sm := base
+			tc.mutate(&sm)
+			out, err := svc.Render(&sm)
+			if err != nil {
+				t.Fatalf("Render error: %v", err)
+			}
+			if !strings.Contains(out, tc.heading+"\n") {
+				t.Errorf("expected heading %q in output; got:\n%s", tc.heading, out)
+			}
+		})
+	}
+}
+
+// T010: Empty Tier 4 slices must produce no heading in the output.
+// This test passes before AND after T011/T012 (empty = no-op is the expected behaviour).
+func TestRender_Tier4Headings_AbsentWhenEmpty(t *testing.T) {
+	sm := &model.SectionMap{
+		SchemaVersion: model.CurrentSchemaVersion,
+		Contact:       model.ContactInfo{Name: "Test"},
+		Experience:    []model.ExperienceEntry{{Company: "Acme", Role: "Eng", StartDate: "2020-01", Bullets: []string{}}},
+		Languages:     nil,
+		Speaking:      nil,
+		OpenSource:    nil,
+		Patents:       nil,
+		Interests:     nil,
+		References:    nil,
+	}
+	svc := render.New()
+	out, err := svc.Render(sm)
+	if err != nil {
+		t.Fatalf("Render error: %v", err)
+	}
+	for _, heading := range []string{"LANGUAGES", "SPEAKING ENGAGEMENTS", "OPEN SOURCE", "PATENTS", "INTERESTS", "REFERENCES"} {
+		if strings.Contains(out, heading) {
+			t.Errorf("empty Tier 4 slice must not produce heading %q; got:\n%s", heading, out)
+		}
+	}
+}
+
 func TestRender_Deterministic(t *testing.T) {
 	sm := &model.SectionMap{
 		SchemaVersion: model.CurrentSchemaVersion,
