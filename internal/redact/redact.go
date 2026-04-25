@@ -47,7 +47,7 @@ var builtinPatterns = []patternReplacement{
 	// Require a non-digit, non-dot boundary on both sides so that digit runs
 	// after a decimal point (e.g. 52.6666666666) are not matched.
 	// Go regexp has no lookbehind; surrounding chars are captured and restored.
-	{regexp.MustCompile(`([^\d.]|^)\d{10}([^\d.]|$)`), "${1}«PHONE»${2}"},
+	{regexp.MustCompile(`([^\d.]|^)\d{10}([^\d]|$)`), "${1}«PHONE»${2}"},
 }
 
 // New constructs a Redactor from a profile. Fields that are empty strings

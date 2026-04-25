@@ -160,6 +160,20 @@ func TestRedact_FloatTenDigitFractionNotRedacted(t *testing.T) {
 	}
 }
 
+func TestRedact_PhoneBareTrailingPeriod(t *testing.T) {
+	r := redact.New(&redact.Profile{})
+	cases := []struct{ input, want string }{
+		{"Call me at 5555551234.", "Call me at «PHONE»."},
+		{"5555551234.", "«PHONE»."},
+	}
+	for _, c := range cases {
+		got := r.Redact(c.input)
+		if got != c.want {
+			t.Errorf("input %q: got %q, want %q", c.input, got, c.want)
+		}
+	}
+}
+
 func TestRedact_EmptyProfileNoReplacement(t *testing.T) {
 	r := redact.New(&redact.Profile{})
 	// No literal PII — only regex patterns may fire, but not on this text.
