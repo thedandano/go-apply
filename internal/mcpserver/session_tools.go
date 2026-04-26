@@ -474,7 +474,7 @@ func HandleSubmitTailorT1WithConfig(ctx context.Context, req *mcp.CallToolReques
 		}
 	}
 
-	// T1 always starts from the base sidecar — it replaces skills from scratch.
+	// T1 always loads from the base sections file — it replaces skills from scratch.
 	// T2 chains from sess.TailoredSections (set by T1) so experience edits stack on top.
 	sections, err := deps.Resumes.LoadSections(sess.ScoreResult.BestLabel)
 	if err != nil {
@@ -740,7 +740,7 @@ func HandlePreviewATSExtractionWithConfig(ctx context.Context, req *mcp.CallTool
 	sections, sectErr := deps.Resumes.LoadSections(label)
 	if sectErr != nil {
 		return envelopeResult(stageErrorEnvelope(sessionID, "preview_ats_extraction", "no_sections_data",
-			"no structured resume sections available — upload a resume with sections sidecar", false))
+			"no structured resume sections available — upload a resume with sections data", false))
 	}
 
 	if deps.PDFRenderer == nil {

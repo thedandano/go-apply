@@ -1,18 +1,16 @@
 package mcpserver_test
 
-// RED tests for issue #117: T1/T2 must not overwrite the base resume sidecar.
+// Tests for issue #117: T1/T2 must not overwrite the base resume sections file.
 //
-// Current code in session_tools.go calls deps.Resumes.SaveSections at the end of
-// HandleSubmitTailorT1WithConfig (line 504) and HandleSubmitTailorT2WithConfig
-// (line 647), persisting tailored sections back to the base resume label and
+// Before the fix, session_tools.go called deps.Resumes.SaveSections after
+// T1 and T2, persisting tailored sections back to the base resume label and
 // corrupting subsequent T0 scoring.
 //
-// Expected after the fix:
+// After the fix:
 //   - T1 stores edited sections in sess.TailoredSections (a new Session field)
 //     and does NOT call SaveSections.
-//   - T2 uses sess.TailoredSections if non-nil, else loads original from disk;
-//     does NOT call SaveSections.
-//   - The base sidecar on disk is unchanged across a tailoring session.
+//   - T2 reads sess.TailoredSections set by T1; never calls SaveSections.
+//   - The base sections file on disk is unchanged across a tailoring session.
 
 import (
 	"context"
@@ -122,9 +120,8 @@ func scoredSessionWithSpy(t *testing.T, cfg *pipeline.ApplyConfig) string {
 
 // ── Test 1: T1 must not call SaveSections ─────────────────────────────────────
 
-// TestT1_DoesNotCallSaveSections asserts the base sidecar is not overwritten by
-// a successful T1 pass. RED on current code (session_tools.go:504 calls
-// SaveSections unconditionally on the happy path).
+// TestT1_DoesNotCallSaveSections asserts the base sections file is not overwritten by
+// a successful T1 pass.
 func TestT1_DoesNotCallSaveSections(t *testing.T) {
 	spy := &spyResumeRepo{
 		loadSectionsFunc: func(_ int) (model.SectionMap, error) {
@@ -150,17 +147,17 @@ func TestT1_DoesNotCallSaveSections(t *testing.T) {
 		t.Fatalf("status = %v, want ok — raw: %s", env["status"], t1Text)
 	}
 	if spy.saveSectionsCalled {
-		t.Errorf("SaveSections was called %d time(s) during T1; expected 0 — base sidecar must remain immutable",
+		t.Errorf("SaveSections was called %d time(s) during T1; expected 0 — base sections file must not be overwritten",
 			spy.saveSectionsCount)
 	}
 }
 
 // ── Test 2: T2 must not call SaveSections ─────────────────────────────────────
 
-// TestT2_DoesNotCallSaveSections asserts the base sidecar is not overwritten by
-// a successful T2 pass. T2 now requires T1 — this test runs the full T0→T1→T2
-// cascade and verifies SaveSections is never called, and that T2 does not
-// call LoadSections (it reads from sess.TailoredSections set by T1).
+// TestT2_DoesNotCallSaveSections asserts the base sections file is not overwritten by
+// a successful T2 pass. Runs the full T0→T1→T2 cascade and verifies SaveSections
+// is never called, and that T2 does not call LoadSections (reads from
+// sess.TailoredSections set by T1).
 func TestT2_DoesNotCallSaveSections(t *testing.T) {
 	spy := &spyResumeRepo{
 		loadSectionsFunc: func(_ int) (model.SectionMap, error) {
@@ -195,7 +192,7 @@ func TestT2_DoesNotCallSaveSections(t *testing.T) {
 		t.Fatalf("status = %v, want ok — raw: %s", env["status"], t2Text)
 	}
 	if spy.saveSectionsCalled {
-		t.Errorf("SaveSections was called %d time(s); expected 0 — base sidecar must remain immutable",
+		t.Errorf("SaveSections was called %d time(s); expected 0 — base sections file must not be overwritten",
 			spy.saveSectionsCount)
 	}
 	// T2 must NOT call LoadSections — it reads from sess.TailoredSections set by T1.
@@ -208,7 +205,7 @@ func TestT2_DoesNotCallSaveSections(t *testing.T) {
 // ── Test 3: T2 after T1 must use session chaining, not disk reload ────────────
 
 // TestT2AfterT1_UsesSessChaining_NotDiskReload asserts that once T1 has applied
-// edits, T2 does NOT need to re-read the sidecar from disk: it must consume
+// edits, T2 does NOT need to re-read the sections file from disk: it must consume
 // the in-memory tailored sections that T1 stored on the Session.
 //
 // Call counting on the happy path with one resume:

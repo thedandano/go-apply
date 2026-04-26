@@ -52,7 +52,7 @@ Encode as compact JSON with no extra whitespace:
 
 ### Step 4 — submit_keywords
 Send session_id + jd_json. Never show session_id to the user.
-Returns: extracted_keywords (echo), scores per resume, best_resume, best_score (0–100), next_action, skills_section (current Skills text, always present), skills_section_found (bool — true when a structured sections sidecar exists), sections (full SectionMap, present only when sidecar exists).
+Returns: extracted_keywords (echo), scores per resume, best_resume, best_score (0–100), next_action, skills_section (current Skills text, always present), skills_section_found (bool — true when a structured sections file exists), sections (full SectionMap, present only when sections file exists).
 
 Scores are 0–100. Do NOT rescale or convert to a different denominator. Always display as NN/100.
 

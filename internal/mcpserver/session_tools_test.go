@@ -355,11 +355,11 @@ func TestHandleSubmitKeywordsWithConfig_NoSectionsSidecar_ReturnsError(t *testin
 	}
 	// PDF scoring requires sections — hard error when missing.
 	if env["status"] != "error" {
-		t.Errorf("status = %v, want error when sections sidecar is missing — full: %s", env["status"], kwText)
+		t.Errorf("status = %v, want error when sections file is missing — full: %s", env["status"], kwText)
 	}
 }
 
-// US3: submit_keywords includes sections + skills_section_found when sidecar exists.
+// US3: submit_keywords includes sections + skills_section_found when sections file exists.
 func TestHandleSubmitKeywordsWithConfig_Sections_PresentWhenSidecarExists(t *testing.T) {
 	cfg := stubApplyConfigWithSkillsLoader() // uses stubResumeRepoWithSkillsSections
 
@@ -386,10 +386,10 @@ func TestHandleSubmitKeywordsWithConfig_Sections_PresentWhenSidecarExists(t *tes
 	data, _ := env["data"].(map[string]any)
 
 	if found, _ := data["skills_section_found"].(bool); !found {
-		t.Error("skills_section_found must be true when sidecar has skills")
+		t.Error("skills_section_found must be true when sections file has skills")
 	}
 	if sections, present := data["sections"]; !present || sections == nil {
-		t.Error("sections must be present and non-nil when sidecar exists")
+		t.Error("sections must be present and non-nil when sections file exists")
 	}
 }
 
@@ -754,7 +754,7 @@ func TestHandleSubmitTailorT1_WrongState_ReturnsError(t *testing.T) {
 }
 
 func TestHandleSubmitTailorT1_HappyPath_ReturnsEditsApplied(t *testing.T) {
-	cfg := stubApplyConfigWithSkillsLoader() // has sections sidecar with flat skills
+	cfg := stubApplyConfigWithSkillsLoader() // has sections file with flat skills
 
 	// load_jd
 	loadReq := callToolRequest("load_jd", map[string]any{"jd_raw_text": "Senior Go engineer. Skills: go, kubernetes."})
@@ -1130,7 +1130,7 @@ func TestHandlePreviewATSExtraction_NoSectionsSidecar_HardFails(t *testing.T) {
 	scoringCfg := stubApplyConfigForSession()
 	sessionID := buildScoredSession(t, &scoringCfg)
 
-	// For the preview step, use a config where LoadSections fails (no sidecar for preview).
+	// For the preview step, use a config where LoadSections fails (no sections file for preview).
 	previewCfg := pipeline.ApplyConfig{
 		Fetcher:        &stubJDFetcher{},
 		Resumes:        &stubResumeRepo{}, // LoadSections returns ErrSectionsMissing

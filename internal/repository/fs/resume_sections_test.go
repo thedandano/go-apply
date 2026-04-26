@@ -54,7 +54,7 @@ func TestResumeSections(t *testing.T) {
 
 		_, err := repo.LoadSections("nonexistent")
 		if err == nil {
-			t.Fatal("expected error for missing sidecar, got nil")
+			t.Fatal("expected error for missing sections file, got nil")
 		}
 		if !errors.Is(err, model.ErrSectionsMissing) {
 			t.Errorf("want errors.Is(err, model.ErrSectionsMissing); got: %v", err)
@@ -64,9 +64,9 @@ func TestResumeSections(t *testing.T) {
 	t.Run("schema_version_mismatch", func(t *testing.T) {
 		repo, inputsDir := setupRepo(t)
 
-		sidecar := filepath.Join(inputsDir, "myresume.sections.json")
-		if err := os.WriteFile(sidecar, []byte(`{"schema_version": 999}`), 0o644); err != nil {
-			t.Fatalf("WriteFile sidecar: %v", err)
+		sectionsFile := filepath.Join(inputsDir, "myresume.sections.json")
+		if err := os.WriteFile(sectionsFile, []byte(`{"schema_version": 999}`), 0o644); err != nil {
+			t.Fatalf("WriteFile sections file: %v", err)
 		}
 
 		_, err := repo.LoadSections("myresume")
