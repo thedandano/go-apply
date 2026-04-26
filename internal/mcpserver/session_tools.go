@@ -266,7 +266,10 @@ func HandleFinalizeWithConfig(ctx context.Context, req *mcp.CallToolRequest, dep
 	if sess.URL != "" {
 		if deps == nil {
 			_, liveDeps, err := loadDeps()
-			if err == nil {
+			if err != nil {
+				slog.WarnContext(ctx, "finalize: dependency load failed; skipping persistence",
+					slog.String("session_id", sessionID), slog.Any("error", err))
+			} else {
 				deps = &liveDeps
 			}
 		}
