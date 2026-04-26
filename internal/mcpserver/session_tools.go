@@ -668,7 +668,8 @@ func HandlePreviewATSExtractionWithConfig(ctx context.Context, req *mcp.CallTool
 	if deps == nil {
 		_, liveDeps, err := loadDeps()
 		if err != nil {
-			slog.ErrorContext(ctx, "preview_ats_extraction: dependency load failed", slog.Any("error", err))
+			slog.ErrorContext(ctx, "preview_ats_extraction: dependency load failed",
+				slog.String("session_id", sessionID), slog.Any("error", err))
 			return envelopeResult(stageErrorEnvelope(sessionID, "preview_ats_extraction", "config_error",
 				"server configuration error — check server logs", true))
 		}
