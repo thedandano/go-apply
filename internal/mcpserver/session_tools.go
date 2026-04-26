@@ -474,6 +474,8 @@ func HandleSubmitTailorT1WithConfig(ctx context.Context, req *mcp.CallToolReques
 		}
 	}
 
+	// T1 always starts from the base sidecar — it replaces skills from scratch.
+	// T2 chains from sess.TailoredSections (set by T1) so experience edits stack on top.
 	sections, err := deps.Resumes.LoadSections(sess.ScoreResult.BestLabel)
 	if err != nil {
 		if errors.Is(err, model.ErrSectionsMissing) {
@@ -501,17 +503,13 @@ func HandleSubmitTailorT1WithConfig(ctx context.Context, req *mcp.CallToolReques
 		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t1", "render_failed", renderErr.Error(), false))
 	}
 
-	if saveErr := deps.Resumes.SaveSections(sess.ScoreResult.BestLabel, editResult.NewSections); saveErr != nil {
-		slog.WarnContext(ctx, "submit_tailor_t1: edits applied but sidecar not persisted",
-			slog.String("session_id", sessionID), slog.Any("error", saveErr))
-	}
-
 	slog.InfoContext(ctx, "tailor T1 complete",
 		slog.String("session_id", sessionID),
 		slog.Int("edits_applied", len(editResult.EditsApplied)),
 		slog.Int("edits_rejected", len(editResult.EditsRejected)),
 	)
 	sess.TailoredText = tailored
+	sess.TailoredSections = &editResult.NewSections
 	sess.State = stateT1Applied
 
 	logger.Banner(ctx, slog.Default(), "Score", "After T1")
@@ -617,14 +615,20 @@ func HandleSubmitTailorT2WithConfig(ctx context.Context, req *mcp.CallToolReques
 		cfg = &config.Config{}
 	}
 
-	sections, err := deps.Resumes.LoadSections(sess.ScoreResult.BestLabel)
-	if err != nil {
-		if errors.Is(err, model.ErrSectionsMissing) {
-			return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t2", "sections_missing",
-				"no sections found for this resume — re-onboard with sections field", false))
+	var sections model.SectionMap
+	if sess.TailoredSections != nil {
+		sections = *sess.TailoredSections
+	} else {
+		loaded, loadErr := deps.Resumes.LoadSections(sess.ScoreResult.BestLabel)
+		if loadErr != nil {
+			if errors.Is(loadErr, model.ErrSectionsMissing) {
+				return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t2", "sections_missing",
+					"no sections found for this resume — re-onboard with sections field", false))
+			}
+			slog.ErrorContext(ctx, "submit_tailor_t2: load sections failed", "session_id", sessionID, "error", loadErr)
+			return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t2", "load_sections_failed", loadErr.Error(), false))
 		}
-		slog.ErrorContext(ctx, "submit_tailor_t2: load sections failed", "session_id", sessionID, "error", err)
-		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t2", "load_sections_failed", err.Error(), false))
+		sections = loaded
 	}
 
 	pres := mcppres.New()
@@ -642,11 +646,6 @@ func HandleSubmitTailorT2WithConfig(ctx context.Context, req *mcp.CallToolReques
 	if renderErr != nil {
 		slog.ErrorContext(ctx, "submit_tailor_t2: render failed", "session_id", sessionID, "error", renderErr)
 		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t2", "render_failed", renderErr.Error(), false))
-	}
-
-	if saveErr := deps.Resumes.SaveSections(sess.ScoreResult.BestLabel, editResult.NewSections); saveErr != nil {
-		slog.WarnContext(ctx, "submit_tailor_t2: edits applied but sidecar not persisted",
-			slog.String("session_id", sessionID), slog.Any("error", saveErr))
 	}
 
 	slog.InfoContext(ctx, "tailor T2 complete",

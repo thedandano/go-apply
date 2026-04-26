@@ -40,14 +40,15 @@ func (s sessionState) String() string {
 // Session holds the in-flight state for one multi-turn job application conversation.
 // Sessions are ephemeral: lost when the MCP server process exits.
 type Session struct {
-	ID           string
-	State        sessionState
-	URL          string // original URL if load_jd was called with jd_url; empty for text input
-	IsText       bool
-	JDText       string
-	JD           model.JDData
-	ScoreResult  pipeline.ScoreResumeResult
-	TailoredText string // updated by T1/T2 handlers
+	ID               string
+	State            sessionState
+	URL              string // original URL if load_jd was called with jd_url; empty for text input
+	IsText           bool
+	JDText           string
+	JD               model.JDData
+	ScoreResult      pipeline.ScoreResumeResult
+	TailoredText     string            // updated by T1/T2 handlers
+	TailoredSections *model.SectionMap // set by T1; consumed by T2 for chaining (not persisted to disk)
 }
 
 const sessionStoreCap = 100
