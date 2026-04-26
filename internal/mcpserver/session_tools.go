@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/thedandano/go-apply/internal/config"
 	"github.com/thedandano/go-apply/internal/logger"
@@ -152,13 +153,59 @@ func HandleSubmitKeywordsWithConfig(ctx context.Context, req *mcp.CallToolReques
 
 	pres := mcppres.New()
 	deps.Presenter = pres
-	pl := pipeline.NewApplyPipeline(deps)
 
 	logger.Banner(ctx, slog.Default(), "Score", "Initial")
-	scored, err := pl.ScoreResumes(ctx, &jd, cfg)
-	if err != nil {
+
+	// List all stored resumes.
+	resumeFiles, listErr := deps.Resumes.ListResumes()
+	if listErr != nil {
+		slog.ErrorContext(ctx, "submit_keywords: list resumes failed", "session_id", sessionID, "error", listErr)
+		return envelopeResult(stageErrorEnvelope(sessionID, "score", "score_failed", listErr.Error(), false))
+	}
+
+	// Fan-out: score each resume from its PDF representation via errgroup.
+	// Hard error on any failure — no partial results.
+	type resumeScoreEntry struct {
+		label  string
+		result model.ScoreResult
+	}
+	results := make([]resumeScoreEntry, len(resumeFiles))
+	g, gctx := errgroup.WithContext(ctx)
+	for i, rf := range resumeFiles {
+		i, rf := i, rf
+		g.Go(func() error {
+			sections, secErr := deps.Resumes.LoadSections(rf.Label)
+			if secErr != nil {
+				return fmt.Errorf("submit_keywords: load sections for %s: %w", rf.Label, secErr)
+			}
+			sr, scoreErr := scoreSectionsPDF(gctx, &sections, rf.Label, sessionID, &jd, cfg, deps)
+			if scoreErr != nil {
+				return scoreErr
+			}
+			results[i] = resumeScoreEntry{label: rf.Label, result: sr}
+			return nil
+		})
+	}
+	if err := g.Wait(); err != nil {
 		slog.ErrorContext(ctx, "submit_keywords: score failed", "session_id", sessionID, "error", err)
 		return envelopeResult(stageErrorEnvelope(sessionID, "score", "score_failed", err.Error(), false))
+	}
+
+	// Build ScoreResumeResult from fan-out results.
+	scores := make(map[string]model.ScoreResult, len(results))
+	var bestLabel string
+	var bestScore float64
+	for i := range results {
+		scores[results[i].label] = results[i].result
+		if t := results[i].result.Breakdown.Total(); t > bestScore {
+			bestScore = t
+			bestLabel = results[i].label
+		}
+	}
+	scored := pipeline.ScoreResumeResult{
+		Scores:    scores,
+		BestLabel: bestLabel,
+		BestScore: bestScore,
 	}
 
 	sess.JD = jd
@@ -439,7 +486,6 @@ func HandleSubmitTailorT1WithConfig(ctx context.Context, req *mcp.CallToolReques
 
 	pres := mcppres.New()
 	deps.Presenter = pres
-	pl := pipeline.NewApplyPipeline(deps)
 
 	logger.Banner(ctx, slog.Default(), "Tailor", "T1")
 	svc := tailor.New(nil, deps.Defaults, slog.Default())
@@ -469,7 +515,7 @@ func HandleSubmitTailorT1WithConfig(ctx context.Context, req *mcp.CallToolReques
 	sess.State = stateT1Applied
 
 	logger.Banner(ctx, slog.Default(), "Score", "After T1")
-	newScore, err := pl.ScoreResume(ctx, tailored, sess.ScoreResult.BestLabel, &sess.JD, cfg)
+	newScore, err := scoreSectionsPDF(ctx, &editResult.NewSections, sess.ScoreResult.BestLabel, sessionID, &sess.JD, cfg, deps)
 	if err != nil {
 		slog.ErrorContext(ctx, "submit_tailor_t1: rescore failed", "session_id", sessionID, "error", err)
 		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t1", "rescore_failed", err.Error(), false))
@@ -488,12 +534,14 @@ func HandleSubmitTailorT1WithConfig(ctx context.Context, req *mcp.CallToolReques
 		NewScore      model.ScoreResult    `json:"new_score"`
 		EditsApplied  int                  `json:"edits_applied"`
 		EditsRejected []port.EditRejection `json:"edits_rejected"`
+		ScoringMethod string               `json:"scoring_method"`
 	}
 	resultData := t1Data{
 		PreviousScore: previousScore,
 		NewScore:      newScore,
 		EditsApplied:  len(editResult.EditsApplied),
 		EditsRejected: editResult.EditsRejected,
+		ScoringMethod: ScoringMethodPDFExtracted,
 	}
 	resultBytes, _ := json.Marshal(resultData)
 	slog.DebugContext(ctx, "mcp tool result",
@@ -581,7 +629,6 @@ func HandleSubmitTailorT2WithConfig(ctx context.Context, req *mcp.CallToolReques
 
 	pres := mcppres.New()
 	deps.Presenter = pres
-	pl := pipeline.NewApplyPipeline(deps)
 
 	logger.Banner(ctx, slog.Default(), "Tailor", "T2")
 	svc := tailor.New(nil, deps.Defaults, slog.Default())
@@ -611,7 +658,7 @@ func HandleSubmitTailorT2WithConfig(ctx context.Context, req *mcp.CallToolReques
 	sess.State = stateT2Applied
 
 	logger.Banner(ctx, slog.Default(), "Score", "After T2")
-	newScore, err := pl.ScoreResume(ctx, tailored, sess.ScoreResult.BestLabel, &sess.JD, cfg)
+	newScore, err := scoreSectionsPDF(ctx, &editResult.NewSections, sess.ScoreResult.BestLabel, sessionID, &sess.JD, cfg, deps)
 	if err != nil {
 		slog.ErrorContext(ctx, "submit_tailor_t2: rescore failed", "session_id", sessionID, "error", err)
 		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t2", "rescore_failed", err.Error(), false))
@@ -630,12 +677,14 @@ func HandleSubmitTailorT2WithConfig(ctx context.Context, req *mcp.CallToolReques
 		NewScore      model.ScoreResult    `json:"new_score"`
 		EditsApplied  int                  `json:"edits_applied"`
 		EditsRejected []port.EditRejection `json:"edits_rejected"`
+		ScoringMethod string               `json:"scoring_method"`
 	}
 	resultData := t2Data{
 		PreviousScore: previousScore,
 		NewScore:      newScore,
 		EditsApplied:  len(editResult.EditsApplied),
 		EditsRejected: editResult.EditsRejected,
+		ScoringMethod: ScoringMethodPDFExtracted,
 	}
 	resultBytes, _ := json.Marshal(resultData)
 	slog.DebugContext(ctx, "mcp tool result",
@@ -657,7 +706,7 @@ func HandlePreviewATSExtraction(ctx context.Context, req *mcp.CallToolRequest) *
 var renderSvc = renderPkg.New()
 
 // HandlePreviewATSExtractionWithConfig is the full handler with optional injected deps (for tests).
-// Renders the best resume to PDF, extracts plain text via pdftotext, and returns a
+// Renders the best resume to PDF, extracts plain text via the configured Extractor, and returns a
 // keyword-survival diff showing which JD keywords survived the render→extract pipeline.
 func HandlePreviewATSExtractionWithConfig(ctx context.Context, req *mcp.CallToolRequest, deps *pipeline.ApplyConfig) *mcp.CallToolResult {
 	sessionID := req.GetString("session_id", "")
@@ -734,7 +783,7 @@ func HandlePreviewATSExtractionWithConfig(ctx context.Context, req *mcp.CallTool
 		slog.ErrorContext(ctx, "preview_ats_extraction: extract failed",
 			slog.String("session_id", sessionID), slog.Any("error", extErr))
 		return envelopeResult(stageErrorEnvelope(sessionID, "preview_ats_extraction", "extract_failed",
-			"text extraction failed — run go-apply doctor to verify pdftotext is installed", false))
+			"text extraction failed — check server logs for details", false))
 	}
 
 	pd.ConstructedText = extracted
