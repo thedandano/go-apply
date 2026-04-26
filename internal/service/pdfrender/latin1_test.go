@@ -16,7 +16,7 @@ type captureHandler struct {
 }
 
 func (h *captureHandler) Enabled(_ context.Context, _ slog.Level) bool { return true }
-func (h *captureHandler) Handle(_ context.Context, r slog.Record) error {
+func (h *captureHandler) Handle(_ context.Context, r slog.Record) error { //nolint:gocritic // slog.Handler interface requires value receiver
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.records = append(h.records, r)
@@ -29,15 +29,15 @@ func (h *captureHandler) warnRecords() []slog.Record {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	var out []slog.Record
-	for _, r := range h.records {
-		if r.Level == slog.LevelWarn {
-			out = append(out, r)
+	for i := range h.records {
+		if h.records[i].Level == slog.LevelWarn {
+			out = append(out, h.records[i])
 		}
 	}
 	return out
 }
 
-func (h *captureHandler) attrCount(r slog.Record) int {
+func (h *captureHandler) attrCount(r *slog.Record) int {
 	count := 0
 	r.Attrs(func(_ slog.Attr) bool {
 		count++
@@ -122,7 +122,7 @@ func TestTransliterateField_UnknownCodepoints(t *testing.T) {
 			}
 
 			// PII guard: exactly 2 attrs (codepoint + field), no surrounding text.
-			count := h.attrCount(warns[0])
+			count := h.attrCount(&warns[0])
 			if count != 2 {
 				t.Errorf("warn log must have exactly 2 attrs (codepoint + field), got %d", count)
 			}

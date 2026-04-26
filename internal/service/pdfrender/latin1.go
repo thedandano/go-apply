@@ -91,7 +91,7 @@ func transliterateField(value, fieldName string) string {
 // transliterateLatin1 returns a deep copy of sections with every string field
 // transliterated to ASCII. The original *model.SectionMap is never mutated.
 func transliterateLatin1(sections *model.SectionMap) model.SectionMap {
-	tf := func(v, f string) string { return transliterateField(v, f) }
+	tf := transliterateField
 
 	out := model.SectionMap{
 		SchemaVersion: sections.SchemaVersion,
