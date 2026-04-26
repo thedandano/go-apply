@@ -37,7 +37,4 @@ A Go CLI that scores resumes against job postings, tailors them via a two-tier c
 - Data (resumes in `inputs/`, jd_cache/) stored in `~/.local/share/go-apply/`
 
 <!-- SPECKIT START -->
-For additional context about technologies to be used, project structure,
-shell commands, and other important information, read the current plan at
-`specs/009-per-tier-ats-scoring/plan.md`
 <!-- SPECKIT END -->
