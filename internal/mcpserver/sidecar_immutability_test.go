@@ -158,10 +158,9 @@ func TestT1_DoesNotCallSaveSections(t *testing.T) {
 // ── Test 2: T2 must not call SaveSections ─────────────────────────────────────
 
 // TestT2_DoesNotCallSaveSections asserts the base sidecar is not overwritten by
-// a successful T2 pass invoked directly after the scored state (no prior T1),
-// and that T2 calls LoadSections to read the base sidecar (disk-fallback path).
-// RED on current code (session_tools.go:647 calls SaveSections unconditionally on
-// the happy path).
+// a successful T2 pass. T2 now requires T1 — this test runs the full T0→T1→T2
+// cascade and verifies SaveSections is never called, and that T2 does not
+// call LoadSections (it reads from sess.TailoredSections set by T1).
 func TestT2_DoesNotCallSaveSections(t *testing.T) {
 	spy := &spyResumeRepo{
 		loadSectionsFunc: func(_ int) (model.SectionMap, error) {
@@ -171,7 +170,15 @@ func TestT2_DoesNotCallSaveSections(t *testing.T) {
 	cfg := applyConfigWithSpy(spy)
 
 	sessionID := scoredSessionWithSpy(t, &cfg)
-	loadCountAfterScoring := spy.loadCallCount
+
+	// T1 — must run before T2
+	t1Req := callToolRequest("submit_tailor_t1", map[string]any{
+		"session_id": sessionID,
+		"edits":      `[{"section":"skills","op":"add","value":"Kubernetes"}]`,
+	})
+	mcpserver.HandleSubmitTailorT1WithConfig(context.Background(), &t1Req, &cfg, &config.Config{})
+
+	loadCountAfterT1 := spy.loadCallCount
 
 	t2Req := callToolRequest("submit_tailor_t2", map[string]any{
 		"session_id": sessionID,
@@ -188,13 +195,13 @@ func TestT2_DoesNotCallSaveSections(t *testing.T) {
 		t.Fatalf("status = %v, want ok — raw: %s", env["status"], t2Text)
 	}
 	if spy.saveSectionsCalled {
-		t.Errorf("SaveSections was called %d time(s) during T2; expected 0 — base sidecar must remain immutable",
+		t.Errorf("SaveSections was called %d time(s); expected 0 — base sidecar must remain immutable",
 			spy.saveSectionsCount)
 	}
-	// T2 without prior T1 must load from disk (TailoredSections is nil on session).
-	if spy.loadCallCount <= loadCountAfterScoring {
-		t.Errorf("T2 without prior T1 must call LoadSections (disk-fallback); load count was %d before and %d after T2",
-			loadCountAfterScoring, spy.loadCallCount)
+	// T2 must NOT call LoadSections — it reads from sess.TailoredSections set by T1.
+	if spy.loadCallCount > loadCountAfterT1 {
+		t.Errorf("T2 must not call LoadSections when TailoredSections is available; load count was %d after T1 and %d after T2",
+			loadCountAfterT1, spy.loadCallCount)
 	}
 }
 
@@ -208,15 +215,11 @@ func TestT2_DoesNotCallSaveSections(t *testing.T) {
 //
 //  1. submit_keywords fan-out scoring loop  (session_tools.go:177)
 //  2. submit_keywords skills_section block  (session_tools.go:250)
-//  3. submit_tailor_t1 LoadSections          (session_tools.go:477)
-//  4. submit_tailor_t2 LoadSections          (session_tools.go:620) — must go away after the fix
+//  3. submit_tailor_t1 LoadSections
 //
-// We let calls 1–3 succeed and force call 4 to fail with ErrSectionsMissing.
-// After the fix, T2 should read sess.TailoredSections (set by T1) and never
-// reach call 4, so it should still return status="ok". On current code, T2
-// hits LoadSections and surfaces sections_missing → status="error".
-//
-// RED on current code.
+// T2 no longer calls LoadSections — it reads sess.TailoredSections set by T1.
+// We let calls 1–3 succeed and force call 4+ to fail with ErrSectionsMissing.
+// T2 must succeed by reading sess.TailoredSections without touching disk.
 func TestT2AfterT1_UsesSessChaining_NotDiskReload(t *testing.T) {
 	spy := &spyResumeRepo{
 		loadSectionsFunc: func(callNum int) (model.SectionMap, error) {
@@ -297,7 +300,21 @@ func TestT1_CrossSession_IsolatesEditedSections(t *testing.T) {
 		t.Fatalf("session A T1 status = %v, want ok — raw: %s", t1Env["status"], t1Text)
 	}
 
-	// T2 on session B (directly after scored, never went through T1).
+	// T1 on session B — required before T2.
+	t1BReq := callToolRequest("submit_tailor_t1", map[string]any{
+		"session_id": sessionB,
+		"edits":      `[{"section":"skills","op":"add","value":"Docker"}]`,
+	})
+	t1BText := extractText(t, mcpserver.HandleSubmitTailorT1WithConfig(context.Background(), &t1BReq, &cfg, &config.Config{}))
+	var t1BEnv map[string]any
+	if err := json.Unmarshal([]byte(t1BText), &t1BEnv); err != nil {
+		t.Fatalf("session B T1 not JSON: %v — raw: %s", err, t1BText)
+	}
+	if t1BEnv["status"] != "ok" {
+		t.Fatalf("session B T1 status = %v, want ok — raw: %s", t1BEnv["status"], t1BText)
+	}
+
+	// T2 on session B (chained from session B's T1 — must not use session A's tailored sections).
 	t2Req := callToolRequest("submit_tailor_t2", map[string]any{
 		"session_id": sessionB,
 		"edits":      `[{"section":"experience","op":"replace","target":"exp-0-b0","value":"Built distributed systems in Go and Kubernetes"}]`,

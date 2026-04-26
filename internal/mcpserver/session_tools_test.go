@@ -923,6 +923,23 @@ func TestHandleSubmitTailorT2_WrongState_ReturnsError(t *testing.T) {
 	}
 }
 
+// TestHandleSubmitTailorT2_ScoredWithoutT1_ReturnsInvalidState asserts that T2 cannot
+// be called directly after T0 scoring — it requires T1 to run first.
+func TestHandleSubmitTailorT2_ScoredWithoutT1_ReturnsInvalidState(t *testing.T) {
+	cfg := stubApplyConfigForSession()
+	sessionID := buildScoredSession(t, &cfg)
+
+	req := callToolRequest("submit_tailor_t2", map[string]any{
+		"session_id": sessionID,
+		"edits":      `[{"section":"experience","op":"replace","target":"exp-0-b0","value":"new bullet"}]`,
+	})
+	result := mcpserver.HandleSubmitTailorT2WithConfig(context.Background(), &req, &cfg, &config.Config{})
+	text := extractText(t, result)
+	if !strings.Contains(text, "invalid_state") {
+		t.Errorf("expected invalid_state error (T2 requires T1 first), got: %s", text)
+	}
+}
+
 func TestHandleSubmitTailorT2_MissingEdits_ReturnsError(t *testing.T) {
 	cfg := stubApplyConfigForSession()
 	req := callToolRequest("submit_tailor_t2", map[string]any{
@@ -990,7 +1007,14 @@ func TestHandleSubmitTailorT2_HappyPath_ReturnsNewScore(t *testing.T) {
 	kwReq := callToolRequest("submit_keywords", map[string]any{"session_id": sessionID, "jd_json": jdJSON})
 	mcpserver.HandleSubmitKeywordsWithConfig(context.Background(), &kwReq, &cfg, &config.Config{})
 
-	// submit_tailor_t2 (directly after scored, skipping T1)
+	// submit_tailor_t1 — T2 requires T1 to run first
+	t1Req := callToolRequest("submit_tailor_t1", map[string]any{
+		"session_id": sessionID,
+		"edits":      `[{"section":"skills","op":"add","value":"Kubernetes"}]`,
+	})
+	mcpserver.HandleSubmitTailorT1WithConfig(context.Background(), &t1Req, &cfg, &config.Config{})
+
+	// submit_tailor_t2 (chained from T1)
 	t2Req := callToolRequest("submit_tailor_t2", map[string]any{
 		"session_id": sessionID,
 		"edits":      `[{"section":"experience","op":"replace","target":"exp-0-b0","value":"Built distributed systems in Go and Kubernetes"}]`,

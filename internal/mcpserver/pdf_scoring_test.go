@@ -129,6 +129,13 @@ func TestHandleSubmitTailorT2_ResponseContainsScoringMethod(t *testing.T) {
 	kwReq := callToolRequest("submit_keywords", map[string]any{"session_id": sessionID, "jd_json": jdJSON})
 	mcpserver.HandleSubmitKeywordsWithConfig(context.Background(), &kwReq, &cfg, &config.Config{})
 
+	// T2 requires T1 to run first.
+	t1Req := callToolRequest("submit_tailor_t1", map[string]any{
+		"session_id": sessionID,
+		"edits":      `[{"section":"skills","op":"add","value":"Kubernetes"}]`,
+	})
+	mcpserver.HandleSubmitTailorT1WithConfig(context.Background(), &t1Req, &cfg, &config.Config{})
+
 	t2Req := callToolRequest("submit_tailor_t2", map[string]any{
 		"session_id": sessionID,
 		"edits":      `[{"section":"experience","op":"replace","target":"exp-0-b0","value":"Built Go microservices on Kubernetes"}]`,

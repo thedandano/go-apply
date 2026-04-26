@@ -593,9 +593,9 @@ func HandleSubmitTailorT2WithConfig(ctx context.Context, req *mcp.CallToolReques
 		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t2", "session_not_found",
 			"session not found — call load_jd first", false))
 	}
-	if sess.State != stateScored && sess.State != stateT1Applied {
+	if sess.State != stateT1Applied {
 		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t2", "invalid_state",
-			fmt.Sprintf("expected state %q or %q, got %q", stateScored, stateT1Applied, sess.State), false))
+			fmt.Sprintf("expected state %q, got %q — call submit_tailor_t1 first", stateT1Applied, sess.State), false))
 	}
 
 	if deps == nil {
@@ -615,21 +615,8 @@ func HandleSubmitTailorT2WithConfig(ctx context.Context, req *mcp.CallToolReques
 		cfg = &config.Config{}
 	}
 
-	var sections model.SectionMap
-	if sess.TailoredSections != nil {
-		sections = *sess.TailoredSections
-	} else {
-		loaded, loadErr := deps.Resumes.LoadSections(sess.ScoreResult.BestLabel)
-		if loadErr != nil {
-			if errors.Is(loadErr, model.ErrSectionsMissing) {
-				return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t2", "sections_missing",
-					"no sections found for this resume — re-onboard with sections field", false))
-			}
-			slog.ErrorContext(ctx, "submit_tailor_t2: load sections failed", "session_id", sessionID, "error", loadErr)
-			return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t2", "load_sections_failed", loadErr.Error(), false))
-		}
-		sections = loaded
-	}
+	// T2 requires T1 to have run first (state guard above). TailoredSections is guaranteed non-nil.
+	sections := *sess.TailoredSections
 
 	pres := mcppres.New()
 	deps.Presenter = pres
