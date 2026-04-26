@@ -181,6 +181,46 @@ func TestRenderPDF_InvalidUTF8_ReturnsError(t *testing.T) {
 	}
 }
 
+// TestRenderPDF_NonLatin1_ReturnsError verifies that valid UTF-8 strings containing
+// runes outside Latin-1 (code point > 0xFF) are rejected before rendering because
+// fpdf core fonts (Arial) silently drop them.
+func TestRenderPDF_NonLatin1_ReturnsError(t *testing.T) {
+	cases := []struct {
+		name  string
+		field string
+		value string
+	}{
+		{"CJK in contact name", "contact.name", "Alice 中文"},
+		{"CJK in experience company", "experience[0].company", "Acme 日本語"},
+		{"CJK in education school", "education[0].school", "MIT 東京"},
+		{"CJK in skills flat", "skills.flat", "Go, Rust, 中文"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var sm model.SectionMap
+			sm.SchemaVersion = model.CurrentSchemaVersion
+			switch tc.field {
+			case "contact.name":
+				sm.Contact = model.ContactInfo{Name: tc.value}
+			case "experience[0].company":
+				sm.Contact = model.ContactInfo{Name: "Alice"}
+				sm.Experience = []model.ExperienceEntry{{Company: tc.value, Role: "Eng", StartDate: "2020-01", Bullets: []string{"built things"}}}
+			case "education[0].school":
+				sm.Contact = model.ContactInfo{Name: "Alice"}
+				sm.Education = []model.EducationEntry{{School: tc.value, Degree: "BS CS"}}
+			case "skills.flat":
+				sm.Contact = model.ContactInfo{Name: "Alice"}
+				sm.Skills = &model.SkillsSection{Kind: model.SkillsKindFlat, Flat: tc.value}
+			}
+			svc := pdfrender.New()
+			_, err := svc.RenderPDF(&sm)
+			if err == nil {
+				t.Errorf("expected error for non-Latin-1 rune in %s, got nil", tc.field)
+			}
+		})
+	}
+}
+
 func TestRenderPDF_LogsRenderEvents(t *testing.T) {
 	origLogger := slog.Default()
 	h := &testLogHandler{}

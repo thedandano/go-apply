@@ -147,6 +147,54 @@ func TestExtract_LogsAttemptAndInvocation(t *testing.T) {
 	}
 }
 
+// TestExtract_InputExceedsMaxPDFBytes_ReturnsError verifies that the 10 MB input cap
+// is enforced before the subprocess is invoked.
+func TestExtract_InputExceedsMaxPDFBytes_ReturnsError(t *testing.T) {
+	svc := &Service{
+		lookPath: func(string) (string, error) { return "/usr/bin/cat", nil },
+		timeout:  5 * time.Second,
+	}
+	data := make([]byte, maxPDFBytes+1)
+	_, err := svc.Extract(context.Background(), data)
+	if err == nil {
+		t.Fatal("expected error for input exceeding 10 MB, got nil")
+	}
+}
+
+// TestExtract_InputAtExactMaxPDFBytes_DoesNotError verifies that a payload exactly
+// at the cap boundary is accepted (boundary-value: cap is exclusive).
+func TestExtract_InputAtExactMaxPDFBytes_DoesNotError(t *testing.T) {
+	svc := &Service{
+		lookPath: func(string) (string, error) { return "/usr/bin/cat", nil },
+		cmdFunc: func(ctx context.Context, _ string, _ ...string) *exec.Cmd {
+			return exec.CommandContext(ctx, "cat")
+		},
+		timeout: 5 * time.Second,
+	}
+	data := make([]byte, maxPDFBytes)
+	_, err := svc.Extract(context.Background(), data)
+	if err != nil {
+		t.Fatalf("payload at exact cap must be accepted: %v", err)
+	}
+}
+
+// TestExtract_OutputExceedsMaxOutputBytes_ReturnsError verifies that the streaming
+// stdout cap is enforced and Extract returns an error when pdftotext emits too much.
+func TestExtract_OutputExceedsMaxOutputBytes_ReturnsError(t *testing.T) {
+	svc := &Service{
+		lookPath: func(string) (string, error) { return "/usr/bin/cat", nil },
+		cmdFunc: func(ctx context.Context, _ string, _ ...string) *exec.Cmd {
+			// 11 * 1 MB = 11 MB, reliably exceeds the 10 MB output cap.
+			return exec.CommandContext(ctx, "dd", "if=/dev/zero", "bs=1048576", "count=11")
+		},
+		timeout: 30 * time.Second,
+	}
+	_, err := svc.Extract(context.Background(), []byte("pdf"))
+	if err == nil {
+		t.Fatal("expected error for output exceeding 10 MB, got nil")
+	}
+}
+
 type testLogHandler struct {
 	mu      sync.Mutex
 	records []slog.Record

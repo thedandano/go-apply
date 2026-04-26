@@ -3,6 +3,7 @@ package survival_test
 import (
 	"context"
 	"log/slog"
+	"sync"
 	"testing"
 
 	"github.com/thedandano/go-apply/internal/service/survival"
@@ -159,7 +160,7 @@ func TestDiff_MultiWordKeyword_DistributedSystems(t *testing.T) {
 }
 
 // TestDiff_RegexpCachingDoesNotAffectResults verifies the sync.Map cache produces
-// the same results across multiple calls with the same keyword set.
+// identical results (by value, not just length) across multiple calls with the same keyword set.
 func TestDiff_RegexpCachingDoesNotAffectResults(t *testing.T) {
 	svc := newService()
 	keywords := []string{"go", "kubernetes"}
@@ -168,18 +169,75 @@ func TestDiff_RegexpCachingDoesNotAffectResults(t *testing.T) {
 	first := svc.Diff(keywords, extracted)
 	second := svc.Diff(keywords, extracted)
 
-	if len(first.Matched) != len(second.Matched) {
-		t.Errorf("repeated Diff calls must return same results; first=%v second=%v", first.Matched, second.Matched)
+	if len(first.Matched) != len(second.Matched) || len(first.Dropped) != len(second.Dropped) {
+		t.Errorf("repeated Diff calls must return same results; first.Matched=%v second.Matched=%v", first.Matched, second.Matched)
+	}
+	for i := range first.Matched {
+		if first.Matched[i] != second.Matched[i] {
+			t.Errorf("Matched[%d]: first=%q second=%q", i, first.Matched[i], second.Matched[i])
+		}
+	}
+}
+
+// TestDiff_ConcurrentCachingIsSafe verifies the sync.Map cache is race-free under
+// concurrent Diff calls. Must pass with -race.
+func TestDiff_ConcurrentCachingIsSafe(t *testing.T) {
+	svc := newService()
+	keywords := []string{"go", "kubernetes", "rust"}
+	extracted := "Go and kubernetes are used here."
+
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			result := svc.Diff(keywords, extracted)
+			if result.TotalJDKeywords != 3 {
+				t.Errorf("TotalJDKeywords = %d, want 3", result.TotalJDKeywords)
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+// TestDiff_EmptyStringKeyword_IsDropped verifies that empty/whitespace keywords
+// are dropped rather than compiled into a pattern that matches everything.
+func TestDiff_EmptyStringKeyword_IsDropped(t *testing.T) {
+	svc := newService()
+
+	result := svc.Diff([]string{""}, "anything goes here")
+	if len(result.Matched) != 0 {
+		t.Errorf("empty-string keyword must not match anything, got Matched=%v", result.Matched)
+	}
+	if len(result.Dropped) != 1 {
+		t.Errorf("empty-string keyword must be in Dropped, got Dropped=%v", result.Dropped)
+	}
+}
+
+// TestDiff_WhitespaceKeyword_IsDropped verifies that whitespace-only keywords
+// are also dropped safely.
+func TestDiff_WhitespaceKeyword_IsDropped(t *testing.T) {
+	svc := newService()
+
+	result := svc.Diff([]string{"   "}, "anything goes here")
+	if len(result.Matched) != 0 {
+		t.Errorf("whitespace-only keyword must not match anything, got Matched=%v", result.Matched)
+	}
+	if len(result.Dropped) != 1 {
+		t.Errorf("whitespace-only keyword must be in Dropped, got Dropped=%v", result.Dropped)
 	}
 }
 
 // testLogHandler captures slog records for assertion in tests.
 type testLogHandler struct {
+	mu      sync.Mutex
 	records []slog.Record
 }
 
 func (h *testLogHandler) Enabled(_ context.Context, _ slog.Level) bool { return true }
 func (h *testLogHandler) Handle(_ context.Context, r slog.Record) error { //nolint:gocritic // slog.Handler interface requires value receiver
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	h.records = append(h.records, r)
 	return nil
 }
@@ -198,6 +256,8 @@ func TestDiff_LogsKeywordCounts(t *testing.T) {
 
 	svc.Diff(keywords, extracted)
 
+	handler.mu.Lock()
+	defer handler.mu.Unlock()
 	var found bool
 	for i := range handler.records {
 		if handler.records[i].Message != "survival.diff" {

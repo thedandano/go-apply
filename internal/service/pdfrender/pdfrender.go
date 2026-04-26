@@ -345,16 +345,22 @@ func validateLatin1Fields(sections *model.SectionMap) error {
 		}
 		return nil
 	}
-	// Contact
-	for _, f := range []struct{ name, val string }{
-		{"contact.name", sections.Contact.Name},
-		{"contact.email", sections.Contact.Email},
-		{"contact.phone", sections.Contact.Phone},
-		{"contact.location", sections.Contact.Location},
-	} {
-		if err := check(f.name, f.val); err != nil {
-			return err
+	checkAll := func(pairs ...struct{ name, val string }) error {
+		for _, f := range pairs {
+			if err := check(f.name, f.val); err != nil {
+				return err
+			}
 		}
+		return nil
+	}
+	// Contact
+	if err := checkAll(
+		struct{ name, val string }{"contact.name", sections.Contact.Name},
+		struct{ name, val string }{"contact.email", sections.Contact.Email},
+		struct{ name, val string }{"contact.phone", sections.Contact.Phone},
+		struct{ name, val string }{"contact.location", sections.Contact.Location},
+	); err != nil {
+		return err
 	}
 	for i, link := range sections.Contact.Links {
 		if err := check(fmt.Sprintf("contact.links[%d]", i), link); err != nil {
@@ -366,13 +372,14 @@ func validateLatin1Fields(sections *model.SectionMap) error {
 	}
 	for i, e := range sections.Experience {
 		p := fmt.Sprintf("experience[%d]", i)
-		for _, f := range []struct{ name, val string }{
-			{p + ".company", e.Company}, {p + ".role", e.Role},
-			{p + ".location", e.Location},
-		} {
-			if err := check(f.name, f.val); err != nil {
-				return err
-			}
+		if err := checkAll(
+			struct{ name, val string }{p + ".company", e.Company},
+			struct{ name, val string }{p + ".role", e.Role},
+			struct{ name, val string }{p + ".location", e.Location},
+			struct{ name, val string }{p + ".start_date", e.StartDate},
+			struct{ name, val string }{p + ".end_date", e.EndDate},
+		); err != nil {
+			return err
 		}
 		for j, b := range e.Bullets {
 			if err := check(fmt.Sprintf("%s.bullets[%d]", p, j), b); err != nil {
@@ -382,12 +389,15 @@ func validateLatin1Fields(sections *model.SectionMap) error {
 	}
 	for i, e := range sections.Education {
 		p := fmt.Sprintf("education[%d]", i)
-		for _, f := range []struct{ name, val string }{
-			{p + ".school", e.School}, {p + ".degree", e.Degree}, {p + ".details", e.Details},
-		} {
-			if err := check(f.name, f.val); err != nil {
-				return err
-			}
+		if err := checkAll(
+			struct{ name, val string }{p + ".school", e.School},
+			struct{ name, val string }{p + ".degree", e.Degree},
+			struct{ name, val string }{p + ".location", e.Location},
+			struct{ name, val string }{p + ".start_date", e.StartDate},
+			struct{ name, val string }{p + ".end_date", e.EndDate},
+			struct{ name, val string }{p + ".details", e.Details},
+		); err != nil {
+			return err
 		}
 	}
 	if sections.Skills != nil {
@@ -407,16 +417,121 @@ func validateLatin1Fields(sections *model.SectionMap) error {
 	}
 	for i, p2 := range sections.Projects {
 		p := fmt.Sprintf("projects[%d]", i)
-		for _, f := range []struct{ name, val string }{
-			{p + ".name", p2.Name}, {p + ".description", p2.Description},
-		} {
-			if err := check(f.name, f.val); err != nil {
+		if err := checkAll(
+			struct{ name, val string }{p + ".name", p2.Name},
+			struct{ name, val string }{p + ".description", p2.Description},
+			struct{ name, val string }{p + ".url", p2.URL},
+		); err != nil {
+			return err
+		}
+		for j, b := range p2.Bullets {
+			if err := check(fmt.Sprintf("%s.bullets[%d]", p, j), b); err != nil {
 				return err
 			}
 		}
 	}
+	for i, e := range sections.Certifications {
+		p := fmt.Sprintf("certifications[%d]", i)
+		if err := checkAll(
+			struct{ name, val string }{p + ".name", e.Name},
+			struct{ name, val string }{p + ".issuer", e.Issuer},
+			struct{ name, val string }{p + ".date", e.Date},
+		); err != nil {
+			return err
+		}
+	}
+	for i, e := range sections.Awards {
+		p := fmt.Sprintf("awards[%d]", i)
+		if err := checkAll(
+			struct{ name, val string }{p + ".title", e.Title},
+			struct{ name, val string }{p + ".date", e.Date},
+			struct{ name, val string }{p + ".details", e.Details},
+		); err != nil {
+			return err
+		}
+	}
+	for i, e := range sections.Volunteer {
+		p := fmt.Sprintf("volunteer[%d]", i)
+		if err := checkAll(
+			struct{ name, val string }{p + ".org", e.Org},
+			struct{ name, val string }{p + ".role", e.Role},
+			struct{ name, val string }{p + ".start_date", e.StartDate},
+			struct{ name, val string }{p + ".end_date", e.EndDate},
+		); err != nil {
+			return err
+		}
+		for j, b := range e.Bullets {
+			if err := check(fmt.Sprintf("%s.bullets[%d]", p, j), b); err != nil {
+				return err
+			}
+		}
+	}
+	for i, e := range sections.Publications {
+		p := fmt.Sprintf("publications[%d]", i)
+		if err := checkAll(
+			struct{ name, val string }{p + ".title", e.Title},
+			struct{ name, val string }{p + ".venue", e.Venue},
+			struct{ name, val string }{p + ".date", e.Date},
+			struct{ name, val string }{p + ".url", e.URL},
+		); err != nil {
+			return err
+		}
+	}
+	for i, e := range sections.Languages {
+		p := fmt.Sprintf("languages[%d]", i)
+		if err := checkAll(
+			struct{ name, val string }{p + ".name", e.Name},
+			struct{ name, val string }{p + ".proficiency", e.Proficiency},
+		); err != nil {
+			return err
+		}
+	}
+	for i, e := range sections.Speaking {
+		p := fmt.Sprintf("speaking[%d]", i)
+		if err := checkAll(
+			struct{ name, val string }{p + ".title", e.Title},
+			struct{ name, val string }{p + ".event", e.Event},
+			struct{ name, val string }{p + ".date", e.Date},
+			struct{ name, val string }{p + ".url", e.URL},
+		); err != nil {
+			return err
+		}
+	}
+	for i, e := range sections.OpenSource {
+		p := fmt.Sprintf("open_source[%d]", i)
+		if err := checkAll(
+			struct{ name, val string }{p + ".project", e.Project},
+			struct{ name, val string }{p + ".role", e.Role},
+			struct{ name, val string }{p + ".url", e.URL},
+			struct{ name, val string }{p + ".description", e.Description},
+		); err != nil {
+			return err
+		}
+	}
+	for i, e := range sections.Patents {
+		p := fmt.Sprintf("patents[%d]", i)
+		if err := checkAll(
+			struct{ name, val string }{p + ".title", e.Title},
+			struct{ name, val string }{p + ".number", e.Number},
+			struct{ name, val string }{p + ".date", e.Date},
+			struct{ name, val string }{p + ".url", e.URL},
+		); err != nil {
+			return err
+		}
+	}
 	for i, e := range sections.Interests {
 		if err := check(fmt.Sprintf("interests[%d].name", i), e.Name); err != nil {
+			return err
+		}
+	}
+	for i, e := range sections.References {
+		p := fmt.Sprintf("references[%d]", i)
+		if err := checkAll(
+			struct{ name, val string }{p + ".name", e.Name},
+			struct{ name, val string }{p + ".title", e.Title},
+			struct{ name, val string }{p + ".company", e.Company},
+			struct{ name, val string }{p + ".contact", e.Contact},
+		); err != nil {
 			return err
 		}
 	}

@@ -643,8 +643,8 @@ func HandlePreviewATSExtraction(ctx context.Context, req *mcp.CallToolRequest) *
 var renderSvc = renderPkg.New()
 
 // HandlePreviewATSExtractionWithConfig is the full handler with optional injected deps (for tests).
-// Returns the constructed text for the best resume in the session — today an identity pass-through;
-// the seam exists for when the render/extract packages gain real implementations.
+// Renders the best resume to PDF, extracts plain text via pdftotext, and returns a
+// keyword-survival diff showing which JD keywords survived the render→extract pipeline.
 func HandlePreviewATSExtractionWithConfig(ctx context.Context, req *mcp.CallToolRequest, deps *pipeline.ApplyConfig) *mcp.CallToolResult {
 	sessionID := req.GetString("session_id", "")
 	if sessionID == "" {
@@ -668,7 +668,9 @@ func HandlePreviewATSExtractionWithConfig(ctx context.Context, req *mcp.CallTool
 	if deps == nil {
 		_, liveDeps, err := loadDeps()
 		if err != nil {
-			return envelopeResult(stageErrorEnvelope(sessionID, "preview_ats_extraction", "config_error", err.Error(), true))
+			slog.ErrorContext(ctx, "preview_ats_extraction: dependency load failed", slog.Any("error", err))
+			return envelopeResult(stageErrorEnvelope(sessionID, "preview_ats_extraction", "config_error",
+				"server configuration error — check server logs", true))
 		}
 		deps = &liveDeps
 	}
@@ -724,10 +726,15 @@ func HandlePreviewATSExtractionWithConfig(ctx context.Context, req *mcp.CallTool
 	pd.SectionsUsed = true
 
 	// Derive deduplicated keyword list from ScoreResult for the best resume.
+	// Allocate a fresh slice to avoid aliasing the session's stored Keywords slices.
 	kw := sess.ScoreResult.Scores[label].Keywords
-	raw := append(append(kw.ReqMatched, kw.ReqUnmatched...), append(kw.PrefMatched, kw.PrefUnmatched...)...)
+	raw := make([]string, 0, len(kw.ReqMatched)+len(kw.ReqUnmatched)+len(kw.PrefMatched)+len(kw.PrefUnmatched))
+	raw = append(raw, kw.ReqMatched...)
+	raw = append(raw, kw.ReqUnmatched...)
+	raw = append(raw, kw.PrefMatched...)
+	raw = append(raw, kw.PrefUnmatched...)
 	seen := make(map[string]struct{}, len(raw))
-	unique := raw[:0]
+	unique := make([]string, 0, len(raw))
 	for _, k := range raw {
 		if _, ok := seen[k]; !ok {
 			seen[k] = struct{}{}

@@ -4,6 +4,7 @@ package survival
 import (
 	"log/slog"
 	"regexp"
+	"strings"
 	"sync"
 
 	"github.com/thedandano/go-apply/internal/model"
@@ -27,10 +28,12 @@ func (s *Service) Diff(keywords []string, extractedText string) model.KeywordSur
 	dropped := []string{}
 
 	for _, kw := range keywords {
-		if s.pattern(kw).MatchString(extractedText) {
-			matched = append(matched, kw)
-		} else {
+		// Empty or whitespace-only keywords cannot match anything meaningful;
+		// skip pattern compilation (which would produce `(?i)` matching everything).
+		if strings.TrimSpace(kw) == "" || !s.pattern(kw).MatchString(extractedText) {
 			dropped = append(dropped, kw)
+		} else {
+			matched = append(matched, kw)
 		}
 	}
 

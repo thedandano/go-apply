@@ -6,5 +6,3 @@ type KeywordSurvival struct {
 	Matched         []string `json:"matched"`
 	TotalJDKeywords int      `json:"total_jd_keywords"`
 }
-
-var _ = KeywordSurvival{}

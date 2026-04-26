@@ -1023,19 +1023,10 @@ func TestHandleSubmitTailorT2_HappyPath_ReturnsNewScore(t *testing.T) {
 	}
 }
 
-// ── T007: preview_ats_extraction hard-fail tests (RED STATE until T012) ───────
+// ── preview_ats_extraction hard-fail tests ────────────────────────────────────
 //
-// T012 must:
-//   - Add PDFRenderer port.PDFRenderer to pipeline.ApplyConfig (field: cfg.PDFRenderer)
-//   - Add Extractor port.Extractor to pipeline.ApplyConfig (field: cfg.Extractor)
-//   - Remove the silent fallback to rawText when LoadSections fails → return stageErrorEnvelope "no_sections_data"
-//   - Remove the silent fallback when Render fails → return stageErrorEnvelope "render_failed"
-//   - Remove the silent fallback when Extract fails → return stageErrorEnvelope "extract_failed"
-//
-// NOTE: TestHandlePreviewATSExtraction_ReturnsConstructedText (line 393) uses
-// stubApplyConfigForSession() whose LoadSections returns ErrSectionsMissing.
-// After T012 removes the fallback, that test will break — T012 must migrate it
-// to a sections-bearing stub (e.g., stubApplyConfigWithSkillsLoader).
+// All failure modes hard-fail with descriptive error codes. There is no silent fallback.
+// Tests here assert the specific error code returned for each failure scenario.
 
 // stubPDFRenderer is an injectable PDF renderer for tests.
 // successPDF controls whether RenderPDF succeeds (returns fake PDF bytes) or fails.
@@ -1113,9 +1104,6 @@ func buildScoredSession(t *testing.T, cfg *pipeline.ApplyConfig) string {
 // TestHandlePreviewATSExtraction_NoSectionsSidecar_HardFails asserts that when
 // LoadSections returns an error the handler returns status="error" with
 // error_code="no_sections_data" instead of silently falling back to raw text.
-//
-// RED STATE: current code falls back to rawText and returns status="ok".
-// This test will pass after T012 removes the silent fallback.
 func TestHandlePreviewATSExtraction_NoSectionsSidecar_HardFails(t *testing.T) {
 	cfg := stubApplyConfigForSession() // stubResumeRepo.LoadSections returns ErrSectionsMissing
 
@@ -1130,7 +1118,7 @@ func TestHandlePreviewATSExtraction_NoSectionsSidecar_HardFails(t *testing.T) {
 		t.Fatalf("preview_ats_extraction not JSON: %v — raw: %s", err, text)
 	}
 	if env["status"] != "error" {
-		t.Errorf("status = %v, want error (T012 must remove silent rawText fallback) — full: %s", env["status"], text)
+		t.Errorf("status = %v, want error — full: %s", env["status"], text)
 	}
 	errObj, _ := env["error"].(map[string]any)
 	if errObj == nil || errObj["code"] != "no_sections_data" {
@@ -1147,12 +1135,8 @@ func TestHandlePreviewATSExtraction_NoSectionsSidecar_HardFails(t *testing.T) {
 // TestHandlePreviewATSExtraction_RenderFails_ReturnsRenderFailedCode asserts that
 // when the PDF renderer fails the handler returns status="error" with
 // error_code="render_failed".
-//
-// RED STATE: this test will not compile until T012 adds PDFRenderer to
-// pipeline.ApplyConfig. The compile error is the expected red state.
 func TestHandlePreviewATSExtraction_RenderFails_ReturnsRenderFailedCode(t *testing.T) {
 	cfg := stubApplyConfigWithSkillsLoader() // LoadSections succeeds
-	// T012 must add: cfg.PDFRenderer = &stubPDFRenderer{failRender: true}
 	cfg.PDFRenderer = &stubPDFRenderer{failRender: true}
 	cfg.Extractor = &stubExtractor{failExtract: false}
 	cfg.SurvivalDiffer = &stubSurvivalDiffer{}
@@ -1168,7 +1152,7 @@ func TestHandlePreviewATSExtraction_RenderFails_ReturnsRenderFailedCode(t *testi
 		t.Fatalf("preview_ats_extraction not JSON: %v — raw: %s", err, text)
 	}
 	if env["status"] != "error" {
-		t.Errorf("status = %v, want error (T012 must replace render fallback with hard-fail) — full: %s", env["status"], text)
+		t.Errorf("status = %v, want error — full: %s", env["status"], text)
 	}
 	errObj, _ := env["error"].(map[string]any)
 	if errObj == nil || errObj["code"] != "render_failed" {
@@ -1179,12 +1163,8 @@ func TestHandlePreviewATSExtraction_RenderFails_ReturnsRenderFailedCode(t *testi
 // TestHandlePreviewATSExtraction_ExtractFails_ReturnsExtractFailedCode asserts that
 // when the PDF extractor fails the handler returns status="error" with
 // error_code="extract_failed".
-//
-// RED STATE: this test will not compile until T012 adds both PDFRenderer and
-// Extractor to pipeline.ApplyConfig. The compile error is the expected red state.
 func TestHandlePreviewATSExtraction_ExtractFails_ReturnsExtractFailedCode(t *testing.T) {
-	cfg := stubApplyConfigWithSkillsLoader() // LoadSections succeeds
-	// T012 must add: cfg.PDFRenderer + cfg.Extractor to pipeline.ApplyConfig
+	cfg := stubApplyConfigWithSkillsLoader()              // LoadSections succeeds
 	cfg.PDFRenderer = &stubPDFRenderer{failRender: false} // render succeeds, returns fake PDF bytes
 	cfg.Extractor = &stubExtractor{failExtract: true}     // extract fails
 	cfg.SurvivalDiffer = &stubSurvivalDiffer{}
@@ -1200,7 +1180,7 @@ func TestHandlePreviewATSExtraction_ExtractFails_ReturnsExtractFailedCode(t *tes
 		t.Fatalf("preview_ats_extraction not JSON: %v — raw: %s", err, text)
 	}
 	if env["status"] != "error" {
-		t.Errorf("status = %v, want error (T012 must replace extract fallback with hard-fail) — full: %s", env["status"], text)
+		t.Errorf("status = %v, want error — full: %s", env["status"], text)
 	}
 	errObj, _ := env["error"].(map[string]any)
 	if errObj == nil || errObj["code"] != "extract_failed" {
@@ -1208,14 +1188,11 @@ func TestHandlePreviewATSExtraction_ExtractFails_ReturnsExtractFailedCode(t *tes
 	}
 }
 
-// ── T014: keyword_survival presence tests (RED STATE until T015/T016) ─────────
+// ── keyword_survival tests ────────────────────────────────────────────────────
 
 // TestHandlePreviewATSExtraction_KeywordSurvivalPresent asserts that the
 // preview_ats_extraction response includes a "keyword_survival" field with the
 // expected structure: dropped, matched, and total_jd_keywords keys.
-//
-// RED STATE: previewData struct does not yet have a KeywordSurvival field.
-// This test will pass after T015 implements survival.Service and T016 wires it.
 func TestHandlePreviewATSExtraction_KeywordSurvivalPresent(t *testing.T) {
 	cfg := stubApplyConfigWithSkillsLoader()
 	cfg.PDFRenderer = &stubPDFRenderer{failRender: false}
@@ -1326,6 +1303,60 @@ func TestHandlePreviewATSExtraction_NilExtractor_ReturnsConfigurationError(t *te
 	errObj, _ := env["error"].(map[string]any)
 	if errObj == nil || errObj["code"] != "configuration_error" {
 		t.Errorf("expected error.code=configuration_error, got %v", errObj)
+	}
+}
+
+// TestHandlePreviewATSExtraction_NilSurvivalDiffer_ReturnsConfigurationError verifies
+// that a nil SurvivalDiffer returns a clean configuration_error instead of panicking.
+func TestHandlePreviewATSExtraction_NilSurvivalDiffer_ReturnsConfigurationError(t *testing.T) {
+	cfg := stubApplyConfigWithSkillsLoader()
+	cfg.PDFRenderer = &stubPDFRenderer{failRender: false}
+	cfg.Extractor = &stubExtractor{failExtract: false}
+	cfg.SurvivalDiffer = nil
+
+	sessionID := buildScoredSession(t, &cfg)
+
+	previewReq := callToolRequest("preview_ats_extraction", map[string]any{"session_id": sessionID})
+	result := mcpserver.HandlePreviewATSExtractionWithConfig(context.Background(), &previewReq, &cfg)
+	text := extractText(t, result)
+
+	var env map[string]any
+	if err := json.Unmarshal([]byte(text), &env); err != nil {
+		t.Fatalf("not JSON: %v — raw: %s", err, text)
+	}
+	if env["status"] != "error" {
+		t.Errorf("status = %v, want error for nil SurvivalDiffer", env["status"])
+	}
+	errObj, _ := env["error"].(map[string]any)
+	if errObj == nil || errObj["code"] != "configuration_error" {
+		t.Errorf("expected error.code=configuration_error, got %v", errObj)
+	}
+}
+
+// TestHandlePreviewATSExtraction_LoadSectionsFails_WinsOverNilDeps verifies that
+// no_sections_data is returned even when all deps are nil — user error takes priority
+// over server misconfiguration so the caller gets an actionable message.
+func TestHandlePreviewATSExtraction_LoadSectionsFails_WinsOverNilDeps(t *testing.T) {
+	// stubApplyConfigForSession uses stubResumeRepo which returns ErrSectionsMissing.
+	cfg := stubApplyConfigForSession()
+	// Deliberately leave PDFRenderer, Extractor, SurvivalDiffer nil.
+
+	sessionID := buildScoredSession(t, &cfg)
+
+	previewReq := callToolRequest("preview_ats_extraction", map[string]any{"session_id": sessionID})
+	result := mcpserver.HandlePreviewATSExtractionWithConfig(context.Background(), &previewReq, &cfg)
+	text := extractText(t, result)
+
+	var env map[string]any
+	if err := json.Unmarshal([]byte(text), &env); err != nil {
+		t.Fatalf("not JSON: %v — raw: %s", err, text)
+	}
+	if env["status"] != "error" {
+		t.Fatalf("status = %v, want error — full: %s", env["status"], text)
+	}
+	errObj, _ := env["error"].(map[string]any)
+	if errObj == nil || errObj["code"] != "no_sections_data" {
+		t.Errorf("expected error.code=no_sections_data (user error before server misconfig), got %v", errObj)
 	}
 }
 

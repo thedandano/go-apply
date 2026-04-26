@@ -64,9 +64,12 @@ func (s *Service) Extract(ctx context.Context, data []byte) (string, error) {
 
 	cmd := s.cmdFunc(tctx, path, "-", "-")
 	cmd.Stdin = bytes.NewReader(data)
+	// cappedWriter caps stdout mid-stream so pathological PDFs cannot exhaust RAM
+	// before cmd.Run() returns.
 	var stdout bytes.Buffer
+	cw := &cappedWriter{w: &stdout, remaining: maxOutputBytes}
+	cmd.Stdout = cw
 	var stderr bytes.Buffer
-	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
@@ -74,11 +77,34 @@ func (s *Service) Extract(ctx context.Context, data []byte) (string, error) {
 		return "", fmt.Errorf("pdftotext: exit 1: %s: %w", sanitized, err)
 	}
 
-	if stdout.Len() > maxOutputBytes {
+	if cw.exceeded {
 		return "", fmt.Errorf("extract: pdftotext output exceeded maximum size of %d bytes", maxOutputBytes)
 	}
 
 	return stdout.String(), nil
+}
+
+// cappedWriter is an io.Writer that forwards bytes to w up to remaining bytes,
+// then silently discards writes and marks exceeded=true.
+type cappedWriter struct {
+	w         *bytes.Buffer
+	remaining int
+	exceeded  bool
+}
+
+func (c *cappedWriter) Write(p []byte) (int, error) {
+	if c.exceeded {
+		return len(p), nil
+	}
+	if len(p) > c.remaining {
+		c.exceeded = true
+		_, err := c.w.Write(p[:c.remaining])
+		c.remaining = 0
+		return len(p), err
+	}
+	n, err := c.w.Write(p)
+	c.remaining -= n
+	return n, err
 }
 
 // sanitizeStderr caps raw stderr to 256 bytes and strips all bytes outside
