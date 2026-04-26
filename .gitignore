@@ -24,3 +24,6 @@ openspec/
 # Claude local tooling (skills, commands — not project source)
 .claude/commands/
 .claude/skills/
+
+# Speckit tooling (local workflow — not project source)
+.specify/

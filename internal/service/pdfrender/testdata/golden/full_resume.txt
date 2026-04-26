@@ -1,0 +1,57 @@
+Alice Engineer
+alice@example.com | 555-0100 | San Francisco, CA | linkedin.com/in/alice | github.com/alice
+
+SUMMARY
+Seasoned software engineer with 10+ years building distributed systems.
+
+EXPERIENCE
+BigCo | Staff Engineer | 2019-03 - Present (Remote)
+- Led migration of monolith to microservices, reducing p99 latency by 45%.
+- Mentored 8 engineers across 3 time zones.
+
+EDUCATION
+State University | BSc Computer Science | 2013-05
+
+SKILLS
+Cloud: AWS, GCP, Kubernetes
+Languages: Go, Python, TypeScript
+
+PROJECTS
+go-apply (github.com/alice/go-apply)
+Job application CLI with LLM-powered resume tailoring.
+
+CERTIFICATIONS
+AWS Certified Solutions Architect â€” Amazon (2022-06)
+
+AWARDS
+Hackathon Champion (2021)
+Best developer tool.
+
+VOLUNTEER
+Code for Good | Mentor
+- Taught Python to 20 high school students.
+
+PUBLICATIONS
+Consistency Models in Practice â€” USENIX ATC (2020)
+
+LANGUAGES
+English: Native
+Spanish: Conversational
+
+SPEAKING ENGAGEMENTS
+Building Reliable Pipelines â€” GopherCon (2023)
+
+OPEN SOURCE
+go-apply â€” Author
+github.com/alice/go-apply
+
+PATENTS
+Distributed Cache Invalidation (US20230001234) 2023
+
+INTERESTS
+Open Source, Rock Climbing
+
+REFERENCES
+Available upon request
+
+

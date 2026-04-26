@@ -3,12 +3,16 @@ package mcpserver_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"os/exec"
 	"strings"
 	"testing"
 
 	"github.com/thedandano/go-apply/internal/config"
 	"github.com/thedandano/go-apply/internal/mcpserver"
 	"github.com/thedandano/go-apply/internal/model"
+	extractPkg "github.com/thedandano/go-apply/internal/service/extract"
+	pdfrender "github.com/thedandano/go-apply/internal/service/pdfrender"
 	"github.com/thedandano/go-apply/internal/service/pipeline"
 )
 
@@ -390,8 +394,12 @@ func TestHandleSubmitKeywordsWithConfig_Sections_PresentWhenSidecarExists(t *tes
 }
 
 // US3: preview_ats_extraction returns constructed text for the best resume in the session.
+// Uses stubApplyConfigWithSkillsLoader so LoadSections succeeds, and injects stub
+// PDFRenderer + Extractor so the test does not require a real pdftotext installation.
 func TestHandlePreviewATSExtraction_ReturnsConstructedText(t *testing.T) {
-	cfg := stubApplyConfigForSession()
+	cfg := stubApplyConfigWithSkillsLoader()
+	cfg.PDFRenderer = &stubPDFRenderer{failRender: false}
+	cfg.Extractor = &stubExtractor{failExtract: false}
 
 	loadReq := callToolRequest("load_jd", map[string]any{"jd_raw_text": "Senior Go engineer."})
 	loadText := extractText(t, mcpserver.HandleLoadJDWithConfig(context.Background(), &loadReq, &cfg))
@@ -489,7 +497,12 @@ func stubApplyConfigWithTier4Sections() pipeline.ApplyConfig {
 }
 
 func TestHandlePreviewATSExtraction_Tier4SectionInConstructedText(t *testing.T) {
+	if _, err := exec.LookPath("pdftotext"); err != nil {
+		t.Skip("pdftotext not installed — skipping Tier 4 content check")
+	}
 	cfg := stubApplyConfigWithTier4Sections()
+	cfg.PDFRenderer = pdfrender.New()
+	cfg.Extractor = extractPkg.New()
 
 	loadReq := callToolRequest("load_jd", map[string]any{"jd_raw_text": "Senior Go engineer."})
 	loadText := extractText(t, mcpserver.HandleLoadJDWithConfig(context.Background(), &loadReq, &cfg))
@@ -1004,6 +1017,211 @@ func TestHandleSubmitTailorT2_HappyPath_ReturnsNewScore(t *testing.T) {
 	}
 	if _, ok := data["edits_rejected"]; !ok {
 		t.Errorf("expected edits_rejected key in data, got: %s", text)
+	}
+}
+
+// ── T007: preview_ats_extraction hard-fail tests (RED STATE until T012) ───────
+//
+// T012 must:
+//   - Add PDFRenderer port.PDFRenderer to pipeline.ApplyConfig (field: cfg.PDFRenderer)
+//   - Add Extractor port.Extractor to pipeline.ApplyConfig (field: cfg.Extractor)
+//   - Remove the silent fallback to rawText when LoadSections fails → return stageErrorEnvelope "no_sections_data"
+//   - Remove the silent fallback when Render fails → return stageErrorEnvelope "render_failed"
+//   - Remove the silent fallback when Extract fails → return stageErrorEnvelope "extract_failed"
+//
+// NOTE: TestHandlePreviewATSExtraction_ReturnsConstructedText (line 393) uses
+// stubApplyConfigForSession() whose LoadSections returns ErrSectionsMissing.
+// After T012 removes the fallback, that test will break — T012 must migrate it
+// to a sections-bearing stub (e.g., stubApplyConfigWithSkillsLoader).
+
+// stubPDFRenderer is an injectable PDF renderer for tests.
+// successPDF controls whether RenderPDF succeeds (returns fake PDF bytes) or fails.
+type stubPDFRenderer struct {
+	failRender bool
+}
+
+func (s *stubPDFRenderer) RenderPDF(_ *model.SectionMap) ([]byte, error) {
+	if s.failRender {
+		return nil, fmt.Errorf("render error")
+	}
+	return []byte("%PDF-1.4 fake"), nil
+}
+
+// stubExtractor is an injectable text extractor for tests.
+// failExtract controls whether Extract succeeds or fails.
+type stubExtractor struct {
+	failExtract bool
+}
+
+func (s *stubExtractor) Extract(_ []byte) (string, error) {
+	if s.failExtract {
+		return "", fmt.Errorf("extract error")
+	}
+	return "extracted text", nil
+}
+
+// buildScoredSession creates a scored session via load_jd + submit_keywords and returns the session ID.
+func buildScoredSession(t *testing.T, cfg *pipeline.ApplyConfig) string {
+	t.Helper()
+	loadReq := callToolRequest("load_jd", map[string]any{"jd_raw_text": "Senior Go engineer."})
+	loadText := extractText(t, mcpserver.HandleLoadJDWithConfig(context.Background(), &loadReq, cfg))
+	var loadEnv map[string]any
+	if err := json.Unmarshal([]byte(loadText), &loadEnv); err != nil {
+		t.Fatalf("load_jd not JSON: %v — raw: %s", err, loadText)
+	}
+	sessionID, _ := loadEnv["session_id"].(string)
+	if sessionID == "" {
+		t.Fatal("load_jd returned no session_id")
+	}
+
+	const jdJSON = `{"title":"Go Engineer","company":"Acme","required":["go"],"preferred":[]}`
+	kwReq := callToolRequest("submit_keywords", map[string]any{"session_id": sessionID, "jd_json": jdJSON})
+	mcpserver.HandleSubmitKeywordsWithConfig(context.Background(), &kwReq, cfg, &config.Config{YearsOfExperience: 5})
+	return sessionID
+}
+
+// TestHandlePreviewATSExtraction_NoSectionsSidecar_HardFails asserts that when
+// LoadSections returns an error the handler returns status="error" with
+// error_code="no_sections_data" instead of silently falling back to raw text.
+//
+// RED STATE: current code falls back to rawText and returns status="ok".
+// This test will pass after T012 removes the silent fallback.
+func TestHandlePreviewATSExtraction_NoSectionsSidecar_HardFails(t *testing.T) {
+	cfg := stubApplyConfigForSession() // stubResumeRepo.LoadSections returns ErrSectionsMissing
+
+	sessionID := buildScoredSession(t, &cfg)
+
+	previewReq := callToolRequest("preview_ats_extraction", map[string]any{"session_id": sessionID})
+	result := mcpserver.HandlePreviewATSExtractionWithConfig(context.Background(), &previewReq, &cfg)
+	text := extractText(t, result)
+
+	var env map[string]any
+	if err := json.Unmarshal([]byte(text), &env); err != nil {
+		t.Fatalf("preview_ats_extraction not JSON: %v — raw: %s", err, text)
+	}
+	if env["status"] != "error" {
+		t.Errorf("status = %v, want error (T012 must remove silent rawText fallback) — full: %s", env["status"], text)
+	}
+	errObj, _ := env["error"].(map[string]any)
+	if errObj == nil || errObj["code"] != "no_sections_data" {
+		t.Errorf("expected error.code=no_sections_data, got %v — full: %s", errObj, text)
+	}
+	// Ensure no constructed_text is leaked through the data field.
+	if data, ok := env["data"].(map[string]any); ok && data != nil {
+		if data["constructed_text"] != nil && data["constructed_text"] != "" {
+			t.Errorf("constructed_text must not be present on error, got: %v", data["constructed_text"])
+		}
+	}
+}
+
+// TestHandlePreviewATSExtraction_RenderFails_ReturnsRenderFailedCode asserts that
+// when the PDF renderer fails the handler returns status="error" with
+// error_code="render_failed".
+//
+// RED STATE: this test will not compile until T012 adds PDFRenderer to
+// pipeline.ApplyConfig. The compile error is the expected red state.
+func TestHandlePreviewATSExtraction_RenderFails_ReturnsRenderFailedCode(t *testing.T) {
+	cfg := stubApplyConfigWithSkillsLoader() // LoadSections succeeds
+	// T012 must add: cfg.PDFRenderer = &stubPDFRenderer{failRender: true}
+	cfg.PDFRenderer = &stubPDFRenderer{failRender: true}
+
+	sessionID := buildScoredSession(t, &cfg)
+
+	previewReq := callToolRequest("preview_ats_extraction", map[string]any{"session_id": sessionID})
+	result := mcpserver.HandlePreviewATSExtractionWithConfig(context.Background(), &previewReq, &cfg)
+	text := extractText(t, result)
+
+	var env map[string]any
+	if err := json.Unmarshal([]byte(text), &env); err != nil {
+		t.Fatalf("preview_ats_extraction not JSON: %v — raw: %s", err, text)
+	}
+	if env["status"] != "error" {
+		t.Errorf("status = %v, want error (T012 must replace render fallback with hard-fail) — full: %s", env["status"], text)
+	}
+	errObj, _ := env["error"].(map[string]any)
+	if errObj == nil || errObj["code"] != "render_failed" {
+		t.Errorf("expected error.code=render_failed, got %v — full: %s", errObj, text)
+	}
+}
+
+// TestHandlePreviewATSExtraction_ExtractFails_ReturnsExtractFailedCode asserts that
+// when the PDF extractor fails the handler returns status="error" with
+// error_code="extract_failed".
+//
+// RED STATE: this test will not compile until T012 adds both PDFRenderer and
+// Extractor to pipeline.ApplyConfig. The compile error is the expected red state.
+func TestHandlePreviewATSExtraction_ExtractFails_ReturnsExtractFailedCode(t *testing.T) {
+	cfg := stubApplyConfigWithSkillsLoader() // LoadSections succeeds
+	// T012 must add: cfg.PDFRenderer + cfg.Extractor to pipeline.ApplyConfig
+	cfg.PDFRenderer = &stubPDFRenderer{failRender: false} // render succeeds, returns fake PDF bytes
+	cfg.Extractor = &stubExtractor{failExtract: true}     // extract fails
+
+	sessionID := buildScoredSession(t, &cfg)
+
+	previewReq := callToolRequest("preview_ats_extraction", map[string]any{"session_id": sessionID})
+	result := mcpserver.HandlePreviewATSExtractionWithConfig(context.Background(), &previewReq, &cfg)
+	text := extractText(t, result)
+
+	var env map[string]any
+	if err := json.Unmarshal([]byte(text), &env); err != nil {
+		t.Fatalf("preview_ats_extraction not JSON: %v — raw: %s", err, text)
+	}
+	if env["status"] != "error" {
+		t.Errorf("status = %v, want error (T012 must replace extract fallback with hard-fail) — full: %s", env["status"], text)
+	}
+	errObj, _ := env["error"].(map[string]any)
+	if errObj == nil || errObj["code"] != "extract_failed" {
+		t.Errorf("expected error.code=extract_failed, got %v — full: %s", errObj, text)
+	}
+}
+
+// ── T014: keyword_survival presence tests (RED STATE until T015/T016) ─────────
+
+// TestHandlePreviewATSExtraction_KeywordSurvivalPresent asserts that the
+// preview_ats_extraction response includes a "keyword_survival" field with the
+// expected structure: dropped, matched, and total_jd_keywords keys.
+//
+// RED STATE: previewData struct does not yet have a KeywordSurvival field.
+// This test will pass after T015 implements survival.Service and T016 wires it.
+func TestHandlePreviewATSExtraction_KeywordSurvivalPresent(t *testing.T) {
+	cfg := stubApplyConfigWithSkillsLoader()
+	cfg.PDFRenderer = &stubPDFRenderer{failRender: false}
+	cfg.Extractor = &stubExtractor{failExtract: false}
+
+	sessionID := buildScoredSession(t, &cfg)
+
+	previewReq := callToolRequest("preview_ats_extraction", map[string]any{"session_id": sessionID})
+	result := mcpserver.HandlePreviewATSExtractionWithConfig(context.Background(), &previewReq, &cfg)
+	text := extractText(t, result)
+
+	var env map[string]any
+	if err := json.Unmarshal([]byte(text), &env); err != nil {
+		t.Fatalf("preview_ats_extraction not JSON: %v — raw: %s", err, text)
+	}
+	if env["status"] != "ok" {
+		t.Fatalf("status = %v, want ok — full: %s", env["status"], text)
+	}
+	data, _ := env["data"].(map[string]any)
+	if data == nil {
+		t.Fatal("expected data field in response")
+	}
+	// keyword_survival field must be present (fails until T016 adds it to previewData)
+	ks, ok := data["keyword_survival"]
+	if !ok {
+		t.Fatalf("keyword_survival missing from response data; got keys: %v", data)
+	}
+	ksMap, ok := ks.(map[string]any)
+	if !ok {
+		t.Fatalf("keyword_survival is not an object: %T", ks)
+	}
+	if _, ok := ksMap["dropped"]; !ok {
+		t.Error("keyword_survival missing 'dropped' key")
+	}
+	if _, ok := ksMap["matched"]; !ok {
+		t.Error("keyword_survival missing 'matched' key")
+	}
+	if _, ok := ksMap["total_jd_keywords"]; !ok {
+		t.Error("keyword_survival missing 'total_jd_keywords' key")
 	}
 }
 

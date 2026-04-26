@@ -62,6 +62,12 @@ type ApplyConfig struct {
 	// Orchestrator is optional. When set, it is used for LLM decision points
 	// (keyword extraction) instead of the raw LLMClient. In MCP mode, leave nil.
 	Orchestrator port.Orchestrator
+	// PDFRenderer renders a SectionMap to PDF bytes for ATS extraction.
+	// Required for preview_ats_extraction; must not be nil in production.
+	PDFRenderer port.PDFRenderer
+	// Extractor extracts plain text from PDF bytes for ATS extraction.
+	// Required for preview_ats_extraction; must not be nil in production.
+	Extractor port.Extractor
 }
 
 // NewApplyPipeline constructs an ApplyPipeline with all dependencies injected via ApplyConfig.
