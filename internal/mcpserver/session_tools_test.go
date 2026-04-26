@@ -1029,7 +1029,7 @@ func TestHandleSubmitTailorT2_HappyPath_ReturnsNewScore(t *testing.T) {
 // Tests here assert the specific error code returned for each failure scenario.
 
 // stubPDFRenderer is an injectable PDF renderer for tests.
-// successPDF controls whether RenderPDF succeeds (returns fake PDF bytes) or fails.
+// failRender, when true, causes RenderPDF to return an error.
 type stubPDFRenderer struct {
 	failRender bool
 }

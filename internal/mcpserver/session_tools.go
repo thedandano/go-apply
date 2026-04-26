@@ -55,7 +55,9 @@ func HandleLoadJDWithConfig(ctx context.Context, req *mcp.CallToolRequest, deps 
 	if deps == nil {
 		_, liveDeps, err := loadDeps()
 		if err != nil {
-			return envelopeResult(stageErrorEnvelope("", "load_jd", "config_error", err.Error(), true))
+			slog.ErrorContext(ctx, "load_jd: dependency load failed", slog.Any("error", err))
+			return envelopeResult(stageErrorEnvelope("", "load_jd", "config_error",
+				"server configuration error — check server logs", true))
 		}
 		deps = &liveDeps
 	}
@@ -134,7 +136,10 @@ func HandleSubmitKeywordsWithConfig(ctx context.Context, req *mcp.CallToolReques
 	if deps == nil {
 		liveCfg, liveDeps, err := loadDeps()
 		if err != nil {
-			return envelopeResult(stageErrorEnvelope(sessionID, "submit_keywords", "config_error", err.Error(), true))
+			slog.ErrorContext(ctx, "submit_keywords: dependency load failed",
+				slog.String("session_id", sessionID), slog.Any("error", err))
+			return envelopeResult(stageErrorEnvelope(sessionID, "submit_keywords", "config_error",
+				"server configuration error — check server logs", true))
 		}
 		deps = &liveDeps
 		if cfg == nil {
@@ -397,7 +402,10 @@ func HandleSubmitTailorT1WithConfig(ctx context.Context, req *mcp.CallToolReques
 	if deps == nil {
 		liveCfg, liveDeps, err := loadDeps()
 		if err != nil {
-			return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t1", "config_error", err.Error(), true))
+			slog.ErrorContext(ctx, "submit_tailor_t1: dependency load failed",
+				slog.String("session_id", sessionID), slog.Any("error", err))
+			return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t1", "config_error",
+				"server configuration error — check server logs", true))
 		}
 		deps = &liveDeps
 		if cfg == nil {
@@ -544,7 +552,10 @@ func HandleSubmitTailorT2WithConfig(ctx context.Context, req *mcp.CallToolReques
 	if deps == nil {
 		liveCfg, liveDeps, err := loadDeps()
 		if err != nil {
-			return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t2", "config_error", err.Error(), true))
+			slog.ErrorContext(ctx, "submit_tailor_t2: dependency load failed",
+				slog.String("session_id", sessionID), slog.Any("error", err))
+			return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t2", "config_error",
+				"server configuration error — check server logs", true))
 		}
 		deps = &liveDeps
 		if cfg == nil {

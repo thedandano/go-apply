@@ -98,9 +98,9 @@ func (c *cappedWriter) Write(p []byte) (int, error) {
 	}
 	if len(p) > c.remaining {
 		c.exceeded = true
-		_, err := c.w.Write(p[:c.remaining])
+		c.w.Write(p[:c.remaining]) //nolint:errcheck // buffer error irrelevant once cap exceeded; cw.exceeded checked post-run
 		c.remaining = 0
-		return len(p), err
+		return len(p), nil
 	}
 	n, err := c.w.Write(p)
 	c.remaining -= n
