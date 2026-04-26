@@ -12,9 +12,12 @@ import (
 	"github.com/thedandano/go-apply/internal/logger"
 	"github.com/thedandano/go-apply/internal/redact"
 	"github.com/thedandano/go-apply/internal/repository/fs"
+	extractPkg "github.com/thedandano/go-apply/internal/service/extract"
 	"github.com/thedandano/go-apply/internal/service/fetcher"
+	pdfrender "github.com/thedandano/go-apply/internal/service/pdfrender"
 	"github.com/thedandano/go-apply/internal/service/pipeline"
 	"github.com/thedandano/go-apply/internal/service/scorer"
+	"github.com/thedandano/go-apply/internal/service/survival"
 )
 
 // loadDeps loads configuration and wires all pipeline dependencies.
@@ -43,15 +46,18 @@ func loadDeps() (*config.Config, pipeline.ApplyConfig, error) {
 	fetcherSvc := fetcher.NewFallback(defaults, log)
 
 	deps := pipeline.ApplyConfig{
-		Fetcher:  fetcherSvc,
-		LLM:      nil,
-		Scorer:   scorerSvc,
-		CLGen:    nil,
-		Resumes:  resumeRepo,
-		Loader:   docLoader,
-		AppRepo:  appRepo,
-		Defaults: defaults,
-		Tailor:   nil,
+		Fetcher:        fetcherSvc,
+		LLM:            nil,
+		Scorer:         scorerSvc,
+		CLGen:          nil,
+		Resumes:        resumeRepo,
+		Loader:         docLoader,
+		AppRepo:        appRepo,
+		Defaults:       defaults,
+		Tailor:         nil,
+		PDFRenderer:    pdfrender.New(),
+		Extractor:      extractPkg.New(),
+		SurvivalDiffer: survival.New(),
 	}
 
 	r := redact.New(&redact.Profile{

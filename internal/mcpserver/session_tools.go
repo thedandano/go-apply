@@ -16,7 +16,6 @@ import (
 	"github.com/thedandano/go-apply/internal/model"
 	"github.com/thedandano/go-apply/internal/port"
 	mcppres "github.com/thedandano/go-apply/internal/presenter/mcp"
-	extractPkg "github.com/thedandano/go-apply/internal/service/extract"
 	"github.com/thedandano/go-apply/internal/service/pipeline"
 	renderPkg "github.com/thedandano/go-apply/internal/service/render"
 	"github.com/thedandano/go-apply/internal/service/tailor"
@@ -56,7 +55,9 @@ func HandleLoadJDWithConfig(ctx context.Context, req *mcp.CallToolRequest, deps 
 	if deps == nil {
 		_, liveDeps, err := loadDeps()
 		if err != nil {
-			return envelopeResult(stageErrorEnvelope("", "load_jd", "config_error", err.Error(), true))
+			slog.ErrorContext(ctx, "load_jd: dependency load failed", slog.Any("error", err))
+			return envelopeResult(stageErrorEnvelope("", "load_jd", "config_error",
+				"server configuration error — check server logs", true))
 		}
 		deps = &liveDeps
 	}
@@ -135,7 +136,10 @@ func HandleSubmitKeywordsWithConfig(ctx context.Context, req *mcp.CallToolReques
 	if deps == nil {
 		liveCfg, liveDeps, err := loadDeps()
 		if err != nil {
-			return envelopeResult(stageErrorEnvelope(sessionID, "submit_keywords", "config_error", err.Error(), true))
+			slog.ErrorContext(ctx, "submit_keywords: dependency load failed",
+				slog.String("session_id", sessionID), slog.Any("error", err))
+			return envelopeResult(stageErrorEnvelope(sessionID, "submit_keywords", "config_error",
+				"server configuration error — check server logs", true))
 		}
 		deps = &liveDeps
 		if cfg == nil {
@@ -262,7 +266,10 @@ func HandleFinalizeWithConfig(ctx context.Context, req *mcp.CallToolRequest, dep
 	if sess.URL != "" {
 		if deps == nil {
 			_, liveDeps, err := loadDeps()
-			if err == nil {
+			if err != nil {
+				slog.WarnContext(ctx, "finalize: dependency load failed; skipping persistence",
+					slog.String("session_id", sessionID), slog.Any("error", err))
+			} else {
 				deps = &liveDeps
 			}
 		}
@@ -347,24 +354,6 @@ func NextActionAfterT1(score float64) string {
 	return "tailor_t2"
 }
 
-// loadBestResumeText loads resume text for bestLabel from the repo.
-func loadBestResumeText(deps *pipeline.ApplyConfig, bestLabel string) (string, error) {
-	resumeFiles, err := deps.Resumes.ListResumes()
-	if err != nil {
-		return "", fmt.Errorf("list resumes: %w", err)
-	}
-	for _, r := range resumeFiles {
-		if r.Label == bestLabel {
-			text, loadErr := deps.Loader.Load(r.Path)
-			if loadErr != nil {
-				return "", fmt.Errorf("load resume %q: %w", bestLabel, loadErr)
-			}
-			return text, nil
-		}
-	}
-	return "", fmt.Errorf("resume %q not found", bestLabel)
-}
-
 // HandleSubmitTailorT1 is the exported handler for the "submit_tailor_t1" MCP tool.
 func HandleSubmitTailorT1(ctx context.Context, req *mcp.CallToolRequest) *mcp.CallToolResult {
 	return HandleSubmitTailorT1WithConfig(ctx, req, nil, nil)
@@ -416,7 +405,10 @@ func HandleSubmitTailorT1WithConfig(ctx context.Context, req *mcp.CallToolReques
 	if deps == nil {
 		liveCfg, liveDeps, err := loadDeps()
 		if err != nil {
-			return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t1", "config_error", err.Error(), true))
+			slog.ErrorContext(ctx, "submit_tailor_t1: dependency load failed",
+				slog.String("session_id", sessionID), slog.Any("error", err))
+			return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t1", "config_error",
+				"server configuration error — check server logs", true))
 		}
 		deps = &liveDeps
 		if cfg == nil {
@@ -563,7 +555,10 @@ func HandleSubmitTailorT2WithConfig(ctx context.Context, req *mcp.CallToolReques
 	if deps == nil {
 		liveCfg, liveDeps, err := loadDeps()
 		if err != nil {
-			return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t2", "config_error", err.Error(), true))
+			slog.ErrorContext(ctx, "submit_tailor_t2: dependency load failed",
+				slog.String("session_id", sessionID), slog.Any("error", err))
+			return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t2", "config_error",
+				"server configuration error — check server logs", true))
 		}
 		deps = &liveDeps
 		if cfg == nil {
@@ -658,16 +653,12 @@ func HandlePreviewATSExtraction(ctx context.Context, req *mcp.CallToolRequest) *
 	return HandlePreviewATSExtractionWithConfig(ctx, req, nil)
 }
 
-// renderSvc and extractSvc are package-level to allow future injection in tests.
-// Both are stateless; identity implementations today.
-var (
-	renderSvc  = renderPkg.New()
-	extractSvc = extractPkg.New()
-)
+// renderSvc is the package-level text renderer used by the T1/T2 tailor handlers.
+var renderSvc = renderPkg.New()
 
 // HandlePreviewATSExtractionWithConfig is the full handler with optional injected deps (for tests).
-// Returns the constructed text for the best resume in the session — today an identity pass-through;
-// the seam exists for when the render/extract packages gain real implementations.
+// Renders the best resume to PDF, extracts plain text via pdftotext, and returns a
+// keyword-survival diff showing which JD keywords survived the render→extract pipeline.
 func HandlePreviewATSExtractionWithConfig(ctx context.Context, req *mcp.CallToolRequest, deps *pipeline.ApplyConfig) *mcp.CallToolResult {
 	sessionID := req.GetString("session_id", "")
 	if sessionID == "" {
@@ -691,7 +682,10 @@ func HandlePreviewATSExtractionWithConfig(ctx context.Context, req *mcp.CallTool
 	if deps == nil {
 		_, liveDeps, err := loadDeps()
 		if err != nil {
-			return envelopeResult(stageErrorEnvelope(sessionID, "preview_ats_extraction", "config_error", err.Error(), true))
+			slog.ErrorContext(ctx, "preview_ats_extraction: dependency load failed",
+				slog.String("session_id", sessionID), slog.Any("error", err))
+			return envelopeResult(stageErrorEnvelope(sessionID, "preview_ats_extraction", "config_error",
+				"server configuration error — check server logs", true))
 		}
 		deps = &liveDeps
 	}
@@ -701,44 +695,68 @@ func HandlePreviewATSExtractionWithConfig(ctx context.Context, req *mcp.CallTool
 	type previewData struct {
 		Label           string `json:"label"`
 		ConstructedText string `json:"constructed_text"`
-		SectionsUsed    bool   `json:"sections_used"`
+		// SectionsUsed is always true in a success response (no fallback path exists after FR-005b).
+		SectionsUsed    bool                  `json:"sections_used"`
+		KeywordSurvival model.KeywordSurvival `json:"keyword_survival"`
 	}
 	pd := previewData{Label: label}
 
-	// Prefer sections → render → extract pipeline when a sidecar exists.
-	// Both render and extract are identity today; swapping in real implementations
-	// requires no changes here.
-	if sections, sectErr := deps.Resumes.LoadSections(label); sectErr == nil {
-		rendered, renderErr := renderSvc.Render(&sections)
-		if renderErr != nil {
-			slog.WarnContext(ctx, "preview_ats_extraction: render failed, falling back to raw text",
-				slog.String("session_id", sessionID), slog.Any("error", renderErr))
-		} else {
-			extracted, extErr := extractSvc.Extract([]byte(rendered))
-			if extErr != nil {
-				slog.WarnContext(ctx, "preview_ats_extraction: extract failed, falling back to raw text",
-					slog.String("session_id", sessionID), slog.Any("error", extErr))
-			} else {
-				pd.ConstructedText = extracted
-				pd.SectionsUsed = true
-			}
-		}
+	// LoadSections first: user-fixable error (missing resume) takes priority over server misconfig.
+	sections, sectErr := deps.Resumes.LoadSections(label)
+	if sectErr != nil {
+		return envelopeResult(stageErrorEnvelope(sessionID, "preview_ats_extraction", "no_sections_data",
+			"no structured resume sections available — upload a resume with sections sidecar", false))
 	}
 
-	// Fall back to raw resume text when no sections sidecar exists or render/extract fails.
-	if pd.ConstructedText == "" {
-		rawText, loadErr := loadBestResumeText(deps, label)
-		if loadErr != nil {
-			slog.ErrorContext(ctx, "preview_ats_extraction: load resume failed", "session_id", sessionID, "error", loadErr)
-			return envelopeResult(stageErrorEnvelope(sessionID, "preview_ats_extraction", "load_resume_failed", loadErr.Error(), false))
-		}
-		extracted, extErr := extractSvc.Extract([]byte(rawText))
-		if extErr != nil {
-			slog.ErrorContext(ctx, "preview_ats_extraction: extract on raw text failed", "session_id", sessionID, "error", extErr)
-			return envelopeResult(stageErrorEnvelope(sessionID, "preview_ats_extraction", "extract_failed", extErr.Error(), false))
-		}
-		pd.ConstructedText = extracted
+	if deps.PDFRenderer == nil {
+		return envelopeResult(stageErrorEnvelope(sessionID, "preview_ats_extraction", "configuration_error",
+			"PDFRenderer not configured — this is a server misconfiguration", false))
 	}
+	if deps.Extractor == nil {
+		return envelopeResult(stageErrorEnvelope(sessionID, "preview_ats_extraction", "configuration_error",
+			"Extractor not configured — this is a server misconfiguration", false))
+	}
+	if deps.SurvivalDiffer == nil {
+		return envelopeResult(stageErrorEnvelope(sessionID, "preview_ats_extraction", "configuration_error",
+			"SurvivalDiffer not configured — this is a server misconfiguration", false))
+	}
+
+	pdfBytes, renderErr := deps.PDFRenderer.RenderPDF(&sections)
+	if renderErr != nil {
+		slog.ErrorContext(ctx, "preview_ats_extraction: render failed",
+			slog.String("session_id", sessionID), slog.Any("error", renderErr))
+		return envelopeResult(stageErrorEnvelope(sessionID, "preview_ats_extraction", "render_failed",
+			"PDF rendering failed — check server logs for details", false))
+	}
+
+	extracted, extErr := deps.Extractor.Extract(ctx, pdfBytes)
+	if extErr != nil {
+		slog.ErrorContext(ctx, "preview_ats_extraction: extract failed",
+			slog.String("session_id", sessionID), slog.Any("error", extErr))
+		return envelopeResult(stageErrorEnvelope(sessionID, "preview_ats_extraction", "extract_failed",
+			"text extraction failed — run go-apply doctor to verify pdftotext is installed", false))
+	}
+
+	pd.ConstructedText = extracted
+	pd.SectionsUsed = true
+
+	// Derive deduplicated keyword list from ScoreResult for the best resume.
+	// Allocate a fresh slice to avoid aliasing the session's stored Keywords slices.
+	kw := sess.ScoreResult.Scores[label].Keywords
+	raw := make([]string, 0, len(kw.ReqMatched)+len(kw.ReqUnmatched)+len(kw.PrefMatched)+len(kw.PrefUnmatched))
+	raw = append(raw, kw.ReqMatched...)
+	raw = append(raw, kw.ReqUnmatched...)
+	raw = append(raw, kw.PrefMatched...)
+	raw = append(raw, kw.PrefUnmatched...)
+	seen := make(map[string]struct{}, len(raw))
+	unique := make([]string, 0, len(raw))
+	for _, k := range raw {
+		if _, ok := seen[k]; !ok {
+			seen[k] = struct{}{}
+			unique = append(unique, k)
+		}
+	}
+	pd.KeywordSurvival = deps.SurvivalDiffer.Diff(unique, extracted)
 
 	resultBytes, _ := json.Marshal(pd)
 	slog.DebugContext(ctx, "mcp tool result",
