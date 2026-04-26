@@ -11,8 +11,11 @@
 - **Fix type errors properly**: Never suppress `go vet` or `staticcheck` warnings with blank identifiers or build tags unless there is no correct alternative.
 - **Architecture invariant**: No service or repository package may import any presenter package. Dependency arrows only point inward through `internal/port/`.
 
+## North Star
+go-apply exists to help users land conversations with real humans — honestly. No fabricated experience, no invented skills. Every feature should make it easier for a user to present their genuine self more effectively, not to deceive.
+
 ## Project Overview
-A Go CLI that scores resumes against job postings, tailors them via a two-tier cascade, generates cover letters, and operates in three modes: TUI (interactive), Headless (JSON for agents), MCP Server (Claude Code integration).
+A Go CLI that scores resumes against job postings, tailors them via a two-tier cascade, generates cover letters, and operates in two modes: Headless (JSON for agents), MCP Server (Claude Code integration).
 
 ## Development Guidelines
 - Follow the port/adapter (hexagonal) architecture pattern
@@ -36,5 +39,5 @@ A Go CLI that scores resumes against job postings, tailors them via a two-tier c
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan at
-`specs/007-tier4-schema-sections/plan.md`
+`specs/009-per-tier-ats-scoring/plan.md`
 <!-- SPECKIT END -->
