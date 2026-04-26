@@ -18,7 +18,6 @@ import (
 	mcppres "github.com/thedandano/go-apply/internal/presenter/mcp"
 	"github.com/thedandano/go-apply/internal/service/pipeline"
 	renderPkg "github.com/thedandano/go-apply/internal/service/render"
-	"github.com/thedandano/go-apply/internal/service/survival"
 	"github.com/thedandano/go-apply/internal/service/tailor"
 )
 
@@ -643,9 +642,6 @@ func HandlePreviewATSExtraction(ctx context.Context, req *mcp.CallToolRequest) *
 // renderSvc is the package-level text renderer used by the T1/T2 tailor handlers.
 var renderSvc = renderPkg.New()
 
-// survivalSvc computes keyword-survival diffs for preview_ats_extraction.
-var survivalSvc = survival.New()
-
 // HandlePreviewATSExtractionWithConfig is the full handler with optional injected deps (for tests).
 // Returns the constructed text for the best resume in the session — today an identity pass-through;
 // the seam exists for when the render/extract packages gain real implementations.
@@ -688,24 +684,40 @@ func HandlePreviewATSExtractionWithConfig(ctx context.Context, req *mcp.CallTool
 	}
 	pd := previewData{Label: label}
 
+	// LoadSections first: user-fixable error (missing resume) takes priority over server misconfig.
 	sections, sectErr := deps.Resumes.LoadSections(label)
 	if sectErr != nil {
 		return envelopeResult(stageErrorEnvelope(sessionID, "preview_ats_extraction", "no_sections_data",
 			"no structured resume sections available — upload a resume with sections sidecar", false))
 	}
 
+	if deps.PDFRenderer == nil {
+		return envelopeResult(stageErrorEnvelope(sessionID, "preview_ats_extraction", "configuration_error",
+			"PDFRenderer not configured — this is a server misconfiguration", false))
+	}
+	if deps.Extractor == nil {
+		return envelopeResult(stageErrorEnvelope(sessionID, "preview_ats_extraction", "configuration_error",
+			"Extractor not configured — this is a server misconfiguration", false))
+	}
+	if deps.SurvivalDiffer == nil {
+		return envelopeResult(stageErrorEnvelope(sessionID, "preview_ats_extraction", "configuration_error",
+			"SurvivalDiffer not configured — this is a server misconfiguration", false))
+	}
+
 	pdfBytes, renderErr := deps.PDFRenderer.RenderPDF(&sections)
 	if renderErr != nil {
 		slog.ErrorContext(ctx, "preview_ats_extraction: render failed",
 			slog.String("session_id", sessionID), slog.Any("error", renderErr))
-		return envelopeResult(stageErrorEnvelope(sessionID, "preview_ats_extraction", "render_failed", renderErr.Error(), false))
+		return envelopeResult(stageErrorEnvelope(sessionID, "preview_ats_extraction", "render_failed",
+			"PDF rendering failed — check server logs for details", false))
 	}
 
-	extracted, extErr := deps.Extractor.Extract(pdfBytes)
+	extracted, extErr := deps.Extractor.Extract(ctx, pdfBytes)
 	if extErr != nil {
 		slog.ErrorContext(ctx, "preview_ats_extraction: extract failed",
 			slog.String("session_id", sessionID), slog.Any("error", extErr))
-		return envelopeResult(stageErrorEnvelope(sessionID, "preview_ats_extraction", "extract_failed", extErr.Error(), false))
+		return envelopeResult(stageErrorEnvelope(sessionID, "preview_ats_extraction", "extract_failed",
+			"text extraction failed — run go-apply doctor to verify pdftotext is installed", false))
 	}
 
 	pd.ConstructedText = extracted
@@ -722,7 +734,7 @@ func HandlePreviewATSExtractionWithConfig(ctx context.Context, req *mcp.CallTool
 			unique = append(unique, k)
 		}
 	}
-	pd.KeywordSurvival = survivalSvc.Diff(unique, extracted)
+	pd.KeywordSurvival = deps.SurvivalDiffer.Diff(unique, extracted)
 
 	resultBytes, _ := json.Marshal(pd)
 	slog.DebugContext(ctx, "mcp tool result",

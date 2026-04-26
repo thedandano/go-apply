@@ -47,7 +47,6 @@ func TestDiff_SomeKeywordsDropped(t *testing.T) {
 	if total != result.TotalJDKeywords {
 		t.Errorf("Dropped(%d) + Matched(%d) = %d, want %d", len(result.Dropped), len(result.Matched), total, result.TotalJDKeywords)
 	}
-	// "rust" and "java" must be dropped
 	droppedSet := make(map[string]bool)
 	for _, kw := range result.Dropped {
 		droppedSet[kw] = true
@@ -75,20 +74,17 @@ func TestDiff_EmptyKeywords_ReturnsZeroStruct(t *testing.T) {
 	}
 }
 
-func TestDiff_DeduplicatesSameKeywordAcrossReqAndPref(t *testing.T) {
-	// The caller is expected to deduplicate before calling Diff.
-	// Verify that when given a deduplicated list, counts are correct.
+// TestDiff_AssumesCallerDeduplicates verifies that Diff does NOT deduplicate: if the
+// caller passes ["go", "go"], TotalJDKeywords is 2. Deduplication is the caller's job.
+func TestDiff_AssumesCallerDeduplicates(t *testing.T) {
 	svc := newService()
-	keywords := []string{"go", "kubernetes"}
-	extracted := "Go developer with kubernetes expertise."
+	keywords := []string{"go", "go"}
+	extracted := "Go developer."
 
 	result := svc.Diff(keywords, extracted)
 
 	if result.TotalJDKeywords != 2 {
-		t.Errorf("TotalJDKeywords = %d, want 2", result.TotalJDKeywords)
-	}
-	if len(result.Matched) != 2 {
-		t.Errorf("Matched = %v, want [go kubernetes]", result.Matched)
+		t.Errorf("TotalJDKeywords = %d, want 2 (Diff does not deduplicate)", result.TotalJDKeywords)
 	}
 }
 
@@ -117,6 +113,63 @@ func TestDiff_NonNilSlices(t *testing.T) {
 	}
 	if result.Matched == nil {
 		t.Error("Matched must be non-nil (empty slice)")
+	}
+}
+
+// TestDiff_SpecialCharKeyword_CppMatches verifies that "C++" matches the literal
+// string "C++" in extracted text and does NOT match unrelated words like "plusplus".
+func TestDiff_SpecialCharKeyword_CppMatches(t *testing.T) {
+	svc := newService()
+
+	result := svc.Diff([]string{"C++"}, "Built C++ services for low-latency trading.")
+	if len(result.Dropped) != 0 {
+		t.Errorf("C++ should match in extracted text, got Dropped=%v", result.Dropped)
+	}
+
+	result2 := svc.Diff([]string{"C++"}, "Wrote plusplus code.")
+	if len(result2.Matched) != 0 {
+		t.Errorf("C++ must not match 'plusplus', got Matched=%v", result2.Matched)
+	}
+}
+
+// TestDiff_SpecialCharKeyword_DotNETMatches verifies that ".NET" matches ".NET Framework"
+// and does NOT match standalone "NET".
+func TestDiff_SpecialCharKeyword_DotNETMatches(t *testing.T) {
+	svc := newService()
+
+	result := svc.Diff([]string{".NET"}, "Experience with .NET Framework and Azure.")
+	if len(result.Dropped) != 0 {
+		t.Errorf(".NET should match in extracted text, got Dropped=%v", result.Dropped)
+	}
+}
+
+// TestDiff_MultiWordKeyword_DistributedSystems verifies multi-word keyword matching.
+func TestDiff_MultiWordKeyword_DistributedSystems(t *testing.T) {
+	svc := newService()
+
+	result := svc.Diff([]string{"distributed systems"}, "Expert in distributed systems architecture.")
+	if len(result.Dropped) != 0 {
+		t.Errorf("'distributed systems' should match, got Dropped=%v", result.Dropped)
+	}
+
+	result2 := svc.Diff([]string{"distributed systems"}, "undistributed systemsx performance.")
+	if len(result2.Matched) != 0 {
+		t.Errorf("'distributed systems' must not match 'undistributed systemsx', got Matched=%v", result2.Matched)
+	}
+}
+
+// TestDiff_RegexpCachingDoesNotAffectResults verifies the sync.Map cache produces
+// the same results across multiple calls with the same keyword set.
+func TestDiff_RegexpCachingDoesNotAffectResults(t *testing.T) {
+	svc := newService()
+	keywords := []string{"go", "kubernetes"}
+	extracted := "Go and kubernetes are used here."
+
+	first := svc.Diff(keywords, extracted)
+	second := svc.Diff(keywords, extracted)
+
+	if len(first.Matched) != len(second.Matched) {
+		t.Errorf("repeated Diff calls must return same results; first=%v second=%v", first.Matched, second.Matched)
 	}
 }
 

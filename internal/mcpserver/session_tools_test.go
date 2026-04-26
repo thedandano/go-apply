@@ -14,6 +14,7 @@ import (
 	extractPkg "github.com/thedandano/go-apply/internal/service/extract"
 	pdfrender "github.com/thedandano/go-apply/internal/service/pdfrender"
 	"github.com/thedandano/go-apply/internal/service/pipeline"
+	"github.com/thedandano/go-apply/internal/service/survival"
 )
 
 // stubApplyConfigForSession returns an ApplyConfig with all stubs and no Presenter set.
@@ -400,6 +401,7 @@ func TestHandlePreviewATSExtraction_ReturnsConstructedText(t *testing.T) {
 	cfg := stubApplyConfigWithSkillsLoader()
 	cfg.PDFRenderer = &stubPDFRenderer{failRender: false}
 	cfg.Extractor = &stubExtractor{failExtract: false}
+	cfg.SurvivalDiffer = &stubSurvivalDiffer{}
 
 	loadReq := callToolRequest("load_jd", map[string]any{"jd_raw_text": "Senior Go engineer."})
 	loadText := extractText(t, mcpserver.HandleLoadJDWithConfig(context.Background(), &loadReq, &cfg))
@@ -503,6 +505,7 @@ func TestHandlePreviewATSExtraction_Tier4SectionInConstructedText(t *testing.T) 
 	cfg := stubApplyConfigWithTier4Sections()
 	cfg.PDFRenderer = pdfrender.New()
 	cfg.Extractor = extractPkg.New()
+	cfg.SurvivalDiffer = survival.New()
 
 	loadReq := callToolRequest("load_jd", map[string]any{"jd_raw_text": "Senior Go engineer."})
 	loadText := extractText(t, mcpserver.HandleLoadJDWithConfig(context.Background(), &loadReq, &cfg))
@@ -1053,11 +1056,38 @@ type stubExtractor struct {
 	failExtract bool
 }
 
-func (s *stubExtractor) Extract(_ []byte) (string, error) {
+func (s *stubExtractor) Extract(_ context.Context, _ []byte) (string, error) {
 	if s.failExtract {
 		return "", fmt.Errorf("extract error")
 	}
 	return "extracted text", nil
+}
+
+// stubSurvivalDiffer is an injectable survival differ for tests.
+type stubSurvivalDiffer struct{}
+
+func (s *stubSurvivalDiffer) Diff(keywords []string, _ string) model.KeywordSurvival {
+	return model.KeywordSurvival{
+		Dropped:         []string{},
+		Matched:         keywords,
+		TotalJDKeywords: len(keywords),
+	}
+}
+
+// stubScorerWithKeywords is a scorer that echoes JD keywords into KeywordResult so
+// keyword-survival tests can assert on non-empty keyword lists.
+type stubScorerWithKeywords struct{}
+
+func (s *stubScorerWithKeywords) Score(input *model.ScorerInput) (model.ScoreResult, error) {
+	return model.ScoreResult{
+		Breakdown: model.ScoreBreakdown{
+			KeywordMatch: 0.9, ExperienceFit: 0.9, ImpactEvidence: 0.9, ATSFormat: 0.9, Readability: 0.9,
+		},
+		Keywords: model.KeywordResult{
+			ReqUnmatched:  input.JD.Required,
+			PrefUnmatched: input.JD.Preferred,
+		},
+	}, nil
 }
 
 // buildScoredSession creates a scored session via load_jd + submit_keywords and returns the session ID.
@@ -1124,6 +1154,8 @@ func TestHandlePreviewATSExtraction_RenderFails_ReturnsRenderFailedCode(t *testi
 	cfg := stubApplyConfigWithSkillsLoader() // LoadSections succeeds
 	// T012 must add: cfg.PDFRenderer = &stubPDFRenderer{failRender: true}
 	cfg.PDFRenderer = &stubPDFRenderer{failRender: true}
+	cfg.Extractor = &stubExtractor{failExtract: false}
+	cfg.SurvivalDiffer = &stubSurvivalDiffer{}
 
 	sessionID := buildScoredSession(t, &cfg)
 
@@ -1155,6 +1187,7 @@ func TestHandlePreviewATSExtraction_ExtractFails_ReturnsExtractFailedCode(t *tes
 	// T012 must add: cfg.PDFRenderer + cfg.Extractor to pipeline.ApplyConfig
 	cfg.PDFRenderer = &stubPDFRenderer{failRender: false} // render succeeds, returns fake PDF bytes
 	cfg.Extractor = &stubExtractor{failExtract: true}     // extract fails
+	cfg.SurvivalDiffer = &stubSurvivalDiffer{}
 
 	sessionID := buildScoredSession(t, &cfg)
 
@@ -1187,6 +1220,11 @@ func TestHandlePreviewATSExtraction_KeywordSurvivalPresent(t *testing.T) {
 	cfg := stubApplyConfigWithSkillsLoader()
 	cfg.PDFRenderer = &stubPDFRenderer{failRender: false}
 	cfg.Extractor = &stubExtractor{failExtract: false}
+	// stubScorerWithKeywords echoes JD required/preferred into KeywordResult so the
+	// survival diff sees a non-empty keyword list. Real survival service: stub extractor
+	// returns "extracted text" which does not contain "go", so it lands in dropped.
+	cfg.Scorer = &stubScorerWithKeywords{}
+	cfg.SurvivalDiffer = survival.New()
 
 	sessionID := buildScoredSession(t, &cfg)
 
@@ -1205,7 +1243,6 @@ func TestHandlePreviewATSExtraction_KeywordSurvivalPresent(t *testing.T) {
 	if data == nil {
 		t.Fatal("expected data field in response")
 	}
-	// keyword_survival field must be present (fails until T016 adds it to previewData)
 	ks, ok := data["keyword_survival"]
 	if !ok {
 		t.Fatalf("keyword_survival missing from response data; got keys: %v", data)
@@ -1214,14 +1251,81 @@ func TestHandlePreviewATSExtraction_KeywordSurvivalPresent(t *testing.T) {
 	if !ok {
 		t.Fatalf("keyword_survival is not an object: %T", ks)
 	}
-	if _, ok := ksMap["dropped"]; !ok {
-		t.Error("keyword_survival missing 'dropped' key")
+	// total_jd_keywords must be 1 (JD has required:["go"], preferred:[]).
+	total, _ := ksMap["total_jd_keywords"].(float64)
+	if total != 1 {
+		t.Errorf("keyword_survival.total_jd_keywords = %v, want 1", ksMap["total_jd_keywords"])
 	}
-	if _, ok := ksMap["matched"]; !ok {
-		t.Error("keyword_survival missing 'matched' key")
+	dropped, _ := ksMap["dropped"].([]any)
+	matched, _ := ksMap["matched"].([]any)
+	// dropped + matched must equal total.
+	if len(dropped)+len(matched) != int(total) {
+		t.Errorf("dropped(%d) + matched(%d) = %d, want total(%d)", len(dropped), len(matched), len(dropped)+len(matched), int(total))
 	}
-	if _, ok := ksMap["total_jd_keywords"]; !ok {
-		t.Error("keyword_survival missing 'total_jd_keywords' key")
+	// stub extractor returns "extracted text" which does not contain "go" as a whole word,
+	// so "go" must appear in dropped.
+	foundInDropped := false
+	for _, d := range dropped {
+		if d == "go" {
+			foundInDropped = true
+		}
+	}
+	if !foundInDropped {
+		t.Errorf("keyword 'go' should be in dropped (stub extractor returns 'extracted text'), got dropped=%v matched=%v", dropped, matched)
+	}
+}
+
+// TestHandlePreviewATSExtraction_NilPDFRenderer_ReturnsConfigurationError verifies
+// that a nil PDFRenderer returns a clean configuration_error instead of panicking.
+func TestHandlePreviewATSExtraction_NilPDFRenderer_ReturnsConfigurationError(t *testing.T) {
+	cfg := stubApplyConfigWithSkillsLoader()
+	cfg.PDFRenderer = nil
+	cfg.Extractor = &stubExtractor{failExtract: false}
+	cfg.SurvivalDiffer = &stubSurvivalDiffer{}
+
+	sessionID := buildScoredSession(t, &cfg)
+
+	previewReq := callToolRequest("preview_ats_extraction", map[string]any{"session_id": sessionID})
+	result := mcpserver.HandlePreviewATSExtractionWithConfig(context.Background(), &previewReq, &cfg)
+	text := extractText(t, result)
+
+	var env map[string]any
+	if err := json.Unmarshal([]byte(text), &env); err != nil {
+		t.Fatalf("not JSON: %v — raw: %s", err, text)
+	}
+	if env["status"] != "error" {
+		t.Errorf("status = %v, want error for nil PDFRenderer", env["status"])
+	}
+	errObj, _ := env["error"].(map[string]any)
+	if errObj == nil || errObj["code"] != "configuration_error" {
+		t.Errorf("expected error.code=configuration_error, got %v", errObj)
+	}
+}
+
+// TestHandlePreviewATSExtraction_NilExtractor_ReturnsConfigurationError verifies
+// that a nil Extractor returns a clean configuration_error instead of panicking.
+func TestHandlePreviewATSExtraction_NilExtractor_ReturnsConfigurationError(t *testing.T) {
+	cfg := stubApplyConfigWithSkillsLoader()
+	cfg.PDFRenderer = &stubPDFRenderer{failRender: false}
+	cfg.Extractor = nil
+	cfg.SurvivalDiffer = &stubSurvivalDiffer{}
+
+	sessionID := buildScoredSession(t, &cfg)
+
+	previewReq := callToolRequest("preview_ats_extraction", map[string]any{"session_id": sessionID})
+	result := mcpserver.HandlePreviewATSExtractionWithConfig(context.Background(), &previewReq, &cfg)
+	text := extractText(t, result)
+
+	var env map[string]any
+	if err := json.Unmarshal([]byte(text), &env); err != nil {
+		t.Fatalf("not JSON: %v — raw: %s", err, text)
+	}
+	if env["status"] != "error" {
+		t.Errorf("status = %v, want error for nil Extractor", env["status"])
+	}
+	errObj, _ := env["error"].(map[string]any)
+	if errObj == nil || errObj["code"] != "configuration_error" {
+		t.Errorf("expected error.code=configuration_error, got %v", errObj)
 	}
 }
 

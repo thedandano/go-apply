@@ -14,6 +14,12 @@ import (
 
 var _ port.Extractor = (*Service)(nil)
 
+// maxPDFBytes is the maximum accepted PDF input size (10 MB).
+const maxPDFBytes = 10 * 1024 * 1024
+
+// maxOutputBytes is the maximum accepted pdftotext stdout size (10 MB).
+const maxOutputBytes = 10 * 1024 * 1024
+
 // Service invokes pdftotext to extract plain text from PDF bytes.
 type Service struct {
 	lookPath func(string) (string, error)
@@ -21,40 +27,42 @@ type Service struct {
 	timeout  time.Duration
 }
 
-// New returns a Service configured with real exec helpers and a 10s timeout.
+// New returns a Service configured with real exec helpers and a 30s timeout.
 func New() *Service {
 	return &Service{
 		lookPath: exec.LookPath,
 		cmdFunc:  exec.CommandContext,
-		timeout:  10 * time.Second,
+		timeout:  30 * time.Second,
 	}
 }
 
 // Extract invokes pdftotext on data and returns the extracted plain text.
 // Returns "", nil for empty or nil input.
-func (s *Service) Extract(data []byte) (string, error) {
-	// Step 1: empty/nil input — callers treat empty result as signal to check renderer output.
+// The context is used to propagate caller cancellation to the subprocess.
+func (s *Service) Extract(ctx context.Context, data []byte) (string, error) {
 	if len(data) == 0 {
 		return "", nil
 	}
 
-	// Step 2: FR-009 — log attempt.
+	if len(data) > maxPDFBytes {
+		return "", fmt.Errorf("extract: PDF size %d bytes exceeds limit of %d bytes", len(data), maxPDFBytes)
+	}
+
 	slog.Info("extract.attempt", "binary", "pdftotext")
 
-	// Step 3: locate pdftotext binary.
 	path, err := s.lookPath("pdftotext")
 	if err != nil {
 		return "", fmt.Errorf("extractor: pdftotext not found — run go-apply doctor to diagnose missing dependencies: %w", err)
 	}
 
-	// Step 4: FR-009 — log invocation.
-	slog.Info("extract.invoke")
+	slog.Info("extract.invoke", "path", path)
 
-	// Step 5: run subprocess — pdftotext reads stdin ("-") and writes to stdout ("-").
-	ctx, cancel := context.WithTimeout(context.Background(), s.timeout)
+	// Derive a timeout sub-context from the caller context so pdftotext is
+	// cancelled when the caller disconnects or times out.
+	tctx, cancel := context.WithTimeout(ctx, s.timeout)
 	defer cancel()
 
-	cmd := s.cmdFunc(ctx, path, "-", "-")
+	cmd := s.cmdFunc(tctx, path, "-", "-")
 	cmd.Stdin = bytes.NewReader(data)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -66,11 +74,15 @@ func (s *Service) Extract(data []byte) (string, error) {
 		return "", fmt.Errorf("pdftotext: exit 1: %s: %w", sanitized, err)
 	}
 
-	// Step 6: return extracted text.
+	if stdout.Len() > maxOutputBytes {
+		return "", fmt.Errorf("extract: pdftotext output exceeded maximum size of %d bytes", maxOutputBytes)
+	}
+
 	return stdout.String(), nil
 }
 
-// sanitizeStderr caps raw stderr to 256 bytes and strips non-printable / high bytes.
+// sanitizeStderr caps raw stderr to 256 bytes and strips all bytes outside
+// the ASCII printable range [0x20, 0x7e]. Tab and newline are excluded.
 func sanitizeStderr(raw []byte) string {
 	if len(raw) > 256 {
 		raw = raw[:256]

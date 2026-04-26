@@ -14,7 +14,7 @@ func TestExtract_LookPathMissing_ReturnsDescriptiveError(t *testing.T) {
 	svc := &Service{
 		lookPath: func(string) (string, error) { return "", exec.ErrNotFound },
 	}
-	_, err := svc.Extract([]byte("pdf bytes"))
+	_, err := svc.Extract(context.Background(), []byte("pdf bytes"))
 	if err == nil {
 		t.Fatal("expected error when lookPath returns ErrNotFound, got nil")
 	}
@@ -32,7 +32,7 @@ func TestExtract_LookPathFound_SubprocessSuccess(t *testing.T) {
 		timeout: 5 * time.Second,
 	}
 	input := []byte("hello extracted text")
-	got, err := svc.Extract(input)
+	got, err := svc.Extract(context.Background(), input)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -50,7 +50,7 @@ func TestExtract_SubprocessFailure_StderrSanitized(t *testing.T) {
 		},
 		timeout: 5 * time.Second,
 	}
-	_, err := svc.Extract([]byte("pdf bytes"))
+	_, err := svc.Extract(context.Background(), []byte("pdf bytes"))
 	if err == nil {
 		t.Fatal("expected error from non-zero exit, got nil")
 	}
@@ -59,7 +59,7 @@ func TestExtract_SubprocessFailure_StderrSanitized(t *testing.T) {
 		t.Errorf("error message suspiciously long (%d bytes); stderr portion should be capped at 256 bytes", len(msg))
 	}
 	for i, b := range []byte(msg) {
-		if b < 0x20 && b != '\t' && b != '\n' {
+		if b < 0x20 {
 			t.Errorf("non-printable byte 0x%02x at position %d in error message", b, i)
 		}
 		if b > 0x7e {
@@ -79,7 +79,7 @@ func TestExtract_ContextTimeout_KillsSubprocess(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := svc.Extract([]byte("some data"))
+		_, err := svc.Extract(context.Background(), []byte("some data"))
 		done <- err
 	}()
 
@@ -90,6 +90,34 @@ func TestExtract_ContextTimeout_KillsSubprocess(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Error("Extract did not return within 2 seconds after context timeout")
+	}
+}
+
+func TestExtract_CallerContextCancelled_KillsSubprocess(t *testing.T) {
+	svc := &Service{
+		lookPath: func(string) (string, error) { return "/bin/sleep", nil },
+		cmdFunc: func(ctx context.Context, _ string, _ ...string) *exec.Cmd {
+			return exec.CommandContext(ctx, "sleep", "10")
+		},
+		timeout: 30 * time.Second,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := svc.Extract(ctx, []byte("some data"))
+		done <- err
+	}()
+
+	cancel()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("expected error from caller context cancellation, got nil")
+		}
+	case <-time.After(2 * time.Second):
+		t.Error("Extract did not return within 2 seconds after caller context cancel")
 	}
 }
 
@@ -106,7 +134,7 @@ func TestExtract_LogsAttemptAndInvocation(t *testing.T) {
 		},
 		timeout: 5 * time.Second,
 	}
-	_, err := svc.Extract([]byte("data"))
+	_, err := svc.Extract(context.Background(), []byte("data"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

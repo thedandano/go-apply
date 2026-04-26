@@ -7,11 +7,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"strings"
 	"testing"
 
 	"github.com/thedandano/go-apply/internal/mcpserver"
 	"github.com/thedandano/go-apply/internal/service/extract"
 	"github.com/thedandano/go-apply/internal/service/pdfrender"
+	"github.com/thedandano/go-apply/internal/service/survival"
 )
 
 func TestHandlePreviewATSExtraction_HonestLoop_RealPdftotext(t *testing.T) {
@@ -21,13 +23,11 @@ func TestHandlePreviewATSExtraction_HonestLoop_RealPdftotext(t *testing.T) {
 	}
 
 	cfg := stubApplyConfigWithTier4Sections()
-	pdfSvc, err := pdfrender.New()
-	if err != nil {
-		t.Fatalf("pdfrender.New(): %v", err)
-	}
+	pdfSvc := pdfrender.New()
 	extractSvc := extract.New()
 	cfg.PDFRenderer = pdfSvc
 	cfg.Extractor = extractSvc
+	cfg.SurvivalDiffer = survival.New()
 
 	sessionID := buildScoredSession(t, &cfg)
 
@@ -51,7 +51,7 @@ func TestHandlePreviewATSExtraction_HonestLoop_RealPdftotext(t *testing.T) {
 		t.Errorf("constructed_text must be non-empty, got: %q", constructedText)
 	}
 
-	if !contains(constructedText, "Alice") {
+	if !strings.Contains(constructedText, "Alice") {
 		t.Errorf("constructed_text missing candidate name from ContactInfo, got:\n%s", constructedText)
 	}
 }
@@ -60,6 +60,7 @@ func TestHandlePreviewATSExtraction_PdftotextMissing_ErrorReferencesDoctorCmd(t 
 	cfg := stubApplyConfigWithTier4Sections()
 	cfg.PDFRenderer = &stubPDFRenderer{failRender: false}
 	cfg.Extractor = &stubbedExtractorWithDoctorMsg{failExtract: true}
+	cfg.SurvivalDiffer = survival.New()
 
 	sessionID := buildScoredSession(t, &cfg)
 
@@ -74,7 +75,7 @@ func TestHandlePreviewATSExtraction_PdftotextMissing_ErrorReferencesDoctorCmd(t 
 	if env["status"] != "error" {
 		t.Errorf("status = %v, want error — full: %s", env["status"], text)
 	}
-	if !contains(text, "go-apply doctor") {
+	if !strings.Contains(text, "go-apply doctor") {
 		t.Errorf("error message must reference 'go-apply doctor', got: %s", text)
 	}
 }
@@ -83,18 +84,9 @@ type stubbedExtractorWithDoctorMsg struct {
 	failExtract bool
 }
 
-func (s *stubbedExtractorWithDoctorMsg) Extract(_ []byte) (string, error) {
+func (s *stubbedExtractorWithDoctorMsg) Extract(_ context.Context, _ []byte) (string, error) {
 	if s.failExtract {
 		return "", fmt.Errorf("extractor: pdftotext not found — run go-apply doctor to diagnose missing dependencies")
 	}
 	return "extracted text", nil
-}
-
-func contains(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }

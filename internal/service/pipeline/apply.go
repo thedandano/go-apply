@@ -68,6 +68,9 @@ type ApplyConfig struct {
 	// Extractor extracts plain text from PDF bytes for ATS extraction.
 	// Required for preview_ats_extraction; must not be nil in production.
 	Extractor port.Extractor
+	// SurvivalDiffer computes which JD keywords survived the render→extract pipeline.
+	// Required for preview_ats_extraction; must not be nil in production.
+	SurvivalDiffer port.SurvivalDiffer
 }
 
 // NewApplyPipeline constructs an ApplyPipeline with all dependencies injected via ApplyConfig.

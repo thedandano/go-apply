@@ -4,12 +4,18 @@ package survival
 import (
 	"log/slog"
 	"regexp"
+	"sync"
 
 	"github.com/thedandano/go-apply/internal/model"
+	"github.com/thedandano/go-apply/internal/port"
 )
 
-// Service computes keyword-survival diffs.
-type Service struct{}
+var _ port.SurvivalDiffer = (*Service)(nil)
+
+// Service computes keyword-survival diffs with a per-instance regexp cache.
+type Service struct {
+	cache sync.Map // map[string]*regexp.Regexp
+}
 
 // New returns a ready-to-use Service.
 func New() *Service { return &Service{} }
@@ -21,7 +27,7 @@ func (s *Service) Diff(keywords []string, extractedText string) model.KeywordSur
 	dropped := []string{}
 
 	for _, kw := range keywords {
-		if compileKeywordPattern(kw).MatchString(extractedText) {
+		if s.pattern(kw).MatchString(extractedText) {
 			matched = append(matched, kw)
 		} else {
 			dropped = append(dropped, kw)
@@ -41,14 +47,25 @@ func (s *Service) Diff(keywords []string, extractedText string) model.KeywordSur
 	}
 }
 
+// pattern returns the compiled regexp for kw, using the cache to avoid
+// recompiling the same pattern across repeated Diff calls.
+func (s *Service) pattern(kw string) *regexp.Regexp {
+	if v, ok := s.cache.Load(kw); ok {
+		return v.(*regexp.Regexp) //nolint:forcetypeassert
+	}
+	re := compileKeywordPattern(kw)
+	s.cache.Store(kw, re)
+	return re
+}
+
 // isWordChar reports whether b is a regex word character [A-Za-z0-9_].
 func isWordChar(b byte) bool {
 	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') || b == '_'
 }
 
 // compileKeywordPattern builds a case-insensitive whole-word pattern for kw.
-// \b boundaries are only added where the keyword character is a word char —
-// this handles keywords like "C++" and ".NET" correctly.
+// \b boundaries are only added where the keyword starts/ends with a word character —
+// this handles keywords like "C++" and ".NET" correctly without false negatives.
 func compileKeywordPattern(kw string) *regexp.Regexp {
 	quoted := regexp.QuoteMeta(kw)
 	prefix, suffix := "", ""

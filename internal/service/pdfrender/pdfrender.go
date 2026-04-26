@@ -32,6 +32,10 @@ func (s *Service) RenderPDF(sections *model.SectionMap) ([]byte, error) {
 		return nil, fmt.Errorf("pdfrender: invalid UTF-8 in field: %w", err)
 	}
 
+	if err := validateLatin1Fields(sections); err != nil {
+		return nil, fmt.Errorf("pdfrender: character outside Latin-1 (fpdf core fonts limit): %w", err)
+	}
+
 	slog.Info("pdfrender.render", "sections_count", countNonEmptySections(sections))
 
 	pdf := fpdf.New("P", "mm", "A4", "")
@@ -59,6 +63,11 @@ func (s *Service) RenderPDF(sections *model.SectionMap) ([]byte, error) {
 	var buf bytes.Buffer
 	if err := pdf.Output(&buf); err != nil {
 		return nil, fmt.Errorf("pdfrender: output failed: %w", err)
+	}
+
+	// Check fpdf's internal error state (accumulated during section writes).
+	if err := pdf.Error(); err != nil {
+		return nil, fmt.Errorf("pdfrender: internal rendering error: %w", err)
 	}
 
 	pdfBytes := buf.Bytes()
@@ -320,6 +329,97 @@ func validateUTF8Fields(sections *model.SectionMap) error {
 		}
 	}
 
+	return nil
+}
+
+// validateLatin1Fields checks that all string fields contain only characters within the
+// Latin-1 (ISO-8859-1) range (code points ≤ 0xFF). fpdf core fonts (Arial) use Windows-1252
+// encoding, which covers Latin-1 but not wider Unicode. Characters outside this range are
+// silently dropped by fpdf — we fail explicitly instead of producing corrupt output.
+func validateLatin1Fields(sections *model.SectionMap) error {
+	check := func(field, value string) error {
+		for _, r := range value {
+			if r > 0xFF {
+				return fmt.Errorf("field %q contains non-Latin-1 character %q (U+%04X) — use a Latin-1 character or a TTF-font renderer for full Unicode support", field, r, r)
+			}
+		}
+		return nil
+	}
+	// Contact
+	for _, f := range []struct{ name, val string }{
+		{"contact.name", sections.Contact.Name},
+		{"contact.email", sections.Contact.Email},
+		{"contact.phone", sections.Contact.Phone},
+		{"contact.location", sections.Contact.Location},
+	} {
+		if err := check(f.name, f.val); err != nil {
+			return err
+		}
+	}
+	for i, link := range sections.Contact.Links {
+		if err := check(fmt.Sprintf("contact.links[%d]", i), link); err != nil {
+			return err
+		}
+	}
+	if err := check("summary", sections.Summary); err != nil {
+		return err
+	}
+	for i, e := range sections.Experience {
+		p := fmt.Sprintf("experience[%d]", i)
+		for _, f := range []struct{ name, val string }{
+			{p + ".company", e.Company}, {p + ".role", e.Role},
+			{p + ".location", e.Location},
+		} {
+			if err := check(f.name, f.val); err != nil {
+				return err
+			}
+		}
+		for j, b := range e.Bullets {
+			if err := check(fmt.Sprintf("%s.bullets[%d]", p, j), b); err != nil {
+				return err
+			}
+		}
+	}
+	for i, e := range sections.Education {
+		p := fmt.Sprintf("education[%d]", i)
+		for _, f := range []struct{ name, val string }{
+			{p + ".school", e.School}, {p + ".degree", e.Degree}, {p + ".details", e.Details},
+		} {
+			if err := check(f.name, f.val); err != nil {
+				return err
+			}
+		}
+	}
+	if sections.Skills != nil {
+		if err := check("skills.flat", sections.Skills.Flat); err != nil {
+			return err
+		}
+		for cat, vals := range sections.Skills.Categorized {
+			if err := check("skills.categorized.key:"+cat, cat); err != nil {
+				return err
+			}
+			for j, v := range vals {
+				if err := check(fmt.Sprintf("skills.categorized[%s][%d]", cat, j), v); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	for i, p2 := range sections.Projects {
+		p := fmt.Sprintf("projects[%d]", i)
+		for _, f := range []struct{ name, val string }{
+			{p + ".name", p2.Name}, {p + ".description", p2.Description},
+		} {
+			if err := check(f.name, f.val); err != nil {
+				return err
+			}
+		}
+	}
+	for i, e := range sections.Interests {
+		if err := check(fmt.Sprintf("interests[%d].name", i), e.Name); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
