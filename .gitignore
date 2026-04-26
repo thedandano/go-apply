@@ -27,3 +27,6 @@ openspec/
 
 # Speckit tooling (local workflow — not project source)
 .specify/
+
+# Specs (local planning docs — not project source)
+specs/
