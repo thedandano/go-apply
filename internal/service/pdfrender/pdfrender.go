@@ -32,9 +32,8 @@ func (s *Service) RenderPDF(sections *model.SectionMap) ([]byte, error) {
 		return nil, fmt.Errorf("pdfrender: invalid UTF-8 in field: %w", err)
 	}
 
-	if err := validateLatin1Fields(sections); err != nil {
-		return nil, fmt.Errorf("pdfrender: character outside Latin-1 (fpdf core fonts limit): %w", err)
-	}
+	transliterated := transliterateLatin1(sections)
+	sections = &transliterated
 
 	slog.Info("pdfrender.render", "sections_count", countNonEmptySections(sections))
 
@@ -332,212 +331,6 @@ func validateUTF8Fields(sections *model.SectionMap) error {
 	return nil
 }
 
-// validateLatin1Fields checks that all string fields contain only characters within the
-// Latin-1 (ISO-8859-1) range (code points ≤ 0xFF). fpdf core fonts (Arial) use Windows-1252
-// encoding, which covers Latin-1 but not wider Unicode. Characters outside this range are
-// silently dropped by fpdf — we fail explicitly instead of producing corrupt output.
-func validateLatin1Fields(sections *model.SectionMap) error {
-	check := func(field, value string) error {
-		for _, r := range value {
-			if r > 0xFF {
-				return fmt.Errorf("field %q contains non-Latin-1 character %q (U+%04X) — use a Latin-1 character or a TTF-font renderer for full Unicode support", field, r, r)
-			}
-		}
-		return nil
-	}
-	checkAll := func(pairs ...struct{ name, val string }) error {
-		for _, f := range pairs {
-			if err := check(f.name, f.val); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-	// Contact
-	if err := checkAll(
-		struct{ name, val string }{"contact.name", sections.Contact.Name},
-		struct{ name, val string }{"contact.email", sections.Contact.Email},
-		struct{ name, val string }{"contact.phone", sections.Contact.Phone},
-		struct{ name, val string }{"contact.location", sections.Contact.Location},
-	); err != nil {
-		return err
-	}
-	for i, link := range sections.Contact.Links {
-		if err := check(fmt.Sprintf("contact.links[%d]", i), link); err != nil {
-			return err
-		}
-	}
-	if err := check("summary", sections.Summary); err != nil {
-		return err
-	}
-	for i, e := range sections.Experience {
-		p := fmt.Sprintf("experience[%d]", i)
-		if err := checkAll(
-			struct{ name, val string }{p + ".company", e.Company},
-			struct{ name, val string }{p + ".role", e.Role},
-			struct{ name, val string }{p + ".location", e.Location},
-			struct{ name, val string }{p + ".start_date", e.StartDate},
-			struct{ name, val string }{p + ".end_date", e.EndDate},
-		); err != nil {
-			return err
-		}
-		for j, b := range e.Bullets {
-			if err := check(fmt.Sprintf("%s.bullets[%d]", p, j), b); err != nil {
-				return err
-			}
-		}
-	}
-	for i, e := range sections.Education {
-		p := fmt.Sprintf("education[%d]", i)
-		if err := checkAll(
-			struct{ name, val string }{p + ".school", e.School},
-			struct{ name, val string }{p + ".degree", e.Degree},
-			struct{ name, val string }{p + ".location", e.Location},
-			struct{ name, val string }{p + ".start_date", e.StartDate},
-			struct{ name, val string }{p + ".end_date", e.EndDate},
-			struct{ name, val string }{p + ".details", e.Details},
-		); err != nil {
-			return err
-		}
-	}
-	if sections.Skills != nil {
-		if err := check("skills.flat", sections.Skills.Flat); err != nil {
-			return err
-		}
-		for cat, vals := range sections.Skills.Categorized {
-			if err := check("skills.categorized.key:"+cat, cat); err != nil {
-				return err
-			}
-			for j, v := range vals {
-				if err := check(fmt.Sprintf("skills.categorized[%s][%d]", cat, j), v); err != nil {
-					return err
-				}
-			}
-		}
-	}
-	for i, p2 := range sections.Projects {
-		p := fmt.Sprintf("projects[%d]", i)
-		if err := checkAll(
-			struct{ name, val string }{p + ".name", p2.Name},
-			struct{ name, val string }{p + ".description", p2.Description},
-			struct{ name, val string }{p + ".url", p2.URL},
-		); err != nil {
-			return err
-		}
-		for j, b := range p2.Bullets {
-			if err := check(fmt.Sprintf("%s.bullets[%d]", p, j), b); err != nil {
-				return err
-			}
-		}
-	}
-	for i, e := range sections.Certifications {
-		p := fmt.Sprintf("certifications[%d]", i)
-		if err := checkAll(
-			struct{ name, val string }{p + ".name", e.Name},
-			struct{ name, val string }{p + ".issuer", e.Issuer},
-			struct{ name, val string }{p + ".date", e.Date},
-		); err != nil {
-			return err
-		}
-	}
-	for i, e := range sections.Awards {
-		p := fmt.Sprintf("awards[%d]", i)
-		if err := checkAll(
-			struct{ name, val string }{p + ".title", e.Title},
-			struct{ name, val string }{p + ".date", e.Date},
-			struct{ name, val string }{p + ".details", e.Details},
-		); err != nil {
-			return err
-		}
-	}
-	for i, e := range sections.Volunteer {
-		p := fmt.Sprintf("volunteer[%d]", i)
-		if err := checkAll(
-			struct{ name, val string }{p + ".org", e.Org},
-			struct{ name, val string }{p + ".role", e.Role},
-			struct{ name, val string }{p + ".start_date", e.StartDate},
-			struct{ name, val string }{p + ".end_date", e.EndDate},
-		); err != nil {
-			return err
-		}
-		for j, b := range e.Bullets {
-			if err := check(fmt.Sprintf("%s.bullets[%d]", p, j), b); err != nil {
-				return err
-			}
-		}
-	}
-	for i, e := range sections.Publications {
-		p := fmt.Sprintf("publications[%d]", i)
-		if err := checkAll(
-			struct{ name, val string }{p + ".title", e.Title},
-			struct{ name, val string }{p + ".venue", e.Venue},
-			struct{ name, val string }{p + ".date", e.Date},
-			struct{ name, val string }{p + ".url", e.URL},
-		); err != nil {
-			return err
-		}
-	}
-	for i, e := range sections.Languages {
-		p := fmt.Sprintf("languages[%d]", i)
-		if err := checkAll(
-			struct{ name, val string }{p + ".name", e.Name},
-			struct{ name, val string }{p + ".proficiency", e.Proficiency},
-		); err != nil {
-			return err
-		}
-	}
-	for i, e := range sections.Speaking {
-		p := fmt.Sprintf("speaking[%d]", i)
-		if err := checkAll(
-			struct{ name, val string }{p + ".title", e.Title},
-			struct{ name, val string }{p + ".event", e.Event},
-			struct{ name, val string }{p + ".date", e.Date},
-			struct{ name, val string }{p + ".url", e.URL},
-		); err != nil {
-			return err
-		}
-	}
-	for i, e := range sections.OpenSource {
-		p := fmt.Sprintf("open_source[%d]", i)
-		if err := checkAll(
-			struct{ name, val string }{p + ".project", e.Project},
-			struct{ name, val string }{p + ".role", e.Role},
-			struct{ name, val string }{p + ".url", e.URL},
-			struct{ name, val string }{p + ".description", e.Description},
-		); err != nil {
-			return err
-		}
-	}
-	for i, e := range sections.Patents {
-		p := fmt.Sprintf("patents[%d]", i)
-		if err := checkAll(
-			struct{ name, val string }{p + ".title", e.Title},
-			struct{ name, val string }{p + ".number", e.Number},
-			struct{ name, val string }{p + ".date", e.Date},
-			struct{ name, val string }{p + ".url", e.URL},
-		); err != nil {
-			return err
-		}
-	}
-	for i, e := range sections.Interests {
-		if err := check(fmt.Sprintf("interests[%d].name", i), e.Name); err != nil {
-			return err
-		}
-	}
-	for i, e := range sections.References {
-		p := fmt.Sprintf("references[%d]", i)
-		if err := checkAll(
-			struct{ name, val string }{p + ".name", e.Name},
-			struct{ name, val string }{p + ".title", e.Title},
-			struct{ name, val string }{p + ".company", e.Company},
-			struct{ name, val string }{p + ".contact", e.Contact},
-		); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // countNonEmptySections returns the number of non-empty sections in the SectionMap.
 func countNonEmptySections(sections *model.SectionMap) int {
 	count := 0
@@ -751,7 +544,7 @@ func writeCertificationsPDF(pdf *fpdf.Fpdf, entries []model.CertificationEntry) 
 	for _, c := range entries {
 		line := c.Name
 		if c.Issuer != "" {
-			line += " — " + c.Issuer
+			line += " - " + c.Issuer
 		}
 		if c.Date != "" {
 			line += " (" + c.Date + ")"
@@ -814,7 +607,7 @@ func writePublicationsPDF(pdf *fpdf.Fpdf, entries []model.PublicationEntry) {
 	for _, p := range entries {
 		line := p.Title
 		if p.Venue != "" {
-			line += " — " + p.Venue
+			line += " - " + p.Venue
 		}
 		if p.Date != "" {
 			line += " (" + p.Date + ")"
@@ -849,7 +642,7 @@ func writeSpeakingPDF(pdf *fpdf.Fpdf, entries []model.SpeakingEntry) {
 	for _, e := range entries {
 		line := e.Title
 		if e.Event != "" {
-			line += " — " + e.Event
+			line += " - " + e.Event
 		}
 		if e.Date != "" {
 			line += " (" + e.Date + ")"
@@ -869,7 +662,7 @@ func writeOpenSourcePDF(pdf *fpdf.Fpdf, entries []model.OpenSourceEntry) {
 		pdf.SetFont("Arial", "B", 10)
 		line := e.Project
 		if e.Role != "" {
-			line += " — " + e.Role
+			line += " - " + e.Role
 		}
 		pdf.MultiCell(0, 6, line, "", "L", false)
 		pdf.SetFont("Arial", "", 10)
