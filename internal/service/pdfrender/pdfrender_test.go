@@ -181,10 +181,10 @@ func TestRenderPDF_InvalidUTF8_ReturnsError(t *testing.T) {
 	}
 }
 
-// TestRenderPDF_NonLatin1_ReturnsError verifies that valid UTF-8 strings containing
-// runes outside Latin-1 (code point > 0xFF) are rejected before rendering because
-// fpdf core fonts (Arial) silently drop them.
-func TestRenderPDF_NonLatin1_ReturnsError(t *testing.T) {
+// TestRenderPDF_NonLatin1_TransliteratesToQuestionMark verifies that valid UTF-8 strings
+// containing runes outside Latin-1 (code point > 0xFF) are transliterated (not rejected)
+// before rendering. CJK characters have no mapping so they become '?' substitutions.
+func TestRenderPDF_NonLatin1_TransliteratesToQuestionMark(t *testing.T) {
 	cases := []struct {
 		name  string
 		field string
@@ -213,11 +213,185 @@ func TestRenderPDF_NonLatin1_ReturnsError(t *testing.T) {
 				sm.Skills = &model.SkillsSection{Kind: model.SkillsKindFlat, Flat: tc.value}
 			}
 			svc := pdfrender.New()
-			_, err := svc.RenderPDF(&sm)
-			if err == nil {
-				t.Errorf("expected error for non-Latin-1 rune in %s, got nil", tc.field)
+			got, err := svc.RenderPDF(&sm)
+			if err != nil {
+				t.Errorf("expected success for non-Latin-1 rune in %s (transliterated), got error: %v", tc.field, err)
+				return
+			}
+			if !bytes.HasPrefix(got, []byte("%PDF")) {
+				t.Errorf("expected PDF magic bytes %%PDF, got: %q", got[:min(4, len(got))])
 			}
 		})
+	}
+}
+
+// TestRenderPDF_AccentedName_Succeeds verifies accented characters are transliterated and PDF succeeds.
+func TestRenderPDF_AccentedName_Succeeds(t *testing.T) {
+	sm := model.SectionMap{
+		SchemaVersion: model.CurrentSchemaVersion,
+		Contact:       model.ContactInfo{Name: "José Müñoz"},
+	}
+	svc := pdfrender.New()
+	got, err := svc.RenderPDF(&sm)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !bytes.HasPrefix(got, []byte("%PDF")) {
+		t.Errorf("expected PDF magic bytes %%PDF, got: %q", got[:min(4, len(got))])
+	}
+}
+
+// TestRenderPDF_BulletInSkills_Succeeds verifies U+2022 bullet in skills flat is transliterated.
+func TestRenderPDF_BulletInSkills_Succeeds(t *testing.T) {
+	sm := model.SectionMap{
+		SchemaVersion: model.CurrentSchemaVersion,
+		Contact:       model.ContactInfo{Name: "Test User"},
+		Skills: &model.SkillsSection{
+			Kind: model.SkillsKindFlat,
+			Flat: "• Python • Go",
+		},
+	}
+	svc := pdfrender.New()
+	got, err := svc.RenderPDF(&sm)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !bytes.HasPrefix(got, []byte("%PDF")) {
+		t.Errorf("expected PDF magic bytes %%PDF, got: %q", got[:min(4, len(got))])
+	}
+}
+
+// TestRenderPDF_EnDashInBullet_Succeeds verifies U+2013 en-dash in experience bullets is transliterated.
+func TestRenderPDF_EnDashInBullet_Succeeds(t *testing.T) {
+	sm := model.SectionMap{
+		SchemaVersion: model.CurrentSchemaVersion,
+		Contact:       model.ContactInfo{Name: "Test User"},
+		Experience: []model.ExperienceEntry{
+			{
+				Company:   "Acme",
+				Role:      "Engineer",
+				StartDate: "2020-01",
+				Bullets:   []string{"Delivered results – exceeded targets"},
+			},
+		},
+	}
+	svc := pdfrender.New()
+	got, err := svc.RenderPDF(&sm)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !bytes.HasPrefix(got, []byte("%PDF")) {
+		t.Errorf("expected PDF magic bytes %%PDF, got: %q", got[:min(4, len(got))])
+	}
+}
+
+// TestRenderPDF_SmartQuotesInSummary_Succeeds verifies U+201C/U+201D smart quotes in summary succeed.
+func TestRenderPDF_SmartQuotesInSummary_Succeeds(t *testing.T) {
+	sm := model.SectionMap{
+		SchemaVersion: model.CurrentSchemaVersion,
+		Contact:       model.ContactInfo{Name: "Test User"},
+		Summary:       "“Seasoned engineer” with a passion for ‘clean code’.",
+	}
+	svc := pdfrender.New()
+	got, err := svc.RenderPDF(&sm)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !bytes.HasPrefix(got, []byte("%PDF")) {
+		t.Errorf("expected PDF magic bytes %%PDF, got: %q", got[:min(4, len(got))])
+	}
+}
+
+// TestRenderPDF_SnowmanInContactName_Succeeds verifies U+2603 snowman is substituted with '?'
+// and rendering succeeds (no error).
+func TestRenderPDF_SnowmanInContactName_Succeeds(t *testing.T) {
+	sm := model.SectionMap{
+		SchemaVersion: model.CurrentSchemaVersion,
+		Contact:       model.ContactInfo{Name: "John ☃ Doe"},
+	}
+	svc := pdfrender.New()
+	got, err := svc.RenderPDF(&sm)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !bytes.HasPrefix(got, []byte("%PDF")) {
+		t.Errorf("expected PDF magic bytes %%PDF, got: %q", got[:min(4, len(got))])
+	}
+}
+
+// TestRenderPDF_CertificationsSection_NoError verifies certifications section renders without error.
+func TestRenderPDF_CertificationsSection_NoError(t *testing.T) {
+	sm := model.SectionMap{
+		SchemaVersion: model.CurrentSchemaVersion,
+		Contact:       model.ContactInfo{Name: "Test User"},
+		Certifications: []model.CertificationEntry{
+			{Name: "AWS Solutions Architect", Issuer: "Amazon", Date: "2022-06"},
+		},
+	}
+	svc := pdfrender.New()
+	got, err := svc.RenderPDF(&sm)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !bytes.HasPrefix(got, []byte("%PDF")) {
+		t.Errorf("expected PDF magic bytes %%PDF, got: %q", got[:min(4, len(got))])
+	}
+}
+
+// TestRenderPDF_PublicationsSection_NoError verifies publications section renders without error.
+func TestRenderPDF_PublicationsSection_NoError(t *testing.T) {
+	sm := model.SectionMap{
+		SchemaVersion: model.CurrentSchemaVersion,
+		Contact:       model.ContactInfo{Name: "Test User"},
+		Publications: []model.PublicationEntry{
+			{Title: "Consistency Models in Practice", Venue: "USENIX ATC", Date: "2020"},
+		},
+	}
+	svc := pdfrender.New()
+	got, err := svc.RenderPDF(&sm)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !bytes.HasPrefix(got, []byte("%PDF")) {
+		t.Errorf("expected PDF magic bytes %%PDF, got: %q", got[:min(4, len(got))])
+	}
+}
+
+// TestRenderPDF_SpeakingSection_NoError verifies speaking section renders without error.
+func TestRenderPDF_SpeakingSection_NoError(t *testing.T) {
+	sm := model.SectionMap{
+		SchemaVersion: model.CurrentSchemaVersion,
+		Contact:       model.ContactInfo{Name: "Test User"},
+		Speaking: []model.SpeakingEntry{
+			{Title: "Building Reliable Pipelines", Event: "GopherCon", Date: "2023"},
+		},
+	}
+	svc := pdfrender.New()
+	got, err := svc.RenderPDF(&sm)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !bytes.HasPrefix(got, []byte("%PDF")) {
+		t.Errorf("expected PDF magic bytes %%PDF, got: %q", got[:min(4, len(got))])
+	}
+}
+
+// TestRenderPDF_OpenSourceSection_NoError verifies open source section renders without error.
+func TestRenderPDF_OpenSourceSection_NoError(t *testing.T) {
+	sm := model.SectionMap{
+		SchemaVersion: model.CurrentSchemaVersion,
+		Contact:       model.ContactInfo{Name: "Test User"},
+		OpenSource: []model.OpenSourceEntry{
+			{Project: "go-apply", Role: "Author", URL: "github.com/alice/go-apply"},
+		},
+	}
+	svc := pdfrender.New()
+	got, err := svc.RenderPDF(&sm)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !bytes.HasPrefix(got, []byte("%PDF")) {
+		t.Errorf("expected PDF magic bytes %%PDF, got: %q", got[:min(4, len(got))])
 	}
 }
 
