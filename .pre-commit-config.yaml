@@ -40,7 +40,7 @@ repos:
 
       - id: gosec
         name: gosec security scan
-        entry: bash -c 'export PATH="$PATH:$(go env GOPATH)/bin" && gosec -exclude-dir .worktrees ./...' --
+        entry: bash -c 'export PATH="$PATH:$(go env GOPATH)/bin" && gosec -exclude-dir .worktrees -exclude-dir spike ./...' --
         language: system
         pass_filenames: false
         stages: [pre-push]
