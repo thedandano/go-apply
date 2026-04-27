@@ -39,10 +39,13 @@ Provide jd_url OR jd_raw_text (not both).
 Returns: session_id + jd_text (raw job description text for you to reason over).
 
 ### Step 3 — Extract keywords yourself
-From jd_text, extract the following fields:
+Follow the extraction_protocol field in the load_jd response exactly. Key rules:
+- Copy exact strings from the JD — do NOT paraphrase or substitute synonyms.
+- Extract ALL explicitly stated terms; do not filter by importance.
+- Find labeled sections first (Required/Preferred); fall back to technical nouns if none exist.
 
-Required fields: title (string), company (string), required (string array, 5–10 must-have skills)
-Optional fields: preferred (string array, 0–5 nice-to-have skills), location (string), seniority ("junior"|"mid"|"senior"|"lead"|"director"), required_years (number)
+Required fields: title (string), company (string), required (string array — all must-have skills, no cap)
+Optional fields: preferred (string array — all nice-to-have skills), location (string), seniority ("junior"|"mid"|"senior"|"lead"|"director"), required_years (number)
 Missing values: omit the field entirely. Do NOT invent values.
 
 Show the extracted keywords to the user (title, company, required, preferred), then immediately call submit_keywords — do NOT ask the user to confirm or wait for a response.
