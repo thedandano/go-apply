@@ -88,6 +88,26 @@ func TestCheckFR010a_ProfileMissing(t *testing.T) {
 	}
 }
 
+// TestCheckFR010a_ReplaceOp verifies that EditOpReplace edits are also checked.
+// A regression that only checked EditOpAdd would silently allow unevidenced replace edits.
+func TestCheckFR010a_ReplaceOp(t *testing.T) {
+	dir := t.TempDir()
+	writeFR010aProfile(t, dir, []string{"Go"})
+
+	env := mcpserver.CheckFR010aReplaceForTest(context.Background(), "ses1", dir, "Go, Terraform")
+	if env == nil {
+		t.Fatal("expected error envelope for unevidenced token via replace op, got nil")
+	}
+	if env.Error.Code != "unevidenced_skill" {
+		t.Errorf("code=%q; want unevidenced_skill", env.Error.Code)
+	}
+	details, _ := env.Error.Details.(map[string]interface{})
+	tokens, _ := details["unevidenced_tokens"].([]string)
+	if len(tokens) == 0 || tokens[0] != "Terraform" {
+		t.Errorf("unevidenced_tokens=%v; want [Terraform]", tokens)
+	}
+}
+
 // TestCheckFR010a_MultipleUnevidenced verifies all unevidenced tokens appear in the details.
 func TestCheckFR010a_MultipleUnevidenced(t *testing.T) {
 	dir := t.TempDir()

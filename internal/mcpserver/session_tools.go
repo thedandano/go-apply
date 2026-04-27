@@ -857,14 +857,18 @@ func checkFR010a(ctx context.Context, sessionID string, edits []port.Edit, dataD
 			)
 			return nil
 		}
-		// Unexpected load error — log and allow through (do not block tailoring).
-		slog.WarnContext(ctx, "fr010a: profile load error; check skipped",
-			slog.String("event", "fr_010a_skipped"),
-			slog.String("reason", "profile_load_error"),
+		// Unexpected load error — fail closed: do not allow unevidenced skills through
+		// when the profile is present but unreadable (corrupted, schema mismatch, I/O error).
+		slog.WarnContext(ctx, "fr010a: profile unreadable; blocking tailoring",
+			slog.String("event", "fr_010a_blocked"),
+			slog.String("reason", "profile_unreadable"),
 			slog.String("tool", "submit_tailor_t1"),
 			slog.String("error", err.Error()),
 		)
-		return nil
+		return stageErrorEnvelope(sessionID, "tailor_t1", "profile_unreadable",
+			"compiled profile cannot be read — run compile_profile to fix: "+err.Error(),
+			true,
+		)
 	}
 
 	// Build evidenced skill set from all successfully-tagged stories.

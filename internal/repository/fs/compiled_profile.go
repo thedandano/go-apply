@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -65,8 +66,8 @@ func (r *CompiledProfileRepo) Save(dataDir string, profile model.CompiledProfile
 	if err := os.WriteFile(tmp, data, 0o600); err != nil { // #nosec G306
 		return fmt.Errorf("write compiled profile tmp: %w", err)
 	}
+	defer func() { _ = os.Remove(tmp) }() // no-op after successful rename; cleans up on panic or early return
 	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
 		return fmt.Errorf("rename compiled profile: %w", err)
 	}
 	return nil
@@ -104,9 +105,13 @@ func (r *CompiledProfileRepo) IsStale(dataDir string) (bool, []string, error) {
 
 	var staleFiles []string
 	for _, name := range sources {
-		info, err := os.Stat(filepath.Join(dataDir, name)) // #nosec G304
-		if err != nil {
-			continue // file unreadable — skip silently
+		info, statErr := os.Stat(filepath.Join(dataDir, name)) // #nosec G304
+		if statErr != nil {
+			slog.Warn("compiled_profile: skipping unreadable source file in staleness check",
+				slog.String("file", name),
+				slog.String("error", statErr.Error()),
+			)
+			continue
 		}
 		if info.ModTime().After(compiledAt) {
 			staleFiles = append(staleFiles, name)

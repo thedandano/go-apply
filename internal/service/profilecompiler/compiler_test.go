@@ -3,7 +3,6 @@ package profilecompiler_test
 import (
 	"context"
 	"fmt"
-	"strings"
 	"testing"
 	"time"
 
@@ -223,6 +222,10 @@ func TestCompile_DeferredCarriesForward(t *testing.T) {
 		if o.Skill == "Kubernetes" && !o.Deferred {
 			t.Error("Kubernetes Deferred=false; want true (carried from prior)")
 		}
+		// Skills not in the prior must NOT inherit Deferred=true.
+		if o.Skill != "Kubernetes" && o.Deferred {
+			t.Errorf("skill %q Deferred=true but was not deferred in prior; want false", o.Skill)
+		}
 	}
 }
 
@@ -306,10 +309,4 @@ func orphanSet(orphans []model.OrphanedSkill) map[string]bool {
 		m[o.Skill] = true
 	}
 	return m
-}
-
-// storyPromptKey is replicated from the compiler's internal prompt format.
-// Tests must match the format used in compiler.go.
-func init() {
-	_ = strings.Contains // ensure strings imported
 }

@@ -53,7 +53,7 @@ func TestHandleOnboardUserWith_TriggersRecompile(t *testing.T) {
 		"resume_label":   "backend",
 	})
 
-	result := mcpserver.HandleOnboardUserWith(context.Background(), req, svc, stub, dir)
+	result := mcpserver.HandleOnboardUserWith(context.Background(), req, svc, stub, nil, dir)
 	text := textFrom(t, result)
 
 	var resp map[string]interface{}
@@ -95,7 +95,7 @@ func TestHandleOnboardUserWith_NilLLM_SkipsCompile(t *testing.T) {
 		"resume_label":   "backend",
 	})
 
-	result := mcpserver.HandleOnboardUserWith(context.Background(), req, svc, nil, dir)
+	result := mcpserver.HandleOnboardUserWith(context.Background(), req, svc, nil, nil, dir)
 	text := textFrom(t, result)
 
 	var resp map[string]interface{}
