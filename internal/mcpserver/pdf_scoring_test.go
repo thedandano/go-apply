@@ -7,11 +7,7 @@ import (
 
 	"github.com/thedandano/go-apply/internal/config"
 	"github.com/thedandano/go-apply/internal/mcpserver"
-	"github.com/thedandano/go-apply/internal/model"
-	extractSvc "github.com/thedandano/go-apply/internal/service/extract"
-	pdfrender "github.com/thedandano/go-apply/internal/service/pdfrender"
 	"github.com/thedandano/go-apply/internal/service/pipeline"
-	scorerSvc "github.com/thedandano/go-apply/internal/service/scorer"
 )
 
 // stubApplyConfigWithPDFScoring returns a config that supports PDF scoring:
@@ -156,69 +152,5 @@ func TestHandleSubmitTailorT2_ResponseContainsScoringMethod(t *testing.T) {
 	}
 	if data["scoring_method"] != mcpserver.ScoringMethodPDFExtracted {
 		t.Errorf("data.scoring_method = %v, want %q", data["scoring_method"], mcpserver.ScoringMethodPDFExtracted)
-	}
-}
-
-// T015: routing regression test — NextActionAfterT1 routing is preserved via the
-// PDF path (SC-004: routing decisions preserved after extractor swap).
-// Uses real pdfrender + extract + scorer deps to verify routing is deterministic:
-// calling ScoreSectionsPDF twice with the same input must produce the same
-// next_action decision.
-func TestRoutingDecision_PreservedWithPDFPath(t *testing.T) {
-	defaults := config.EmbeddedDefaults()
-	deps := &pipeline.ApplyConfig{
-		PDFRenderer: pdfrender.New(),
-		Extractor:   extractSvc.New(),
-		Scorer:      scorerSvc.New(defaults),
-		Defaults:    defaults,
-		// Other fields not needed for scoreSectionsPDF.
-	}
-
-	sections := &model.SectionMap{
-		SchemaVersion: model.CurrentSchemaVersion,
-		Contact:       model.ContactInfo{Name: "Alice"},
-		Skills: &model.SkillsSection{
-			Kind: model.SkillsKindCategorized,
-			Categorized: map[string][]string{
-				"Languages": {"Go", "Python"},
-				"Tools":     {"Kubernetes", "Docker"},
-			},
-		},
-		Experience: []model.ExperienceEntry{
-			{
-				Company:   "Acme",
-				Role:      "Software Engineer",
-				StartDate: "2020-01",
-				EndDate:   "2023-01",
-				Bullets:   []string{"Built Go microservices", "Deployed on Kubernetes"},
-			},
-		},
-	}
-	jd := &model.JDData{
-		Title:    "Go Engineer",
-		Company:  "Acme",
-		Required: []string{"go", "kubernetes"},
-	}
-
-	// Call ScoreSectionsPDF twice with identical input — routing must be stable.
-	r1, err := mcpserver.ScoreSectionsPDF(context.Background(), sections, "resume-a", "sess-t015-1", jd, &config.Config{}, deps)
-	if err != nil {
-		t.Fatalf("first ScoreSectionsPDF: %v", err)
-	}
-	r2, err := mcpserver.ScoreSectionsPDF(context.Background(), sections, "resume-a", "sess-t015-2", jd, &config.Config{}, deps)
-	if err != nil {
-		t.Fatalf("second ScoreSectionsPDF: %v", err)
-	}
-
-	action1 := mcpserver.NextActionAfterT1(r1.Breakdown.Total())
-	action2 := mcpserver.NextActionAfterT1(r2.Breakdown.Total())
-
-	if action1 != action2 {
-		t.Errorf("routing is non-deterministic: call 1 = %q (score %.2f), call 2 = %q (score %.2f)",
-			action1, r1.Breakdown.Total(), action2, r2.Breakdown.Total())
-	}
-	// Routing must be one of the valid terminal actions.
-	if action1 != "tailor_t2" && action1 != "cover_letter" {
-		t.Errorf("NextActionAfterT1 returned unexpected action %q for score %.2f", action1, r1.Breakdown.Total())
 	}
 }

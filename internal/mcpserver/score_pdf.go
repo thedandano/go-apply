@@ -14,22 +14,8 @@ import (
 // computed from PDF-extracted text via the render→extract→score pipeline.
 const ScoringMethodPDFExtracted = "pdf_extracted"
 
-// ScoreSectionsPDF renders sections to PDF, extracts plain text, and scores it.
-// It is exported so that tests in the mcpserver_test package can call it directly.
-// In production it is called by T0/T1/T2 handlers.
-func ScoreSectionsPDF(
-	ctx context.Context,
-	sections *model.SectionMap,
-	label string,
-	sessionID string,
-	jd *model.JDData,
-	cfg *config.Config,
-	deps *pipeline.ApplyConfig,
-) (model.ScoreResult, error) {
-	return scoreSectionsPDF(ctx, sections, label, sessionID, jd, cfg, deps)
-}
-
-// scoreSectionsPDF is the unexported implementation called by handlers.
+// scoreSectionsPDF renders sections to PDF, extracts plain text, and scores it.
+// Called by T0/T1/T2 handlers.
 func scoreSectionsPDF(
 	ctx context.Context,
 	sections *model.SectionMap,

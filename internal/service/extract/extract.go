@@ -6,9 +6,15 @@ import (
 	"fmt"
 	"io"
 
+	// ledongthuc/pdf has no tagged releases; the pseudo-version pin is intentional.
 	pdf "github.com/ledongthuc/pdf"
 
 	"github.com/thedandano/go-apply/internal/port"
+)
+
+const (
+	maxPDFInputBytes  = 10 * 1024 * 1024 // 10 MB — guard against oversized uploads
+	maxExtractedBytes = 16 * 1024 * 1024 // 16 MB — guard against pathologically dense PDFs
 )
 
 var _ port.Extractor = (*Service)(nil)
@@ -26,9 +32,21 @@ func New() *Service {
 // treating empty output as an extraction failure.
 // ctx is accepted for interface compliance and caller-cancellation awareness,
 // but the ledongthuc/pdf library does not support context cancellation.
-func (s *Service) Extract(_ context.Context, data []byte) (string, error) {
+func (s *Service) Extract(ctx context.Context, data []byte) (out string, retErr error) {
+	defer func() {
+		if r := recover(); r != nil {
+			retErr = fmt.Errorf("extract: pdf panic: %v", r)
+		}
+	}()
+
 	if len(data) == 0 {
 		return "", nil
+	}
+	if len(data) > maxPDFInputBytes {
+		return "", fmt.Errorf("extract: input too large (%d bytes, max %d)", len(data), maxPDFInputBytes)
+	}
+	if err := ctx.Err(); err != nil {
+		return "", fmt.Errorf("extract: %w", err)
 	}
 
 	r, err := pdf.NewReader(bytes.NewReader(data), int64(len(data)))
@@ -39,7 +57,7 @@ func (s *Service) Extract(_ context.Context, data []byte) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("extract: get plain text: %w", err)
 	}
-	b, err := io.ReadAll(tr)
+	b, err := io.ReadAll(io.LimitReader(tr, maxExtractedBytes))
 	if err != nil {
 		return "", fmt.Errorf("extract: read text: %w", err)
 	}

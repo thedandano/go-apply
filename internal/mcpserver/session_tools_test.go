@@ -1437,3 +1437,88 @@ func TestNextActionFromScore(t *testing.T) {
 		}
 	}
 }
+
+// ── state guard tests ─────────────────────────────────────────────────────────
+
+// TestHandleSubmitTailorT1_AfterT2_ReturnsInvalidState asserts that T1 cannot run
+// after T2 has already been applied — the state machine must block it.
+func TestHandleSubmitTailorT1_AfterT2_ReturnsInvalidState(t *testing.T) {
+	cfg := stubApplyConfigWithExperienceSections()
+
+	// Advance through the full T0 → T1 → T2 pipeline.
+	loadReq := callToolRequest("load_jd", map[string]any{"jd_raw_text": "Senior Go engineer."})
+	loadText := extractText(t, mcpserver.HandleLoadJDWithConfig(context.Background(), &loadReq, &cfg))
+	var loadEnv map[string]any
+	if err := json.Unmarshal([]byte(loadText), &loadEnv); err != nil {
+		t.Fatalf("load_jd not JSON: %v", err)
+	}
+	sessionID, _ := loadEnv["session_id"].(string)
+
+	const jdJSON = `{"title":"Go Engineer","company":"Acme","required":["go"],"preferred":[]}`
+	kwReq := callToolRequest("submit_keywords", map[string]any{"session_id": sessionID, "jd_json": jdJSON})
+	mcpserver.HandleSubmitKeywordsWithConfig(context.Background(), &kwReq, &cfg, &config.Config{})
+
+	t1Req := callToolRequest("submit_tailor_t1", map[string]any{
+		"session_id": sessionID,
+		"edits":      `[{"section":"skills","op":"add","value":"Kubernetes"}]`,
+	})
+	mcpserver.HandleSubmitTailorT1WithConfig(context.Background(), &t1Req, &cfg, &config.Config{})
+
+	t2Req := callToolRequest("submit_tailor_t2", map[string]any{
+		"session_id": sessionID,
+		"edits":      `[{"section":"experience","op":"replace","target":"exp-0-b0","value":"Built distributed systems"}]`,
+	})
+	mcpserver.HandleSubmitTailorT2WithConfig(context.Background(), &t2Req, &cfg, &config.Config{})
+
+	// Attempt T1 again — must be rejected now that state is stateT2Applied.
+	t1AgainReq := callToolRequest("submit_tailor_t1", map[string]any{
+		"session_id": sessionID,
+		"edits":      `[{"section":"skills","op":"add","value":"Docker"}]`,
+	})
+	result := mcpserver.HandleSubmitTailorT1WithConfig(context.Background(), &t1AgainReq, &cfg, &config.Config{})
+	text := extractText(t, result)
+	if !strings.Contains(text, "invalid_state") {
+		t.Errorf("expected invalid_state after T2, got: %s", text)
+	}
+}
+
+// stubZeroResumesRepo returns an empty (non-nil) slice so submit_keywords has nothing to score.
+type stubZeroResumesRepo struct {
+	stubResumeRepo
+}
+
+func (s *stubZeroResumesRepo) ListResumes() ([]model.ResumeFile, error) {
+	return []model.ResumeFile{}, nil
+}
+
+// TestHandleSubmitKeywords_EmptyResumeList_ReturnsScoreFailed asserts that an empty
+// resume list produces a score_failed error rather than silently returning no scores.
+func TestHandleSubmitKeywords_EmptyResumeList_ReturnsScoreFailed(t *testing.T) {
+	cfg := stubApplyConfigForSession()
+	cfg.Resumes = &stubZeroResumesRepo{}
+
+	loadReq := callToolRequest("load_jd", map[string]any{"jd_raw_text": "Senior Go engineer."})
+	loadText := extractText(t, mcpserver.HandleLoadJDWithConfig(context.Background(), &loadReq, &cfg))
+	var loadEnv map[string]any
+	if err := json.Unmarshal([]byte(loadText), &loadEnv); err != nil {
+		t.Fatalf("load_jd not JSON: %v", err)
+	}
+	sessionID, _ := loadEnv["session_id"].(string)
+
+	const jdJSON = `{"title":"Go Engineer","company":"Acme","required":["go"],"preferred":[]}`
+	kwReq := callToolRequest("submit_keywords", map[string]any{"session_id": sessionID, "jd_json": jdJSON})
+	result := mcpserver.HandleSubmitKeywordsWithConfig(context.Background(), &kwReq, &cfg, &config.Config{})
+	text := extractText(t, result)
+
+	var env map[string]any
+	if err := json.Unmarshal([]byte(text), &env); err != nil {
+		t.Fatalf("not JSON: %v — raw: %s", err, text)
+	}
+	if env["status"] != "error" {
+		t.Errorf("status = %v, want error when no resumes exist", env["status"])
+	}
+	errObj, _ := env["error"].(map[string]any)
+	if errObj == nil || errObj["code"] != "score_failed" {
+		t.Errorf("expected error.code=score_failed, got: %v — full: %s", errObj, text)
+	}
+}

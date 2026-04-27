@@ -69,3 +69,24 @@ func TestExtract_CorruptBytes_ReturnsError(t *testing.T) {
 		t.Error("expected error for corrupt/non-PDF bytes, got nil")
 	}
 }
+
+// Input larger than maxPDFInputBytes must be rejected before parsing.
+func TestExtract_OversizedInput_ReturnsError(t *testing.T) {
+	svc := extract.New()
+	// 11 MB — exceeds the 10 MB cap.
+	oversized := make([]byte, 11*1024*1024)
+	_, err := svc.Extract(context.Background(), oversized)
+	if err == nil {
+		t.Error("expected error for oversized input, got nil")
+	}
+}
+
+// A PDF that causes the underlying library to panic must not crash the process.
+func TestExtract_MalformedPDF_DoesNotPanic(_ *testing.T) {
+	svc := extract.New()
+	// Craft a byte slice that starts like a PDF header but is otherwise garbage,
+	// maximizing the chance that the parser reaches an unexpected code path.
+	malformed := append([]byte("%PDF-1.4\n"), bytes.Repeat([]byte{0xFF, 0x00}, 512)...)
+	// We only care that Extract returns without panicking.
+	_, _ = svc.Extract(context.Background(), malformed)
+}

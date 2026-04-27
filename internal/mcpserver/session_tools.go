@@ -23,6 +23,8 @@ import (
 )
 
 // sessions is the process-lifetime session store shared by all multi-turn handlers.
+// The MCP server uses stdio dispatch (one JSON-RPC message at a time), so concurrent
+// access to the same session from multiple goroutines cannot occur in production.
 var sessions = NewSessionStore()
 
 // HandleLoadJD is the exported handler for the "load_jd" MCP tool.
@@ -161,6 +163,10 @@ func HandleSubmitKeywordsWithConfig(ctx context.Context, req *mcp.CallToolReques
 	if listErr != nil {
 		slog.ErrorContext(ctx, "submit_keywords: list resumes failed", "session_id", sessionID, "error", listErr)
 		return envelopeResult(stageErrorEnvelope(sessionID, "score", "score_failed", listErr.Error(), false))
+	}
+	if len(resumeFiles) == 0 {
+		slog.ErrorContext(ctx, "submit_keywords: no resumes found", "session_id", sessionID)
+		return envelopeResult(stageErrorEnvelope(sessionID, "score", "score_failed", "no resumes found — run onboard_user first", false))
 	}
 
 	// Fan-out: score each resume from its PDF representation via errgroup.
