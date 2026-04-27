@@ -40,6 +40,11 @@ func TestHandleCreateStory_HappyPath(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "skills.md"), []byte("Go\nKubernetes"), 0o600); err != nil {
 		t.Fatalf("write skills.md: %v", err)
 	}
+	// Write the story file that stubCreator will claim to have created — recompile needs it on disk.
+	storyContent := "## Go — technical @ Backend Engineer\n**Situation:** s\n**Behavior:** b\n**Impact:** i"
+	if err := os.WriteFile(filepath.Join(dir, "accomplishments-0.md"), []byte(storyContent), 0o600); err != nil {
+		t.Fatalf("write accomplishments-0.md: %v", err)
+	}
 
 	creator := &stubCreator{out: model.StoryOutput{SourceFile: "accomplishments-0.md"}}
 	stub := llmstub.New(map[string]string{}, 0, "")
@@ -62,6 +67,9 @@ func TestHandleCreateStory_HappyPath(t *testing.T) {
 	}
 	if resp["source_file"] != "accomplishments-0.md" {
 		t.Errorf("source_file=%q; want accomplishments-0.md", resp["source_file"])
+	}
+	if storyID, _ := resp["story_id"].(string); storyID == "" {
+		t.Errorf("story_id is empty; compiled profile should have story for accomplishments-0.md")
 	}
 }
 

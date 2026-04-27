@@ -3,7 +3,6 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -15,7 +14,6 @@ import (
 	"github.com/thedandano/go-apply/internal/model"
 	"github.com/thedandano/go-apply/internal/port"
 	"github.com/thedandano/go-apply/internal/repository/fs"
-	"github.com/thedandano/go-apply/internal/service/profilecompiler"
 	"github.com/thedandano/go-apply/internal/service/storycreator"
 )
 
@@ -55,33 +53,10 @@ func HandleCreateStoryWith(
 		return errorResult(err.Error())
 	}
 
-	// 3. Recompile the profile so the new story is tagged and orphans are updated.
-	profileRepo := fs.NewCompiledProfileRepository()
-	prior, loadErr := profileRepo.Load(dataDir)
-	var priorPtr *model.CompiledProfile
-	if loadErr == nil {
-		priorPtr = &prior
-	} else if !errors.Is(loadErr, model.ErrProfileMissing) {
-		return errorResult("story saved, recompilation failed: load prior profile: " + loadErr.Error())
-	}
-
-	skillsText, rawStories, readErr := readSourceFiles(dataDir)
-	if readErr != nil {
-		return errorResult("story saved, recompilation failed: read source files: " + readErr.Error())
-	}
-
-	compiler := profilecompiler.New(llmClient, slog.Default())
-	compiled, compileErr := compiler.Compile(ctx, model.CompileInput{
-		SkillsText:   skillsText,
-		Stories:      rawStories,
-		PriorProfile: priorPtr,
-	})
+	// 3. Recompile so the new story is tagged and orphans are updated.
+	compiled, _, compileErr := runCompile(ctx, dataDir, llmClient)
 	if compileErr != nil {
 		return errorResult("story saved, recompilation failed: " + compileErr.Error())
-	}
-	if saveErr := profileRepo.Save(dataDir, compiled); saveErr != nil {
-		slog.WarnContext(ctx, "create_story: save compiled profile failed", slog.String("error", saveErr.Error()))
-		return errorResult("story saved, recompilation failed: " + saveErr.Error())
 	}
 
 	// 4. Find the new story in the compiled profile.
@@ -114,7 +89,10 @@ func HandleCreateStoryWith(
 		"compiled_at":       compiled.CompiledAt,
 		"remaining_orphans": remaining,
 	}
-	data, _ := json.Marshal(out2)
+	data, marshalErr := json.Marshal(out2)
+	if marshalErr != nil {
+		return errorResult("marshal response: " + marshalErr.Error())
+	}
 	return mcp.NewToolResultText(string(data))
 }
 

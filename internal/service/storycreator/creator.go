@@ -16,13 +16,13 @@ import (
 // Service implements port.StoryCreatorService.
 type Service struct {
 	dataDir    string
-	careerRepo port.SectionsRepository
+	careerRepo port.CareerRepository
 	log        *slog.Logger
 }
 
 // New returns a Service writing to dataDir.
 // log may be nil (defaults to slog.Default).
-func New(dataDir string, careerRepo port.SectionsRepository, log *slog.Logger) *Service {
+func New(dataDir string, careerRepo port.CareerRepository, log *slog.Logger) *Service {
 	if log == nil {
 		log = slog.Default()
 	}

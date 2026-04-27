@@ -6,9 +6,15 @@ import (
 	"github.com/thedandano/go-apply/internal/port"
 )
 
-// CheckFR010aForTest exposes checkFR010a for black-box testing.
+// CheckFR010aForTest exposes checkFR010a for black-box testing using EditOpAdd.
 // valueStr is treated as a single add-edit value (comma-separated skill tokens).
 func CheckFR010aForTest(ctx context.Context, sessionID, dataDir, valueStr string) *Envelope {
 	edits := []port.Edit{{Section: "skills", Op: port.EditOpAdd, Value: valueStr}}
+	return checkFR010a(ctx, sessionID, edits, dataDir)
+}
+
+// CheckFR010aReplaceForTest exposes checkFR010a using EditOpReplace.
+func CheckFR010aReplaceForTest(ctx context.Context, sessionID, dataDir, valueStr string) *Envelope {
+	edits := []port.Edit{{Section: "skills", Op: port.EditOpReplace, Value: valueStr}}
 	return checkFR010a(ctx, sessionID, edits, dataDir)
 }

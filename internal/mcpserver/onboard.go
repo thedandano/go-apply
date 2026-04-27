@@ -24,15 +24,22 @@ import (
 func HandleOnboardUser(ctx context.Context, req *mcp.CallToolRequest, svc port.Onboarder) *mcp.CallToolResult {
 	dataDir := config.DataDir()
 	var llmClient port.LLMClient
+	var llmErr error
 	if cfg, _, err := loadDeps(); err == nil {
-		llmClient, _ = newLLMClient(cfg)
+		llmClient, llmErr = newLLMClient(cfg)
+		if llmErr != nil {
+			slog.WarnContext(ctx, "onboard_user: LLM client unavailable; compile will be skipped",
+				slog.String("error", llmErr.Error()),
+			)
+		}
 	}
-	return HandleOnboardUserWith(ctx, req, svc, llmClient, dataDir)
+	return HandleOnboardUserWith(ctx, req, svc, llmClient, llmErr, dataDir)
 }
 
 // HandleOnboardUserWith is the testable core for "onboard_user".
-// llmClient may be nil — when nil, recompilation is skipped and the response omits compile info.
-func HandleOnboardUserWith(ctx context.Context, req *mcp.CallToolRequest, svc port.Onboarder, llmClient port.LLMClient, dataDir string) *mcp.CallToolResult {
+// llmClient may be nil — when nil, recompilation is skipped.
+// llmErr is non-nil when the LLM client could not be constructed; surfaced in compile status.
+func HandleOnboardUserWith(ctx context.Context, req *mcp.CallToolRequest, svc port.Onboarder, llmClient port.LLMClient, llmErr error, dataDir string) *mcp.CallToolResult {
 	resumeContent := req.GetString("resume_content", "")
 	resumeLabel := req.GetString("resume_label", "")
 	skills := req.GetString("skills", "")
@@ -104,9 +111,17 @@ func HandleOnboardUserWith(ctx context.Context, req *mcp.CallToolRequest, svc po
 	// Trigger recompilation when an LLM is available (US5 mutation wiring).
 	if llmClient != nil {
 		out["compile"] = extractCompileSummary(ctx, dataDir, llmClient)
+	} else if llmErr != nil {
+		out["compile"] = map[string]interface{}{
+			"status": "compile_skipped",
+			"error":  llmErr.Error(),
+		}
 	}
 
-	data, _ := json.Marshal(out)
+	data, marshalErr := json.Marshal(out)
+	if marshalErr != nil {
+		return errorResult("marshal response: " + marshalErr.Error())
+	}
 	slog.DebugContext(ctx, "mcp tool result",
 		slog.String("tool", "onboard_user"),
 		slog.String("status", "ok"),

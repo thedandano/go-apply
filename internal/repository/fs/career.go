@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/thedandano/go-apply/internal/model"
 	"github.com/thedandano/go-apply/internal/port"
@@ -15,13 +16,17 @@ import (
 
 const careerFile = "career.json"
 
-// CareerRepo implements port.SectionsRepository using career.json in the data dir.
-type CareerRepo struct{}
+// CareerRepo implements port.CareerRepository using career.json in the data dir.
+// mu serialises HasExperience+AppendExperience to prevent TOCTOU races on concurrent
+// create_story calls with is_new_job=true.
+type CareerRepo struct {
+	mu sync.Mutex
+}
 
 // NewCareerRepository returns a new CareerRepo.
 func NewCareerRepository() *CareerRepo { return &CareerRepo{} }
 
-var _ port.SectionsRepository = (*CareerRepo)(nil)
+var _ port.CareerRepository = (*CareerRepo)(nil)
 
 func careerPath(dataDir string) string { return filepath.Join(dataDir, careerFile) }
 
@@ -50,8 +55,8 @@ func saveCareer(dataDir string, refs []model.ExperienceRef) error {
 	if err := os.WriteFile(tmp, data, 0o600); err != nil { // #nosec G306
 		return fmt.Errorf("write career tmp: %w", err)
 	}
+	defer func() { _ = os.Remove(tmp) }() // no-op after successful rename; cleans up on panic or early return
 	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
 		return fmt.Errorf("rename career file: %w", err)
 	}
 	return nil
@@ -60,6 +65,8 @@ func saveCareer(dataDir string, refs []model.ExperienceRef) error {
 // HasExperience reports whether a role matching jobTitle exists in career.json.
 // Case-insensitive comparison.
 func (r *CareerRepo) HasExperience(dataDir string, jobTitle string) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	refs, err := loadCareer(dataDir)
 	if err != nil {
 		return false, err
@@ -75,6 +82,8 @@ func (r *CareerRepo) HasExperience(dataDir string, jobTitle string) (bool, error
 
 // AppendExperience adds ref to career.json atomically.
 func (r *CareerRepo) AppendExperience(dataDir string, ref model.ExperienceRef) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	refs, err := loadCareer(dataDir)
 	if err != nil {
 		return err

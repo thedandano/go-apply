@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -32,6 +33,16 @@ func HandleCompileProfile(ctx context.Context, _ *mcp.CallToolRequest) *mcp.Call
 
 // HandleCompileProfileWith is the testable core — accepts explicit dataDir and LLM client.
 func HandleCompileProfileWith(ctx context.Context, dataDir string, llmClient port.LLMClient) *mcp.CallToolResult {
+	profile, status, err := runCompile(ctx, dataDir, llmClient)
+	if err != nil {
+		return errorResult(err.Error())
+	}
+	return compileProfileResult(status, profile)
+}
+
+// runCompile is the shared compile pipeline: staleness check → read sources → LLM tag → save.
+// Returns the compiled profile, a status string ("already_up_to_date" or "compiled"), and any error.
+func runCompile(ctx context.Context, dataDir string, llmClient port.LLMClient) (*model.CompiledProfile, string, error) {
 	repo := fs.NewCompiledProfileRepository()
 	compiler := profilecompiler.New(llmClient, slog.Default())
 
@@ -43,42 +54,40 @@ func HandleCompileProfileWith(ctx context.Context, dataDir string, llmClient por
 		// 2. Staleness check — only when profile exists.
 		stale, _, staleErr := repo.IsStale(dataDir)
 		if staleErr == nil && !stale {
-			// Profile is current — return existing data without recompiling.
-			return compileProfileResult("already_up_to_date", &prior)
+			return &prior, "already_up_to_date", nil
 		}
 	} else if !errors.Is(err, model.ErrProfileMissing) {
-		return errorResult("load compiled profile: " + err.Error())
+		return nil, "", fmt.Errorf("load compiled profile: %w", err)
 	}
 	// ErrProfileMissing → priorPtr remains nil → always compile.
 
 	// 3. Read source files.
-	skillsText, rawStories, readErr := readSourceFiles(dataDir)
+	skillsText, rawStories, readErr := readSourceFiles(ctx, dataDir)
 	if readErr != nil {
-		return errorResult("read source files: " + readErr.Error())
+		return nil, "", fmt.Errorf("read source files: %w", readErr)
 	}
 
 	// 4. Compile.
-	input := model.CompileInput{
+	compiled, compileErr := compiler.Compile(ctx, model.CompileInput{
 		SkillsText:   skillsText,
 		Stories:      rawStories,
 		PriorProfile: priorPtr,
-	}
-	compiled, compileErr := compiler.Compile(ctx, input)
+	})
 	if compileErr != nil {
-		return errorResult("compile: " + compileErr.Error())
+		return nil, "", fmt.Errorf("compile: %w", compileErr)
 	}
 
 	// 5. Save atomically.
 	if saveErr := repo.Save(dataDir, compiled); saveErr != nil {
 		slog.WarnContext(ctx, "compile_profile: save failed", slog.String("error", saveErr.Error()))
-		return errorResult("save compiled profile: " + saveErr.Error())
+		return nil, "", fmt.Errorf("save compiled profile: %w", saveErr)
 	}
 
-	return compileProfileResult("compiled", &compiled)
+	return &compiled, "compiled", nil
 }
 
 // readSourceFiles reads skills.md and all accomplishments-N.md files from dataDir.
-func readSourceFiles(dataDir string) (string, []model.RawStory, error) {
+func readSourceFiles(ctx context.Context, dataDir string) (string, []model.RawStory, error) {
 	skillsPath := filepath.Join(dataDir, "skills.md")
 	skillsData, err := os.ReadFile(skillsPath) // #nosec G304
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -89,8 +98,12 @@ func readSourceFiles(dataDir string) (string, []model.RawStory, error) {
 	matches, _ := filepath.Glob(filepath.Join(dataDir, "accomplishments-*.md"))
 	stories := make([]model.RawStory, 0, len(matches))
 	for _, path := range matches {
-		data, err := os.ReadFile(path) // #nosec G304
-		if err != nil {
+		data, readErr := os.ReadFile(path) // #nosec G304
+		if readErr != nil {
+			slog.WarnContext(ctx, "compile_profile: skipping unreadable accomplishments file",
+				slog.String("path", filepath.Base(path)),
+				slog.String("error", readErr.Error()),
+			)
 			continue
 		}
 		stories = append(stories, model.RawStory{
@@ -149,6 +162,9 @@ func compileProfileResult(status string, p *model.CompiledProfile) *mcp.CallTool
 		"stories":                 stories,
 		"orphaned_skills":         orphans,
 	}
-	data, _ := json.Marshal(out)
+	data, err := json.Marshal(out)
+	if err != nil {
+		return errorResult("marshal response: " + err.Error())
+	}
 	return mcp.NewToolResultText(string(data))
 }

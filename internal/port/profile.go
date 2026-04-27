@@ -7,10 +7,6 @@ import (
 )
 
 // ProfileCompiler tags each story with matching skills and identifies orphaned skills.
-//
-// Implementations MUST NOT import CompiledProfileRepository. The caller (MCP handler)
-// is responsible for loading the prior profile and passing it as CompileInput.PriorProfile.
-// This enforces the hexagonal architecture invariant: dependency arrows flow inward.
 type ProfileCompiler interface {
 	// Compile tags each story with matching skills and identifies orphaned skills.
 	// On partial LLM failure, returns a CompiledProfile with PartialTaggingFailure=true
@@ -49,10 +45,10 @@ type StoryCreatorService interface {
 	Create(ctx context.Context, input model.StoryInput) (model.StoryOutput, error)
 }
 
-// SectionsRepository manages the career experience catalog used by StoryCreator
-// to classify stories by job title. This is separate from per-resume sections files
-// and is stored as career.json in the data directory.
-type SectionsRepository interface {
+// CareerRepository manages the career experience catalog used by StoryCreator
+// to classify stories by job title. Stored as career.json in the data directory,
+// separate from per-resume sections files to avoid two-writer conflicts.
+type CareerRepository interface {
 	// HasExperience reports whether a role with the given title exists in career.json.
 	HasExperience(dataDir string, jobTitle string) (bool, error)
 
