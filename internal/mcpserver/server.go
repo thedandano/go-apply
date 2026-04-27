@@ -72,6 +72,36 @@ func NewServer() *server.MCPServer {
 		},
 	)
 
+	// ── Profile tools (compile, story creation) ───────────────────────────────
+
+	srv.AddTool(
+		mcp.NewTool("compile_profile",
+			mcp.WithDescription("Read all skills and accomplishment files from the user's profile, tag each story with matching skills, and write a compiled profile artifact. Returns all stories (with skill tags and classification), orphaned skills (skills with no supporting story), and any LLM tagging failures. Call this after onboard_user, after adding a new skills file, or after the user reports adding a new accomplishment file."),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return HandleCompileProfile(ctx, &req), nil
+		},
+	)
+
+	srv.AddTool(
+		mcp.NewTool("create_story",
+			mcp.WithDescription("Save a new accomplishment story in SBI (Situation-Behavior-Impact) format, classified by story type and job title, and trigger recompilation of the user's compiled profile. Use this when the user creates a story for an orphaned skill — either during onboarding or during a job application. The story is stored canonically in the profile; it is not JD-specific. After this call succeeds, the compiled profile is updated and any skills the story evidences are removed from remaining_orphans."),
+			mcp.WithString("skill", mcp.Description("The primary skill this story supports. Must match a label present in the user's skills file."), mcp.Required()),
+			mcp.WithString("story_type", mcp.Description("Classification: project, achievement, technical, leadership, process, or collaboration."), mcp.Required()),
+			mcp.WithString("job_title", mcp.Description("The experience role this story belongs to. Should match a role in the user's career history. If new, set is_new_job=true and provide start/end dates."), mcp.Required()),
+			mcp.WithBoolean("is_new_job", mcp.Description("Set to true if job_title is a new role not in the user's career history. Requires job_start_date and job_end_date.")),
+			mcp.WithString("job_start_date", mcp.Description("Required when is_new_job=true. Format: YYYY-MM or YYYY.")),
+			mcp.WithString("job_end_date", mcp.Description("Required when is_new_job=true. Format: YYYY-MM, YYYY, or 'present'.")),
+			mcp.WithString("situation", mcp.Description("S — Situation: the context, team size, system state, or business problem the user faced."), mcp.Required()),
+			mcp.WithString("behavior", mcp.Description("B — Behavior: what the user specifically did (their actions, not the team's)."), mcp.Required()),
+			mcp.WithString("impact", mcp.Description("I — Impact: the measurable outcome. Include numbers, timeframe, and scale where possible."), mcp.Required()),
+			mcp.WithString("jd_context", mcp.Description("Optional. The current job description text, used to seed the SBI prompts with relevant vocabulary. Not stored in the story.")),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return HandleCreateStory(ctx, &req), nil
+		},
+	)
+
 	// ── Workflow tools (require onboarding) ───────────────────────────────────
 
 	srv.AddTool(
