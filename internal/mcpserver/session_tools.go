@@ -27,6 +27,24 @@ import (
 // access to the same session from multiple goroutines cannot occur in production.
 var sessions = NewSessionStore()
 
+// extractionProtocol is embedded in every load_jd response to guide keyword extraction
+// with enough specificity to minimize model-to-model variance in T0 scoring.
+const extractionProtocol = `Extract keywords from jd_text using this exact protocol:
+
+1. Find sections labeled "Required", "Requirements", "Must Have", "Basic Qualifications", or similar. Extract every technical skill, tool, framework, platform, methodology, and credential. Copy the EXACT string from the JD — do NOT paraphrase, generalize, or substitute synonyms (e.g. if JD says "k8s", use "k8s", not "Kubernetes").
+2. Find sections labeled "Preferred", "Nice to Have", "Bonus", "Preferred Qualifications", or similar. Extract the same way.
+3. If no labeled sections exist, extract all technical nouns from responsibilities and description paragraphs.
+4. Include ALL explicitly stated terms — do not filter by perceived importance.
+5. Do NOT deduplicate across required/preferred — keep each term in whichever section it appears.
+
+Encode as compact JSON (no extra whitespace):
+{"title":"<exact job title>","company":"<exact company name>","required":["<term1>","<term2>",...],"preferred":["<term1>",...],"location":"<city or Remote>","seniority":"junior|mid|senior|lead|director","required_years":<number>}
+Omit optional fields entirely if not present. Do NOT invent values.
+
+Example:
+  JD says: "Requirements: Go, Kubernetes, PostgreSQL, REST APIs. Preferred: GraphQL, Terraform."
+  → {"title":"Software Engineer","company":"Acme Corp","required":["Go","Kubernetes","PostgreSQL","REST APIs"],"preferred":["GraphQL","Terraform"]}`
+
 // HandleLoadJD is the exported handler for the "load_jd" MCP tool.
 // In production, deps and session store come from the process-level instances.
 func HandleLoadJD(ctx context.Context, req *mcp.CallToolRequest) *mcp.CallToolResult {
@@ -81,9 +99,13 @@ func HandleLoadJDWithConfig(ctx context.Context, req *mcp.CallToolRequest, deps 
 	logger.Banner(ctx, slog.Default(), "Session", sess.ID)
 
 	type loadJDData struct {
-		JDText string `json:"jd_text"`
+		JDText             string `json:"jd_text"`
+		ExtractionProtocol string `json:"extraction_protocol"`
 	}
-	resultData := loadJDData{JDText: jdText}
+	resultData := loadJDData{
+		JDText:             jdText,
+		ExtractionProtocol: extractionProtocol,
+	}
 	resultBytes, _ := json.Marshal(resultData)
 	slog.DebugContext(ctx, "mcp tool result",
 		slog.String("tool", "load_jd"),
@@ -134,6 +156,9 @@ func HandleSubmitKeywordsWithConfig(ctx context.Context, req *mcp.CallToolReques
 		strings.TrimSpace(jd.Title) == "" && strings.TrimSpace(jd.Company) == "" {
 		return envelopeResult(stageErrorEnvelope(sessionID, "submit_keywords", "jd_empty",
 			"jd_json contains no extractable keywords — provide at least title, company, or required skills", false))
+	}
+	if jd.Seniority == "" {
+		jd.Seniority = model.SeniorityMid
 	}
 
 	if deps == nil {

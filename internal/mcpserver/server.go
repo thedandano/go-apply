@@ -76,7 +76,7 @@ func NewServer() *server.MCPServer {
 
 	srv.AddTool(
 		mcp.NewTool("load_jd",
-			mcp.WithDescription("Start a job application workflow: fetch the job description by URL or accept raw text. Returns jd_text for keyword extraction and a session_id to use in subsequent calls."),
+			mcp.WithDescription("Start a job application workflow: fetch the job description by URL or accept raw text. Returns jd_text, session_id, and extraction_protocol — follow extraction_protocol exactly when building jd_json for submit_keywords."),
 			mcp.WithString("jd_url", mcp.Description("URL of the job posting to fetch")),
 			mcp.WithString("jd_raw_text", mcp.Description("Raw job description text (alternative to jd_url)")),
 		),
@@ -87,7 +87,7 @@ func NewServer() *server.MCPServer {
 
 	srv.AddTool(
 		mcp.NewTool("submit_keywords",
-			mcp.WithDescription("Submit extracted keywords to score resumes. Call after load_jd: extract keywords from jd_text yourself, then provide them here as jd_json. Returns scores and a next_action directive."),
+			mcp.WithDescription("Submit extracted keywords to score resumes. Call after load_jd: follow the extraction_protocol in the load_jd response to extract keywords from jd_text, then provide them here as jd_json. Returns scores and a next_action directive."),
 			mcp.WithString("session_id", mcp.Description("Session ID returned by load_jd"), mcp.Required()),
 			mcp.WithString("jd_json", mcp.Description("JSON-encoded JDData with title, company, required, preferred, location, seniority, required_years"), mcp.Required()),
 		),
