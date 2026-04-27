@@ -45,6 +45,13 @@ repos:
         pass_filenames: false
         stages: [pre-push]
 
+      - id: deadcode
+        name: deadcode
+        entry: bash -c 'export PATH="$PATH:$(go env GOPATH)/bin" && deadcode -test ./cmd/... ./internal/...' --
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+
       - id: go-coverage
         name: coverage threshold (65%)
         entry: bash scripts/check-coverage.sh

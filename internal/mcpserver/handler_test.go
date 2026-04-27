@@ -63,14 +63,6 @@ func (s *stubScorer) Score(_ *model.ScorerInput) (model.ScoreResult, error) {
 	}, nil
 }
 
-type stubCoverLetterGen struct{}
-
-var _ port.CoverLetterGenerator = (*stubCoverLetterGen)(nil)
-
-func (s *stubCoverLetterGen) Generate(_ context.Context, _ *model.CoverLetterInput) (model.CoverLetterResult, error) {
-	return model.CoverLetterResult{Text: "Cover letter.", Channel: model.ChannelCold}, nil
-}
-
 type stubResumeRepo struct{}
 
 var _ port.ResumeRepository = (*stubResumeRepo)(nil)
