@@ -203,7 +203,7 @@ func writePublications(sb *strings.Builder, entries []model.PublicationEntry) {
 }
 
 // Tier 4 writers intentionally emit a minimal plain-text representation (name/title only).
-// Omitted fields (URL, Contact, Date, etc.) are preserved in the SectionMap sidecar
+// Omitted fields (URL, Contact, Date, etc.) are preserved in the sections file
 // and are available for future renderers — this is not a silent failure.
 
 func writeLanguages(sb *strings.Builder, entries []model.LanguageEntry) {

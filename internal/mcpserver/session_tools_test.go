@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os/exec"
 	"strings"
 	"testing"
 
@@ -18,18 +17,23 @@ import (
 )
 
 // stubApplyConfigForSession returns an ApplyConfig with all stubs and no Presenter set.
+// Includes PDF renderer and extractor stubs required for T0/T1/T2 PDF scoring.
+// Uses stubResumeRepoWithSkillsSections so LoadSections succeeds (sections required for scoring).
 // The handlers set the presenter internally.
 func stubApplyConfigForSession() pipeline.ApplyConfig {
 	return pipeline.ApplyConfig{
-		Fetcher:   &stubJDFetcher{},
-		LLM:       &stubLLMClient{},
-		Scorer:    &stubScorer{},
-		CLGen:     nil,
-		Resumes:   &stubResumeRepo{},
-		Loader:    &stubDocumentLoader{},
-		AppRepo:   &stubApplicationRepository{},
-		Defaults:  &config.AppDefaults{},
-		Presenter: nil,
+		Fetcher:        &stubJDFetcher{},
+		LLM:            &stubLLMClient{},
+		Scorer:         &stubScorer{},
+		CLGen:          nil,
+		Resumes:        &stubResumeRepoWithSkillsSections{},
+		Loader:         &stubDocumentLoader{},
+		AppRepo:        &stubApplicationRepository{},
+		Defaults:       &config.AppDefaults{},
+		Presenter:      nil,
+		PDFRenderer:    &stubPDFRenderer{failRender: false},
+		Extractor:      &stubExtractor{failExtract: false},
+		SurvivalDiffer: &stubSurvivalDiffer{},
 	}
 }
 
@@ -315,9 +319,22 @@ func TestHandleSubmitKeywordsWithConfig_ReturnsSkillsSection(t *testing.T) {
 	}
 }
 
-// T010: skills_section is always present in the envelope (empty string when no sections sidecar).
-func TestHandleSubmitKeywordsWithConfig_NoSkillsSection_FieldAlwaysPresent(t *testing.T) {
-	cfg := stubApplyConfigForSession() // stubResumeRepo.LoadSections returns ErrSectionsMissing
+// T0 PDF scoring: submit_keywords returns score_failed when LoadSections returns ErrSectionsMissing.
+// Sections are required for PDF-based scoring (no partial results, no silent fallback).
+func TestHandleSubmitKeywordsWithConfig_NoSectionsSidecar_ReturnsError(t *testing.T) {
+	// Build a config where Resumes.LoadSections returns ErrSectionsMissing.
+	cfg := pipeline.ApplyConfig{
+		Fetcher:        &stubJDFetcher{},
+		LLM:            &stubLLMClient{},
+		Scorer:         &stubScorer{},
+		Resumes:        &stubResumeRepo{}, // LoadSections returns ErrSectionsMissing
+		Loader:         &stubDocumentLoader{},
+		AppRepo:        &stubApplicationRepository{},
+		Defaults:       &config.AppDefaults{},
+		PDFRenderer:    &stubPDFRenderer{failRender: false},
+		Extractor:      &stubExtractor{failExtract: false},
+		SurvivalDiffer: &stubSurvivalDiffer{},
+	}
 
 	loadReq := callToolRequest("load_jd", map[string]any{"jd_raw_text": "Senior Go engineer."})
 	loadText := extractText(t, mcpserver.HandleLoadJDWithConfig(context.Background(), &loadReq, &cfg))
@@ -336,31 +353,13 @@ func TestHandleSubmitKeywordsWithConfig_NoSkillsSection_FieldAlwaysPresent(t *te
 	if err := json.Unmarshal([]byte(kwText), &env); err != nil {
 		t.Fatalf("submit_keywords not JSON: %v — raw: %s", err, kwText)
 	}
-	if env["status"] != "ok" {
-		t.Fatalf("status = %v, want ok — full: %s", env["status"], kwText)
-	}
-	data, _ := env["data"].(map[string]any)
-	if data == nil {
-		t.Fatal("expected data in response")
-	}
-	// skills_section is always present now (no omitempty).
-	if _, present := data["skills_section"]; !present {
-		t.Error("skills_section must always be present in the envelope")
-	}
-	if ss := data["skills_section"].(string); ss != "" {
-		t.Errorf("skills_section must be empty when no sections sidecar, got: %q", ss)
-	}
-	// skills_section_found must be explicit false.
-	if found, _ := data["skills_section_found"].(bool); found {
-		t.Error("skills_section_found must be false when no sections sidecar")
-	}
-	// sections must be absent (omitempty) when no sidecar.
-	if _, present := data["sections"]; present {
-		t.Error("sections must be absent when no sidecar exists")
+	// PDF scoring requires sections — hard error when missing.
+	if env["status"] != "error" {
+		t.Errorf("status = %v, want error when sections file is missing — full: %s", env["status"], kwText)
 	}
 }
 
-// US3: submit_keywords includes sections + skills_section_found when sidecar exists.
+// US3: submit_keywords includes sections + skills_section_found when sections file exists.
 func TestHandleSubmitKeywordsWithConfig_Sections_PresentWhenSidecarExists(t *testing.T) {
 	cfg := stubApplyConfigWithSkillsLoader() // uses stubResumeRepoWithSkillsSections
 
@@ -387,10 +386,10 @@ func TestHandleSubmitKeywordsWithConfig_Sections_PresentWhenSidecarExists(t *tes
 	data, _ := env["data"].(map[string]any)
 
 	if found, _ := data["skills_section_found"].(bool); !found {
-		t.Error("skills_section_found must be true when sidecar has skills")
+		t.Error("skills_section_found must be true when sections file has skills")
 	}
 	if sections, present := data["sections"]; !present || sections == nil {
-		t.Error("sections must be present and non-nil when sidecar exists")
+		t.Error("sections must be present and non-nil when sections file exists")
 	}
 }
 
@@ -499,9 +498,7 @@ func stubApplyConfigWithTier4Sections() pipeline.ApplyConfig {
 }
 
 func TestHandlePreviewATSExtraction_Tier4SectionInConstructedText(t *testing.T) {
-	if _, err := exec.LookPath("pdftotext"); err != nil {
-		t.Skip("pdftotext not installed — skipping Tier 4 content check")
-	}
+	// No longer requires pdftotext — ledongthuc/pdf is used directly.
 	cfg := stubApplyConfigWithTier4Sections()
 	cfg.PDFRenderer = pdfrender.New()
 	cfg.Extractor = extractPkg.New()
@@ -757,7 +754,7 @@ func TestHandleSubmitTailorT1_WrongState_ReturnsError(t *testing.T) {
 }
 
 func TestHandleSubmitTailorT1_HappyPath_ReturnsEditsApplied(t *testing.T) {
-	cfg := stubApplyConfigWithSkillsLoader() // has sections sidecar with flat skills
+	cfg := stubApplyConfigWithSkillsLoader() // has sections file with flat skills
 
 	// load_jd
 	loadReq := callToolRequest("load_jd", map[string]any{"jd_raw_text": "Senior Go engineer. Skills: go, kubernetes."})
@@ -926,6 +923,23 @@ func TestHandleSubmitTailorT2_WrongState_ReturnsError(t *testing.T) {
 	}
 }
 
+// TestHandleSubmitTailorT2_ScoredWithoutT1_ReturnsInvalidState asserts that T2 cannot
+// be called directly after T0 scoring — it requires T1 to run first.
+func TestHandleSubmitTailorT2_ScoredWithoutT1_ReturnsInvalidState(t *testing.T) {
+	cfg := stubApplyConfigForSession()
+	sessionID := buildScoredSession(t, &cfg)
+
+	req := callToolRequest("submit_tailor_t2", map[string]any{
+		"session_id": sessionID,
+		"edits":      `[{"section":"experience","op":"replace","target":"exp-0-b0","value":"new bullet"}]`,
+	})
+	result := mcpserver.HandleSubmitTailorT2WithConfig(context.Background(), &req, &cfg, &config.Config{})
+	text := extractText(t, result)
+	if !strings.Contains(text, "invalid_state") {
+		t.Errorf("expected invalid_state error (T2 requires T1 first), got: %s", text)
+	}
+}
+
 func TestHandleSubmitTailorT2_MissingEdits_ReturnsError(t *testing.T) {
 	cfg := stubApplyConfigForSession()
 	req := callToolRequest("submit_tailor_t2", map[string]any{
@@ -993,7 +1007,14 @@ func TestHandleSubmitTailorT2_HappyPath_ReturnsNewScore(t *testing.T) {
 	kwReq := callToolRequest("submit_keywords", map[string]any{"session_id": sessionID, "jd_json": jdJSON})
 	mcpserver.HandleSubmitKeywordsWithConfig(context.Background(), &kwReq, &cfg, &config.Config{})
 
-	// submit_tailor_t2 (directly after scored, skipping T1)
+	// submit_tailor_t1 — T2 requires T1 to run first
+	t1Req := callToolRequest("submit_tailor_t1", map[string]any{
+		"session_id": sessionID,
+		"edits":      `[{"section":"skills","op":"add","value":"Kubernetes"}]`,
+	})
+	mcpserver.HandleSubmitTailorT1WithConfig(context.Background(), &t1Req, &cfg, &config.Config{})
+
+	// submit_tailor_t2 (chained from T1)
 	t2Req := callToolRequest("submit_tailor_t2", map[string]any{
 		"session_id": sessionID,
 		"edits":      `[{"section":"experience","op":"replace","target":"exp-0-b0","value":"Built distributed systems in Go and Kubernetes"}]`,
@@ -1102,15 +1123,25 @@ func buildScoredSession(t *testing.T, cfg *pipeline.ApplyConfig) string {
 }
 
 // TestHandlePreviewATSExtraction_NoSectionsSidecar_HardFails asserts that when
-// LoadSections returns an error the handler returns status="error" with
+// LoadSections returns an error during preview the handler returns status="error" with
 // error_code="no_sections_data" instead of silently falling back to raw text.
 func TestHandlePreviewATSExtraction_NoSectionsSidecar_HardFails(t *testing.T) {
-	cfg := stubApplyConfigForSession() // stubResumeRepo.LoadSections returns ErrSectionsMissing
+	// Build session using a config that has sections (required for T0 PDF scoring).
+	scoringCfg := stubApplyConfigForSession()
+	sessionID := buildScoredSession(t, &scoringCfg)
 
-	sessionID := buildScoredSession(t, &cfg)
+	// For the preview step, use a config where LoadSections fails (no sections file for preview).
+	previewCfg := pipeline.ApplyConfig{
+		Fetcher:        &stubJDFetcher{},
+		Resumes:        &stubResumeRepo{}, // LoadSections returns ErrSectionsMissing
+		PDFRenderer:    &stubPDFRenderer{failRender: false},
+		Extractor:      &stubExtractor{failExtract: false},
+		SurvivalDiffer: &stubSurvivalDiffer{},
+		Defaults:       &config.AppDefaults{},
+	}
 
 	previewReq := callToolRequest("preview_ats_extraction", map[string]any{"session_id": sessionID})
-	result := mcpserver.HandlePreviewATSExtractionWithConfig(context.Background(), &previewReq, &cfg)
+	result := mcpserver.HandlePreviewATSExtractionWithConfig(context.Background(), &previewReq, &previewCfg)
 	text := extractText(t, result)
 
 	var env map[string]any
@@ -1136,15 +1167,18 @@ func TestHandlePreviewATSExtraction_NoSectionsSidecar_HardFails(t *testing.T) {
 // when the PDF renderer fails the handler returns status="error" with
 // error_code="render_failed".
 func TestHandlePreviewATSExtraction_RenderFails_ReturnsRenderFailedCode(t *testing.T) {
-	cfg := stubApplyConfigWithSkillsLoader() // LoadSections succeeds
-	cfg.PDFRenderer = &stubPDFRenderer{failRender: true}
-	cfg.Extractor = &stubExtractor{failExtract: false}
-	cfg.SurvivalDiffer = &stubSurvivalDiffer{}
+	// Build a scored session with a working config (T0 scoring requires PDFRenderer+Extractor).
+	scoringCfg := stubApplyConfigWithSkillsLoader()
+	sessionID := buildScoredSession(t, &scoringCfg)
 
-	sessionID := buildScoredSession(t, &cfg)
+	// Preview with a failing renderer.
+	previewCfg := stubApplyConfigWithSkillsLoader()
+	previewCfg.PDFRenderer = &stubPDFRenderer{failRender: true}
+	previewCfg.Extractor = &stubExtractor{failExtract: false}
+	previewCfg.SurvivalDiffer = &stubSurvivalDiffer{}
 
 	previewReq := callToolRequest("preview_ats_extraction", map[string]any{"session_id": sessionID})
-	result := mcpserver.HandlePreviewATSExtractionWithConfig(context.Background(), &previewReq, &cfg)
+	result := mcpserver.HandlePreviewATSExtractionWithConfig(context.Background(), &previewReq, &previewCfg)
 	text := extractText(t, result)
 
 	var env map[string]any
@@ -1164,15 +1198,18 @@ func TestHandlePreviewATSExtraction_RenderFails_ReturnsRenderFailedCode(t *testi
 // when the PDF extractor fails the handler returns status="error" with
 // error_code="extract_failed".
 func TestHandlePreviewATSExtraction_ExtractFails_ReturnsExtractFailedCode(t *testing.T) {
-	cfg := stubApplyConfigWithSkillsLoader()              // LoadSections succeeds
-	cfg.PDFRenderer = &stubPDFRenderer{failRender: false} // render succeeds, returns fake PDF bytes
-	cfg.Extractor = &stubExtractor{failExtract: true}     // extract fails
-	cfg.SurvivalDiffer = &stubSurvivalDiffer{}
+	// Build a scored session with a working config.
+	scoringCfg := stubApplyConfigWithSkillsLoader()
+	sessionID := buildScoredSession(t, &scoringCfg)
 
-	sessionID := buildScoredSession(t, &cfg)
+	// Preview with a failing extractor.
+	previewCfg := stubApplyConfigWithSkillsLoader()
+	previewCfg.PDFRenderer = &stubPDFRenderer{failRender: false}
+	previewCfg.Extractor = &stubExtractor{failExtract: true}
+	previewCfg.SurvivalDiffer = &stubSurvivalDiffer{}
 
 	previewReq := callToolRequest("preview_ats_extraction", map[string]any{"session_id": sessionID})
-	result := mcpserver.HandlePreviewATSExtractionWithConfig(context.Background(), &previewReq, &cfg)
+	result := mcpserver.HandlePreviewATSExtractionWithConfig(context.Background(), &previewReq, &previewCfg)
 	text := extractText(t, result)
 
 	var env map[string]any
@@ -1255,15 +1292,18 @@ func TestHandlePreviewATSExtraction_KeywordSurvivalPresent(t *testing.T) {
 // TestHandlePreviewATSExtraction_NilPDFRenderer_ReturnsConfigurationError verifies
 // that a nil PDFRenderer returns a clean configuration_error instead of panicking.
 func TestHandlePreviewATSExtraction_NilPDFRenderer_ReturnsConfigurationError(t *testing.T) {
-	cfg := stubApplyConfigWithSkillsLoader()
-	cfg.PDFRenderer = nil
-	cfg.Extractor = &stubExtractor{failExtract: false}
-	cfg.SurvivalDiffer = &stubSurvivalDiffer{}
+	// Build the session using a full config (needed for T0 PDF scoring).
+	scoringCfg := stubApplyConfigWithSkillsLoader()
+	sessionID := buildScoredSession(t, &scoringCfg)
 
-	sessionID := buildScoredSession(t, &cfg)
+	// Preview with nil PDFRenderer to trigger configuration_error.
+	previewCfg := stubApplyConfigWithSkillsLoader()
+	previewCfg.PDFRenderer = nil
+	previewCfg.Extractor = &stubExtractor{failExtract: false}
+	previewCfg.SurvivalDiffer = &stubSurvivalDiffer{}
 
 	previewReq := callToolRequest("preview_ats_extraction", map[string]any{"session_id": sessionID})
-	result := mcpserver.HandlePreviewATSExtractionWithConfig(context.Background(), &previewReq, &cfg)
+	result := mcpserver.HandlePreviewATSExtractionWithConfig(context.Background(), &previewReq, &previewCfg)
 	text := extractText(t, result)
 
 	var env map[string]any
@@ -1282,15 +1322,18 @@ func TestHandlePreviewATSExtraction_NilPDFRenderer_ReturnsConfigurationError(t *
 // TestHandlePreviewATSExtraction_NilExtractor_ReturnsConfigurationError verifies
 // that a nil Extractor returns a clean configuration_error instead of panicking.
 func TestHandlePreviewATSExtraction_NilExtractor_ReturnsConfigurationError(t *testing.T) {
-	cfg := stubApplyConfigWithSkillsLoader()
-	cfg.PDFRenderer = &stubPDFRenderer{failRender: false}
-	cfg.Extractor = nil
-	cfg.SurvivalDiffer = &stubSurvivalDiffer{}
+	// Build session using full config (T0 requires PDFRenderer+Extractor).
+	scoringCfg := stubApplyConfigWithSkillsLoader()
+	sessionID := buildScoredSession(t, &scoringCfg)
 
-	sessionID := buildScoredSession(t, &cfg)
+	// Preview with nil Extractor.
+	previewCfg := stubApplyConfigWithSkillsLoader()
+	previewCfg.PDFRenderer = &stubPDFRenderer{failRender: false}
+	previewCfg.Extractor = nil
+	previewCfg.SurvivalDiffer = &stubSurvivalDiffer{}
 
 	previewReq := callToolRequest("preview_ats_extraction", map[string]any{"session_id": sessionID})
-	result := mcpserver.HandlePreviewATSExtractionWithConfig(context.Background(), &previewReq, &cfg)
+	result := mcpserver.HandlePreviewATSExtractionWithConfig(context.Background(), &previewReq, &previewCfg)
 	text := extractText(t, result)
 
 	var env map[string]any
@@ -1309,15 +1352,18 @@ func TestHandlePreviewATSExtraction_NilExtractor_ReturnsConfigurationError(t *te
 // TestHandlePreviewATSExtraction_NilSurvivalDiffer_ReturnsConfigurationError verifies
 // that a nil SurvivalDiffer returns a clean configuration_error instead of panicking.
 func TestHandlePreviewATSExtraction_NilSurvivalDiffer_ReturnsConfigurationError(t *testing.T) {
-	cfg := stubApplyConfigWithSkillsLoader()
-	cfg.PDFRenderer = &stubPDFRenderer{failRender: false}
-	cfg.Extractor = &stubExtractor{failExtract: false}
-	cfg.SurvivalDiffer = nil
+	// Build session using full config (T0 requires all PDF deps).
+	scoringCfg := stubApplyConfigWithSkillsLoader()
+	sessionID := buildScoredSession(t, &scoringCfg)
 
-	sessionID := buildScoredSession(t, &cfg)
+	// Preview with nil SurvivalDiffer.
+	previewCfg := stubApplyConfigWithSkillsLoader()
+	previewCfg.PDFRenderer = &stubPDFRenderer{failRender: false}
+	previewCfg.Extractor = &stubExtractor{failExtract: false}
+	previewCfg.SurvivalDiffer = nil
 
 	previewReq := callToolRequest("preview_ats_extraction", map[string]any{"session_id": sessionID})
-	result := mcpserver.HandlePreviewATSExtractionWithConfig(context.Background(), &previewReq, &cfg)
+	result := mcpserver.HandlePreviewATSExtractionWithConfig(context.Background(), &previewReq, &previewCfg)
 	text := extractText(t, result)
 
 	var env map[string]any
@@ -1337,11 +1383,17 @@ func TestHandlePreviewATSExtraction_NilSurvivalDiffer_ReturnsConfigurationError(
 // no_sections_data is returned even when all deps are nil — user error takes priority
 // over server misconfiguration so the caller gets an actionable message.
 func TestHandlePreviewATSExtraction_LoadSectionsFails_WinsOverNilDeps(t *testing.T) {
-	// stubApplyConfigForSession uses stubResumeRepo which returns ErrSectionsMissing.
-	cfg := stubApplyConfigForSession()
-	// Deliberately leave PDFRenderer, Extractor, SurvivalDiffer nil.
+	// Build session using a sections-capable config (T0 requires sections).
+	scoringCfg := stubApplyConfigForSession()
+	sessionID := buildScoredSession(t, &scoringCfg)
 
-	sessionID := buildScoredSession(t, &cfg)
+	// Preview with no-sections repo and nil PDFRenderer/Extractor/SurvivalDiffer.
+	cfg := pipeline.ApplyConfig{
+		Fetcher:  &stubJDFetcher{},
+		Resumes:  &stubResumeRepo{}, // LoadSections returns ErrSectionsMissing
+		Defaults: &config.AppDefaults{},
+		// Deliberately leave PDFRenderer, Extractor, SurvivalDiffer nil.
+	}
 
 	previewReq := callToolRequest("preview_ats_extraction", map[string]any{"session_id": sessionID})
 	result := mcpserver.HandlePreviewATSExtractionWithConfig(context.Background(), &previewReq, &cfg)
@@ -1383,5 +1435,90 @@ func TestNextActionFromScore(t *testing.T) {
 		if got != c.want {
 			t.Errorf("NextActionFromScore(%v) = %q, want %q", c.score, got, c.want)
 		}
+	}
+}
+
+// ── state guard tests ─────────────────────────────────────────────────────────
+
+// TestHandleSubmitTailorT1_AfterT2_ReturnsInvalidState asserts that T1 cannot run
+// after T2 has already been applied — the state machine must block it.
+func TestHandleSubmitTailorT1_AfterT2_ReturnsInvalidState(t *testing.T) {
+	cfg := stubApplyConfigWithExperienceSections()
+
+	// Advance through the full T0 → T1 → T2 pipeline.
+	loadReq := callToolRequest("load_jd", map[string]any{"jd_raw_text": "Senior Go engineer."})
+	loadText := extractText(t, mcpserver.HandleLoadJDWithConfig(context.Background(), &loadReq, &cfg))
+	var loadEnv map[string]any
+	if err := json.Unmarshal([]byte(loadText), &loadEnv); err != nil {
+		t.Fatalf("load_jd not JSON: %v", err)
+	}
+	sessionID, _ := loadEnv["session_id"].(string)
+
+	const jdJSON = `{"title":"Go Engineer","company":"Acme","required":["go"],"preferred":[]}`
+	kwReq := callToolRequest("submit_keywords", map[string]any{"session_id": sessionID, "jd_json": jdJSON})
+	mcpserver.HandleSubmitKeywordsWithConfig(context.Background(), &kwReq, &cfg, &config.Config{})
+
+	t1Req := callToolRequest("submit_tailor_t1", map[string]any{
+		"session_id": sessionID,
+		"edits":      `[{"section":"skills","op":"add","value":"Kubernetes"}]`,
+	})
+	mcpserver.HandleSubmitTailorT1WithConfig(context.Background(), &t1Req, &cfg, &config.Config{})
+
+	t2Req := callToolRequest("submit_tailor_t2", map[string]any{
+		"session_id": sessionID,
+		"edits":      `[{"section":"experience","op":"replace","target":"exp-0-b0","value":"Built distributed systems"}]`,
+	})
+	mcpserver.HandleSubmitTailorT2WithConfig(context.Background(), &t2Req, &cfg, &config.Config{})
+
+	// Attempt T1 again — must be rejected now that state is stateT2Applied.
+	t1AgainReq := callToolRequest("submit_tailor_t1", map[string]any{
+		"session_id": sessionID,
+		"edits":      `[{"section":"skills","op":"add","value":"Docker"}]`,
+	})
+	result := mcpserver.HandleSubmitTailorT1WithConfig(context.Background(), &t1AgainReq, &cfg, &config.Config{})
+	text := extractText(t, result)
+	if !strings.Contains(text, "invalid_state") {
+		t.Errorf("expected invalid_state after T2, got: %s", text)
+	}
+}
+
+// stubZeroResumesRepo returns an empty (non-nil) slice so submit_keywords has nothing to score.
+type stubZeroResumesRepo struct {
+	stubResumeRepo
+}
+
+func (s *stubZeroResumesRepo) ListResumes() ([]model.ResumeFile, error) {
+	return []model.ResumeFile{}, nil
+}
+
+// TestHandleSubmitKeywords_EmptyResumeList_ReturnsScoreFailed asserts that an empty
+// resume list produces a score_failed error rather than silently returning no scores.
+func TestHandleSubmitKeywords_EmptyResumeList_ReturnsScoreFailed(t *testing.T) {
+	cfg := stubApplyConfigForSession()
+	cfg.Resumes = &stubZeroResumesRepo{}
+
+	loadReq := callToolRequest("load_jd", map[string]any{"jd_raw_text": "Senior Go engineer."})
+	loadText := extractText(t, mcpserver.HandleLoadJDWithConfig(context.Background(), &loadReq, &cfg))
+	var loadEnv map[string]any
+	if err := json.Unmarshal([]byte(loadText), &loadEnv); err != nil {
+		t.Fatalf("load_jd not JSON: %v", err)
+	}
+	sessionID, _ := loadEnv["session_id"].(string)
+
+	const jdJSON = `{"title":"Go Engineer","company":"Acme","required":["go"],"preferred":[]}`
+	kwReq := callToolRequest("submit_keywords", map[string]any{"session_id": sessionID, "jd_json": jdJSON})
+	result := mcpserver.HandleSubmitKeywordsWithConfig(context.Background(), &kwReq, &cfg, &config.Config{})
+	text := extractText(t, result)
+
+	var env map[string]any
+	if err := json.Unmarshal([]byte(text), &env); err != nil {
+		t.Fatalf("not JSON: %v — raw: %s", err, text)
+	}
+	if env["status"] != "error" {
+		t.Errorf("status = %v, want error when no resumes exist", env["status"])
+	}
+	errObj, _ := env["error"].(map[string]any)
+	if errObj == nil || errObj["code"] != "score_failed" {
+		t.Errorf("expected error.code=score_failed, got: %v — full: %s", errObj, text)
 	}
 }
