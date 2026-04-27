@@ -11,11 +11,11 @@ type ResumeRepository interface {
 	ListResumes() ([]model.ResumeFile, error)
 
 	// LoadSections returns the structured SectionMap for the given label.
-	// Returns model.ErrSectionsMissing if the sections sidecar is absent.
+	// Returns model.ErrSectionsMissing if the sections file is absent.
 	LoadSections(label string) (model.SectionMap, error)
 
 	// SaveSections persists the SectionMap for the given label, atomically
-	// replacing any prior sidecar.
+	// replacing any prior sections file on disk.
 	SaveSections(label string, sections model.SectionMap) error
 }
 

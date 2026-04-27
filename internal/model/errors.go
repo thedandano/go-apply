@@ -6,7 +6,7 @@ import (
 )
 
 var (
-	ErrSectionsMissing          = errors.New("sections missing: no sidecar found for this resume")
+	ErrSectionsMissing          = errors.New("sections missing: no sections file found for this resume")
 	ErrSchemaVersionUnsupported = errors.New("sections schema version unsupported")
 	ErrNotSupportedInMCPMode    = errors.New("operation not supported in MCP mode")
 )

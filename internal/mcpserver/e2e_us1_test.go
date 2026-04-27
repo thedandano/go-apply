@@ -15,7 +15,7 @@ import (
 )
 
 // TestUS1_StructuredEdits_E2E verifies that ApplyEdits works correctly through
-// a real sidecar round-trip regardless of resume heading style.
+// a real sections file round-trip regardless of resume heading style.
 //
 // US1: "T1 tailoring works regardless of resume heading style."
 // ApplyEdits targets sections by structural key ("skills", "experience"),
@@ -106,7 +106,7 @@ func TestUS1_StructuredEdits_E2E(t *testing.T) {
 	})
 
 	// nonstandard_heading_kind: Skills.Kind = "Technical Stack" round-trips through the
-	// sidecar and ApplyEdits still accepts edits without rejection — the edit envelope
+	// sections file and ApplyEdits still accepts edits without rejection — the edit envelope
 	// targets the section key "skills" structurally, not by heading text.
 	t.Run("nonstandard_heading_kind", func(t *testing.T) {
 		dataDir := t.TempDir()

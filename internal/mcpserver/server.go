@@ -25,7 +25,7 @@ func NewServer() *server.MCPServer {
 			mcp.WithString("resume_label", mcp.Description("Short identifier for the resume, e.g. 'backend' (required when resume_content is provided)")),
 			mcp.WithString("skills", mcp.Description("Skills reference text (optional)")),
 			mcp.WithString("accomplishments", mcp.Description("Accomplishments text (optional)")),
-			mcp.WithString("sections", mcp.Description("Optional JSON-encoded SectionMap (schema_version, contact, experience, …). When provided, validated and persisted as a sidecar alongside the resume.")),
+			mcp.WithString("sections", mcp.Description("Optional JSON-encoded SectionMap (schema_version, contact, experience, …). When provided, validated and saved to disk alongside the resume.")),
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			return HandleOnboardUser(ctx, &req, newOnboardSvc()), nil
@@ -37,7 +37,7 @@ func NewServer() *server.MCPServer {
 			mcp.WithDescription("Add or replace a single resume in the profile database."),
 			mcp.WithString("resume_content", mcp.Description("Resume text"), mcp.Required()),
 			mcp.WithString("resume_label", mcp.Description("Short identifier, e.g. 'backend'"), mcp.Required()),
-			mcp.WithString("sections", mcp.Description("Optional JSON-encoded SectionMap (schema_version, contact, experience, …). When provided, validated and persisted as a sidecar alongside the resume.")),
+			mcp.WithString("sections", mcp.Description("Optional JSON-encoded SectionMap (schema_version, contact, experience, …). When provided, validated and saved to disk alongside the resume.")),
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			return HandleAddResume(ctx, &req, newOnboardSvc()), nil
