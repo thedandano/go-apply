@@ -26,6 +26,7 @@ type StageError struct {
 	Code      string `json:"code"`
 	Message   string `json:"message"`
 	Retriable bool   `json:"retriable"`
+	Details   any    `json:"details,omitempty"`
 }
 
 // envelopeResult marshals env to JSON and wraps it in an MCP text result.

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 
@@ -491,5 +492,71 @@ func TestHandleGetConfigWithProfile_PreservesConfigFields(t *testing.T) {
 	// log_level should be present (it is in MCPKeys).
 	if _, ok := response["log_level"]; !ok {
 		t.Error("response missing 'log_level' key")
+	}
+}
+
+// TestBuildProfileStatus_Stale_WhenSourceNewerThanProfile verifies stale=true and stale_files
+// are reported in the profile object when an accomplishments file is newer than the compiled profile.
+func TestBuildProfileStatus_Stale_WhenSourceNewerThanProfile(t *testing.T) {
+	dir := t.TempDir()
+
+	// Write profile-compiled.json with a past CompiledAt.
+	past := time.Now().Add(-10 * time.Minute)
+	prof := model.CompiledProfile{SchemaVersion: "1", CompiledAt: past}
+	data, _ := json.Marshal(prof)
+	if err := os.WriteFile(filepath.Join(dir, "profile-compiled.json"), data, 0o600); err != nil {
+		t.Fatalf("write profile: %v", err)
+	}
+
+	// Write accomplishments-0.md with an mtime AFTER CompiledAt.
+	accPath := filepath.Join(dir, "accomplishments-0.md")
+	if err := os.WriteFile(accPath, []byte("story"), 0o600); err != nil {
+		t.Fatalf("write accomplishments: %v", err)
+	}
+	future := time.Now().Add(time.Minute)
+	if err := os.Chtimes(accPath, future, future); err != nil {
+		t.Fatalf("chtimes: %v", err)
+	}
+
+	result := mcpserver.HandleGetConfigWithProfileAndFiles(&config.Config{}, dir)
+	text := extractText(t, result)
+	var resp map[string]interface{}
+	if err := json.Unmarshal([]byte(text), &resp); err != nil {
+		t.Fatalf("parse response: %v", err)
+	}
+
+	profile, _ := resp["profile"].(map[string]interface{})
+	if profile == nil {
+		t.Fatal("profile missing from response")
+	}
+	stale, _ := profile["stale"].(bool)
+	if !stale {
+		t.Error("stale=false; want true when source file is newer than profile")
+	}
+	staleFiles, _ := profile["stale_files"].([]interface{})
+	if len(staleFiles) == 0 {
+		t.Error("stale_files empty; want at least one entry")
+	}
+}
+
+// TestBuildProfileStatus_NotStale_WhenProfileAbsent verifies stale is false (or absent) when
+// no compiled profile exists — IsStale returns (false,nil,nil) for absent profile.
+func TestBuildProfileStatus_NotStale_WhenProfileAbsent(t *testing.T) {
+	dir := t.TempDir()
+
+	result := mcpserver.HandleGetConfigWithProfileAndFiles(&config.Config{}, dir)
+	text := extractText(t, result)
+	var resp map[string]interface{}
+	if err := json.Unmarshal([]byte(text), &resp); err != nil {
+		t.Fatalf("parse response: %v", err)
+	}
+
+	profile, _ := resp["profile"].(map[string]interface{})
+	if profile == nil {
+		t.Fatal("profile missing from response")
+	}
+	stale, _ := profile["stale"].(bool)
+	if stale {
+		t.Error("stale=true; want false when no compiled profile exists")
 	}
 }

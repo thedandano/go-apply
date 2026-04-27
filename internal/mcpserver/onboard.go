@@ -19,9 +19,20 @@ import (
 	"github.com/thedandano/go-apply/internal/service/onboarding"
 )
 
-// HandleOnboardUser is the exported, injectable handler for "onboard_user".
-// svc must not be nil. This function never returns a Go error; failures become JSON error results.
+// HandleOnboardUser is the MCP-wired handler for "onboard_user".
+// It loads the LLM client from config and triggers recompilation after writing profile files.
 func HandleOnboardUser(ctx context.Context, req *mcp.CallToolRequest, svc port.Onboarder) *mcp.CallToolResult {
+	dataDir := config.DataDir()
+	var llmClient port.LLMClient
+	if cfg, _, err := loadDeps(); err == nil {
+		llmClient, _ = newLLMClient(cfg)
+	}
+	return HandleOnboardUserWith(ctx, req, svc, llmClient, dataDir)
+}
+
+// HandleOnboardUserWith is the testable core for "onboard_user".
+// llmClient may be nil — when nil, recompilation is skipped and the response omits compile info.
+func HandleOnboardUserWith(ctx context.Context, req *mcp.CallToolRequest, svc port.Onboarder, llmClient port.LLMClient, dataDir string) *mcp.CallToolResult {
 	resumeContent := req.GetString("resume_content", "")
 	resumeLabel := req.GetString("resume_label", "")
 	skills := req.GetString("skills", "")
@@ -72,7 +83,7 @@ func HandleOnboardUser(ctx context.Context, req *mcp.CallToolRequest, svc port.O
 
 	// Save sections after svc.Run so the inputs/ directory exists.
 	if parsedSections != nil {
-		repo := fs.NewResumeRepository(config.DataDir())
+		repo := fs.NewResumeRepository(dataDir)
 		if saveErr := repo.SaveSections(resumeLabel, *parsedSections); saveErr != nil {
 			slog.ErrorContext(ctx, "onboard_user: save sections failed",
 				slog.String("label", resumeLabel),
@@ -83,7 +94,19 @@ func HandleOnboardUser(ctx context.Context, req *mcp.CallToolRequest, svc port.O
 		slog.DebugContext(ctx, "onboard_user: sections saved", slog.String("label", resumeLabel))
 	}
 
-	data, _ := json.Marshal(result)
+	// Build the base response.
+	out := map[string]interface{}{
+		"stored":   result.Stored,
+		"warnings": result.Warnings,
+		"summary":  result.Summary,
+	}
+
+	// Trigger recompilation when an LLM is available (US5 mutation wiring).
+	if llmClient != nil {
+		out["compile"] = extractCompileSummary(ctx, dataDir, llmClient)
+	}
+
+	data, _ := json.Marshal(out)
 	slog.DebugContext(ctx, "mcp tool result",
 		slog.String("tool", "onboard_user"),
 		slog.String("status", "ok"),
@@ -91,6 +114,32 @@ func HandleOnboardUser(ctx context.Context, req *mcp.CallToolRequest, svc port.O
 		logger.PayloadAttr("result", string(data), logger.Verbose()),
 	)
 	return mcp.NewToolResultText(string(data))
+}
+
+// extractCompileSummary runs HandleCompileProfileWith and returns a compact compile summary
+// suitable for embedding in the onboard_user response.
+func extractCompileSummary(ctx context.Context, dataDir string, llmClient port.LLMClient) map[string]interface{} {
+	result := HandleCompileProfileWith(ctx, dataDir, llmClient)
+	if result == nil || len(result.Content) == 0 {
+		return map[string]interface{}{"status": "compile_failed", "error": "nil result"}
+	}
+	tc, ok := result.Content[0].(mcp.TextContent)
+	if !ok {
+		return map[string]interface{}{"status": "compile_failed", "error": "unexpected content type"}
+	}
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(tc.Text), &parsed); err != nil {
+		return map[string]interface{}{"status": "compile_failed", "error": err.Error()}
+	}
+	// Return only the compile-relevant fields; omit full story text to keep response compact.
+	summary := map[string]interface{}{
+		"status":      parsed["status"],
+		"compiled_at": parsed["compiled_at"],
+	}
+	if orphans, ok := parsed["orphaned_skills"]; ok {
+		summary["orphaned_skills"] = orphans
+	}
+	return summary
 }
 
 // HandleAddResume is the exported, injectable handler for "add_resume".
@@ -271,6 +320,17 @@ func buildProfileStatus(dataDir string) map[string]interface{} {
 	accomplishmentsMatches, _ := filepath.Glob(filepath.Join(dataDir, "accomplishments-*.md"))
 	if len(accomplishmentsMatches) > 0 {
 		profileObj["has_accomplishments"] = true
+	}
+
+	// Report compiled-profile staleness so the host knows whether compile_profile is needed.
+	profileRepo := fs.NewCompiledProfileRepository()
+	stale, staleFiles, staleErr := profileRepo.IsStale(dataDir)
+	if staleErr == nil {
+		profileObj["stale"] = stale
+		if staleFiles == nil {
+			staleFiles = []string{}
+		}
+		profileObj["stale_files"] = staleFiles
 	}
 
 	return profileObj

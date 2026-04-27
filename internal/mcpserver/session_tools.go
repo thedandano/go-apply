@@ -17,6 +17,7 @@ import (
 	"github.com/thedandano/go-apply/internal/model"
 	"github.com/thedandano/go-apply/internal/port"
 	mcppres "github.com/thedandano/go-apply/internal/presenter/mcp"
+	"github.com/thedandano/go-apply/internal/repository/fs"
 	"github.com/thedandano/go-apply/internal/service/pipeline"
 	renderPkg "github.com/thedandano/go-apply/internal/service/render"
 	"github.com/thedandano/go-apply/internal/service/tailor"
@@ -492,6 +493,11 @@ func HandleSubmitTailorT1WithConfig(ctx context.Context, req *mcp.CallToolReques
 		if cfg == nil {
 			cfg = liveCfg
 		}
+		// FR-010a: reject skill tokens with no supporting story in the compiled profile.
+		// Only enforced on the production path (deps==nil) so injected-deps test cases are unaffected.
+		if env := checkFR010a(ctx, sessionID, edits, config.DataDir()); env != nil {
+			return envelopeResult(env)
+		}
 	}
 	if cfg == nil {
 		cfg = &config.Config{}
@@ -833,4 +839,72 @@ func HandlePreviewATSExtractionWithConfig(ctx context.Context, req *mcp.CallTool
 		logger.PayloadAttr("result", string(resultBytes), logger.Verbose()),
 	)
 	return envelopeResult(okEnvelope(sessionID, "", pd))
+}
+
+// checkFR010a enforces FR-010a: skill tokens added via submit_tailor_t1 must have a
+// supporting story in the compiled profile. Returns nil to proceed or an error Envelope.
+// When the compiled profile is absent (never compiled), the check is skipped with a
+// warning log to avoid blocking new users who have not yet run compile_profile.
+func checkFR010a(ctx context.Context, sessionID string, edits []port.Edit, dataDir string) *Envelope {
+	profileRepo := fs.NewCompiledProfileRepository()
+	profile, err := profileRepo.Load(dataDir)
+	if err != nil {
+		if errors.Is(err, model.ErrProfileMissing) {
+			slog.WarnContext(ctx, "fr010a: check skipped",
+				slog.String("event", "fr_010a_skipped"),
+				slog.String("reason", "profile_missing"),
+				slog.String("tool", "submit_tailor_t1"),
+			)
+			return nil
+		}
+		// Unexpected load error — log and allow through (do not block tailoring).
+		slog.WarnContext(ctx, "fr010a: profile load error; check skipped",
+			slog.String("event", "fr_010a_skipped"),
+			slog.String("reason", "profile_load_error"),
+			slog.String("tool", "submit_tailor_t1"),
+			slog.String("error", err.Error()),
+		)
+		return nil
+	}
+
+	// Build evidenced skill set from all successfully-tagged stories.
+	evidenced := make(map[string]bool)
+	for i := range profile.Stories {
+		if profile.Stories[i].TaggingError == "" {
+			for _, sk := range profile.Stories[i].Skills {
+				evidenced[sk] = true
+			}
+		}
+	}
+
+	// Extract and validate skill tokens from add/replace edits.
+	var unevidenced []string
+	seen := map[string]bool{}
+	for _, e := range edits {
+		if e.Op != port.EditOpAdd && e.Op != port.EditOpReplace {
+			continue
+		}
+		for _, token := range strings.Split(e.Value, ",") {
+			tok := strings.TrimSpace(token)
+			if tok == "" || seen[tok] {
+				continue
+			}
+			seen[tok] = true
+			if !evidenced[tok] {
+				unevidenced = append(unevidenced, tok)
+			}
+		}
+	}
+	if len(unevidenced) == 0 {
+		return nil
+	}
+
+	sort.Strings(unevidenced)
+	env := stageErrorEnvelope(sessionID, "tailor_t1", "unevidenced_skill",
+		fmt.Sprintf("skills have no supporting story: %s — add stories via create_story before tailoring",
+			strings.Join(unevidenced, ", ")),
+		false,
+	)
+	env.Error.Details = map[string]interface{}{"unevidenced_tokens": unevidenced}
+	return env
 }
