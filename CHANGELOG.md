@@ -1,5 +1,49 @@
 # Changelog
 
+## [0.3.0](https://github.com/thedandano/go-apply/compare/v0.2.2...v0.3.0) (2026-04-29)
+
+
+### ⚠ BREAKING CHANGES
+
+* **011:** headless CLI removed (go-apply run); port.LLMClient and port.Orchestrator interfaces removed; accomplishments storage format changed; orchestrator.* config keys are now ignored.
+
+### Features
+
+* **011:** host-driven compile_profile, headless removal, and accomplishments.json ([e9e2bde](https://github.com/thedandano/go-apply/commit/e9e2bdedb874f8889d5db99f375afa39afeb81ff))
+* **ats:** real PDF renderer, ATS extractor, keyword-survival diff, and doctor command ([#114](https://github.com/thedandano/go-apply/issues/114)) ([938da08](https://github.com/thedandano/go-apply/commit/938da08d3a2f5c7372b6b79352e9ef193c373c9f))
+* **logs:** pretty-print JSON-valued logfmt fields in go-apply logs ([cd8257a](https://github.com/thedandano/go-apply/commit/cd8257af83b04d1d453c7f3d0561be149ac50689))
+* **mcpserver:** category-aware T1 skill edits — tool contract + spec ([#110](https://github.com/thedandano/go-apply/issues/110)) ([54e91b2](https://github.com/thedandano/go-apply/commit/54e91b28af3cd50014c5067f55b27a43710d2231))
+* **pdfrender:** Latin-1 transliteration + renderer em-dash fix (spec 009 US1) ([7c278d6](https://github.com/thedandano/go-apply/commit/7c278d63bbb67b399226c7a1fb3d1d7c1069b9da))
+* **profile:** 010 compiled profile — skill-story graph + create_story + FR-010a ([fad05cb](https://github.com/thedandano/go-apply/commit/fad05cb67a3d98ae8cdcbe97847d8089a50e0726))
+* **resume:** sections-based model, structured edits, and ATS preview ([#108](https://github.com/thedandano/go-apply/issues/108)) ([144ddcc](https://github.com/thedandano/go-apply/commit/144ddcc7c62e458e9883574d85970bd205c766c3))
+* **resume:** Tier 4 schema sections, section registry, binary extractor interface ([#113](https://github.com/thedandano/go-apply/issues/113)) ([ecc3838](https://github.com/thedandano/go-apply/commit/ecc3838404034165ba1e7c7098d2f2e951f2b649))
+* **scoring:** US2 PDF scoring + fix sidecar immutability (issue [#117](https://github.com/thedandano/go-apply/issues/117)) ([#116](https://github.com/thedandano/go-apply/issues/116)) ([1c1c373](https://github.com/thedandano/go-apply/commit/1c1c3737caf728894e8bfaa9b8bffda71712ed11))
+* **tailor:** redesign T1 to use skill_rewrites string replacement ([4f1417a](https://github.com/thedandano/go-apply/commit/4f1417ad0b16ec4ab0776d8e064a2a1dfda13e06))
+
+
+### Bug Fixes
+
+* **010:** address Opus Council review findings ([90f018e](https://github.com/thedandano/go-apply/commit/90f018ef10af93b0cb0848b904e7acd29eb0ef69))
+* **agentconfig:** register Claude MCP server in settings.json mcpServers ([1f5c324](https://github.com/thedandano/go-apply/commit/1f5c324c1f0c35196dec027693ca7ccb54b8a962))
+* **agentconfig:** write claude MCP to ~/.claude.json user scope ([d11c8a0](https://github.com/thedandano/go-apply/commit/d11c8a0a6047e245078eb37fd7331f48d4cd4125))
+* **ci:** upgrade golangci-lint to v2, fix hardcoded project root in cli_test ([e3e6eb2](https://github.com/thedandano/go-apply/commit/e3e6eb2954f136e13544e90b1a10a545052570d8))
+* **logs:** correct logfmt unquoting, redactor float/phone safety, and preview_ats result logging ([379362c](https://github.com/thedandano/go-apply/commit/379362cb9920fc64b97e7488c4b5bc7eec750e56))
+* **logs:** preserve internal whitespace and support hyphenated field keys ([6bdba27](https://github.com/thedandano/go-apply/commit/6bdba270af887ebb72f40492afced81954f3687c))
+* **logs:** resolve golangci-lint warnings in renderer and tests ([6c1c699](https://github.com/thedandano/go-apply/commit/6c1c6993e4e93be6661d5fc2494ed20ef63014ae))
+* **mcp:** embed extraction_protocol in load_jd response to reduce T0 variance ([752d79d](https://github.com/thedandano/go-apply/commit/752d79d0a6dd09505b81da1fff8f796a83d79cb8)), closes [#118](https://github.com/thedandano/go-apply/issues/118)
+
+
+### Code Refactoring
+
+* **config:** remove orchestrator guard and references ([75586b3](https://github.com/thedandano/go-apply/commit/75586b3ba494d5c35db1e456eabbe48c12bd0608))
+
+
+### Documentation
+
+* **009:** spec, plan, tasks, data-model, research, checklists for per-tier ATS scoring ([e7c0f7e](https://github.com/thedandano/go-apply/commit/e7c0f7e65d78496e94168d01ac79d13443c40109))
+* **readme:** remove OpenClaw until tested, drop TUI from tagline ([359a90f](https://github.com/thedandano/go-apply/commit/359a90f3a7958bdacfee5da5f1a6af9998c3489d))
+* update README and CLAUDE.md for v2 (MCP-only, host-driven compile_profile) ([cab437c](https://github.com/thedandano/go-apply/commit/cab437c2d5f398e481e213ddf68c8fd4ad540c60))
+
 ## [0.2.2](https://github.com/thedandano/go-apply/compare/v0.2.1...v0.2.2) (2026-04-22)
 
 
