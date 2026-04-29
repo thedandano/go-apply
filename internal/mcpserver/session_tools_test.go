@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 
@@ -688,6 +689,254 @@ func TestHandleFinalizeWithConfig_SummaryIncluded(t *testing.T) {
 	}
 	if _, ok := summary["best_score"]; !ok {
 		t.Error("expected best_score in summary")
+	}
+}
+
+// ── HandleFinalizeWithConfig PDF output tests ─────────────────────────────────
+
+// capturingApplicationRepository records the last Put record for assertions.
+type capturingApplicationRepository struct {
+	stubApplicationRepository
+	lastPut *model.ApplicationRecord
+}
+
+func (c *capturingApplicationRepository) Put(rec *model.ApplicationRecord) error {
+	c.lastPut = rec
+	return nil
+}
+
+// fullFlowThroughT1 runs load_jd → submit_keywords → submit_tailor_t1 and returns the session ID.
+func fullFlowThroughT1(t *testing.T, cfg *pipeline.ApplyConfig) string {
+	t.Helper()
+	loadReq := callToolRequest("load_jd", map[string]any{"jd_raw_text": "Senior Go engineer."})
+	loadText := extractText(t, mcpserver.HandleLoadJDWithConfig(context.Background(), &loadReq, cfg))
+	var loadEnv map[string]any
+	if err := json.Unmarshal([]byte(loadText), &loadEnv); err != nil {
+		t.Fatalf("load_jd not JSON: %v", err)
+	}
+	sessionID, _ := loadEnv["session_id"].(string)
+
+	const jdJSON = `{"title":"Go Engineer","company":"Acme","required":["go"],"preferred":[],"location":"Remote","seniority":"senior","required_years":3}`
+	kwReq := callToolRequest("submit_keywords", map[string]any{"session_id": sessionID, "jd_json": jdJSON})
+	mcpserver.HandleSubmitKeywordsWithConfig(context.Background(), &kwReq, cfg, &config.Config{})
+
+	t1Req := callToolRequest("submit_tailor_t1", map[string]any{
+		"session_id": sessionID,
+		"edits":      `[{"section":"skills","op":"add","value":"EKS"}]`,
+	})
+	mcpserver.HandleSubmitTailorT1WithConfig(context.Background(), &t1Req, cfg, &config.Config{})
+	return sessionID
+}
+
+// fullFlowThroughT1WithURL runs load_jd (URL-based) → submit_keywords → submit_tailor_t1.
+// Using jd_url sets sess.URL, which causes finalize to call AppRepo.Put.
+func fullFlowThroughT1WithURL(t *testing.T, cfg *pipeline.ApplyConfig) string {
+	t.Helper()
+	loadReq := callToolRequest("load_jd", map[string]any{"jd_url": "https://example.com/job"})
+	loadText := extractText(t, mcpserver.HandleLoadJDWithConfig(context.Background(), &loadReq, cfg))
+	var loadEnv map[string]any
+	if err := json.Unmarshal([]byte(loadText), &loadEnv); err != nil {
+		t.Fatalf("load_jd not JSON: %v", err)
+	}
+	sessionID, _ := loadEnv["session_id"].(string)
+
+	const jdJSON = `{"title":"Go Engineer","company":"Acme","required":["go"],"preferred":[],"location":"Remote","seniority":"senior","required_years":3}`
+	kwReq := callToolRequest("submit_keywords", map[string]any{"session_id": sessionID, "jd_json": jdJSON})
+	mcpserver.HandleSubmitKeywordsWithConfig(context.Background(), &kwReq, cfg, &config.Config{})
+
+	t1Req := callToolRequest("submit_tailor_t1", map[string]any{
+		"session_id": sessionID,
+		"edits":      `[{"section":"skills","op":"add","value":"EKS"}]`,
+	})
+	mcpserver.HandleSubmitTailorT1WithConfig(context.Background(), &t1Req, cfg, &config.Config{})
+	return sessionID
+}
+
+func TestHandleFinalizeWithConfig_ResumeTextSavedToRecord(t *testing.T) {
+	capRepo := &capturingApplicationRepository{}
+	cfg := stubApplyConfigWithSkillsLoader()
+	cfg.AppRepo = capRepo
+
+	sessionID := fullFlowThroughT1WithURL(t, &cfg)
+
+	finReq := callToolRequest("finalize", map[string]any{"session_id": sessionID})
+	result := mcpserver.HandleFinalizeWithConfig(context.Background(), &finReq, &cfg)
+	text := extractText(t, result)
+
+	var env map[string]any
+	if err := json.Unmarshal([]byte(text), &env); err != nil {
+		t.Fatalf("not JSON: %v — raw: %s", err, text)
+	}
+	if env["status"] != "ok" {
+		t.Errorf("status = %v, want ok — full: %s", env["status"], text)
+	}
+	if capRepo.lastPut == nil {
+		t.Fatal("expected AppRepo.Put to be called for URL-based session")
+	}
+	if capRepo.lastPut.ResumeText == "" {
+		t.Error("expected ApplicationRecord.ResumeText to be populated from TailoredText")
+	}
+	if pdfPath, _ := env["data"].(map[string]any)["pdf_path"].(string); pdfPath != "" {
+		t.Cleanup(func() { os.Remove(pdfPath) })
+	}
+}
+
+func TestHandleFinalizeWithConfig_WithTailoredSections_ReturnsPDFPathAndLink(t *testing.T) {
+	capRepo := &capturingApplicationRepository{}
+	cfg := stubApplyConfigWithSkillsLoader()
+	cfg.AppRepo = capRepo
+
+	sessionID := fullFlowThroughT1(t, &cfg)
+
+	finReq := callToolRequest("finalize", map[string]any{"session_id": sessionID})
+	result := mcpserver.HandleFinalizeWithConfig(context.Background(), &finReq, &cfg)
+	text := extractText(t, result)
+
+	var env map[string]any
+	if err := json.Unmarshal([]byte(text), &env); err != nil {
+		t.Fatalf("not JSON: %v — raw: %s", err, text)
+	}
+	if env["status"] != "ok" {
+		t.Errorf("status = %v, want ok — full: %s", env["status"], text)
+	}
+	data, _ := env["data"].(map[string]any)
+	if data == nil {
+		t.Fatal("expected data in response")
+	}
+	pdfPath, _ := data["pdf_path"].(string)
+	if pdfPath == "" {
+		t.Errorf("expected pdf_path in response, got: %s", text)
+	} else {
+		t.Cleanup(func() { os.Remove(pdfPath) })
+	}
+	pdfLink, _ := data["pdf_link"].(string)
+	if !strings.HasPrefix(pdfLink, "[") || !strings.Contains(pdfLink, "file://") {
+		t.Errorf("pdf_link malformed, got: %q", pdfLink)
+	}
+}
+
+func TestHandleFinalizeWithConfig_TailoredSectionsNil_NoPDFFields(t *testing.T) {
+	cfg := stubApplyConfigForSession()
+
+	// load_jd → submit_keywords only (no T1 → TailoredSections stays nil)
+	loadReq := callToolRequest("load_jd", map[string]any{"jd_raw_text": "Senior Go engineer. Required: go."})
+	loadText := extractText(t, mcpserver.HandleLoadJDWithConfig(context.Background(), &loadReq, &cfg))
+	var loadEnv map[string]any
+	_ = json.Unmarshal([]byte(loadText), &loadEnv)
+	sessionID, _ := loadEnv["session_id"].(string)
+
+	kwReq := callToolRequest("submit_keywords", map[string]any{
+		"session_id": sessionID,
+		"jd_json":    `{"title":"Go Engineer","company":"Acme","required":["go"],"preferred":[],"location":"Remote","seniority":"senior","required_years":3}`,
+	})
+	mcpserver.HandleSubmitKeywordsWithConfig(context.Background(), &kwReq, &cfg, &config.Config{})
+
+	finReq := callToolRequest("finalize", map[string]any{"session_id": sessionID})
+	result := mcpserver.HandleFinalizeWithConfig(context.Background(), &finReq, &cfg)
+	text := extractText(t, result)
+
+	var env map[string]any
+	if err := json.Unmarshal([]byte(text), &env); err != nil {
+		t.Fatalf("not JSON: %v", err)
+	}
+	if env["status"] != "ok" {
+		t.Errorf("status = %v, want ok", env["status"])
+	}
+	data, _ := env["data"].(map[string]any)
+	if data["pdf_path"] != nil && data["pdf_path"] != "" {
+		t.Errorf("expected no pdf_path when TailoredSections is nil, got: %v", data["pdf_path"])
+	}
+	if data["pdf_link"] != nil && data["pdf_link"] != "" {
+		t.Errorf("expected no pdf_link when TailoredSections is nil, got: %v", data["pdf_link"])
+	}
+}
+
+func TestHandleFinalizeWithConfig_PDFRenderFails_FinalizeStillOK(t *testing.T) {
+	// Set up the session through T1 with a working renderer (scoring requires it).
+	setupCfg := stubApplyConfigWithSkillsLoader()
+	sessionID := fullFlowThroughT1(t, &setupCfg)
+
+	// Finalize with an injected failing renderer.
+	failCfg := stubApplyConfigWithSkillsLoader()
+	failCfg.PDFRenderer = &stubPDFRenderer{failRender: true}
+
+	finReq := callToolRequest("finalize", map[string]any{"session_id": sessionID})
+	result := mcpserver.HandleFinalizeWithConfig(context.Background(), &finReq, &failCfg)
+	text := extractText(t, result)
+
+	var env map[string]any
+	if err := json.Unmarshal([]byte(text), &env); err != nil {
+		t.Fatalf("not JSON: %v", err)
+	}
+	if env["status"] != "ok" {
+		t.Errorf("status = %v, want ok even when PDF render fails", env["status"])
+	}
+	data, _ := env["data"].(map[string]any)
+	if data["pdf_path"] != nil && data["pdf_path"] != "" {
+		t.Errorf("expected no pdf_path on render failure, got: %v", data["pdf_path"])
+	}
+}
+
+func TestHandleFinalizeWithConfig_PDFLink_UsesJDTitleAndCompany(t *testing.T) {
+	cfg := stubApplyConfigWithSkillsLoader()
+	sessionID := fullFlowThroughT1(t, &cfg)
+
+	finReq := callToolRequest("finalize", map[string]any{"session_id": sessionID})
+	result := mcpserver.HandleFinalizeWithConfig(context.Background(), &finReq, &cfg)
+	text := extractText(t, result)
+
+	var env map[string]any
+	_ = json.Unmarshal([]byte(text), &env)
+	data, _ := env["data"].(map[string]any)
+	pdfLink, _ := data["pdf_link"].(string)
+	if !strings.HasPrefix(pdfLink, "[Go Engineer @ Acme]") {
+		t.Errorf("pdf_link should use JD title and company, got: %q", pdfLink)
+	}
+	if pdfPath, _ := data["pdf_path"].(string); pdfPath != "" {
+		t.Cleanup(func() { os.Remove(pdfPath) })
+	}
+}
+
+func TestHandleFinalizeWithConfig_PDFLink_FallsBackToBestLabel(t *testing.T) {
+	cfg := stubApplyConfigWithSkillsLoader()
+
+	// Run through T1 but with a JD that has no Title/Company.
+	loadReq := callToolRequest("load_jd", map[string]any{"jd_raw_text": "Senior Go engineer."})
+	loadText := extractText(t, mcpserver.HandleLoadJDWithConfig(context.Background(), &loadReq, &cfg))
+	var loadEnv map[string]any
+	_ = json.Unmarshal([]byte(loadText), &loadEnv)
+	sessionID, _ := loadEnv["session_id"].(string)
+
+	// jd_json with empty title and company
+	kwReq := callToolRequest("submit_keywords", map[string]any{
+		"session_id": sessionID,
+		"jd_json":    `{"title":"","company":"","required":["go"],"preferred":[],"location":"Remote","seniority":"senior","required_years":3}`,
+	})
+	mcpserver.HandleSubmitKeywordsWithConfig(context.Background(), &kwReq, &cfg, &config.Config{})
+
+	t1Req := callToolRequest("submit_tailor_t1", map[string]any{
+		"session_id": sessionID,
+		"edits":      `[{"section":"skills","op":"add","value":"EKS"}]`,
+	})
+	mcpserver.HandleSubmitTailorT1WithConfig(context.Background(), &t1Req, &cfg, &config.Config{})
+
+	finReq := callToolRequest("finalize", map[string]any{"session_id": sessionID})
+	result := mcpserver.HandleFinalizeWithConfig(context.Background(), &finReq, &cfg)
+	text := extractText(t, result)
+
+	var env map[string]any
+	_ = json.Unmarshal([]byte(text), &env)
+	data, _ := env["data"].(map[string]any)
+	pdfLink, _ := data["pdf_link"].(string)
+	// When title/company empty, link text must be the best resume label (not empty).
+	if pdfLink == "" {
+		t.Error("expected pdf_link even with empty JD title/company (fallback to best_label)")
+	}
+	if strings.Contains(pdfLink, " @ ") {
+		t.Errorf("pdf_link should not use @ format when title/company empty, got: %q", pdfLink)
+	}
+	if pdfPath, _ := data["pdf_path"].(string); pdfPath != "" {
+		t.Cleanup(func() { os.Remove(pdfPath) })
 	}
 }
 
