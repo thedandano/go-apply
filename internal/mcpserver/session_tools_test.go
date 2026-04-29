@@ -23,9 +23,7 @@ import (
 func stubApplyConfigForSession() pipeline.ApplyConfig {
 	return pipeline.ApplyConfig{
 		Fetcher:        &stubJDFetcher{},
-		LLM:            &stubLLMClient{},
 		Scorer:         &stubScorer{},
-		CLGen:          nil,
 		Resumes:        &stubResumeRepoWithSkillsSections{},
 		Loader:         &stubDocumentLoader{},
 		AppRepo:        &stubApplicationRepository{},
@@ -325,7 +323,6 @@ func TestHandleSubmitKeywordsWithConfig_NoSectionsSidecar_ReturnsError(t *testin
 	// Build a config where Resumes.LoadSections returns ErrSectionsMissing.
 	cfg := pipeline.ApplyConfig{
 		Fetcher:        &stubJDFetcher{},
-		LLM:            &stubLLMClient{},
 		Scorer:         &stubScorer{},
 		Resumes:        &stubResumeRepo{}, // LoadSections returns ErrSectionsMissing
 		Loader:         &stubDocumentLoader{},

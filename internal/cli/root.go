@@ -40,7 +40,6 @@ func NewRootCommand(version string) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.AddCommand(NewApplyCommand())
 	cmd.AddCommand(NewServeCommand())
 	cmd.AddCommand(NewConfigCommand())
 	cmd.AddCommand(NewOnboardCommand())

@@ -22,7 +22,7 @@ func writeFR010aProfile(t *testing.T, dir string, evidencedSkills []string) {
 	if len(evidencedSkills) > 0 {
 		stories = append(stories, model.Story{
 			ID:         "story-001",
-			SourceFile: "accomplishments-0.md",
+			SourceFile: "onboard",
 			Text:       "story text",
 			Skills:     evidencedSkills,
 			Format:     "SBI",

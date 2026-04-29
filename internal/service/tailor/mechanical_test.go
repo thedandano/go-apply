@@ -2,8 +2,6 @@ package tailor
 
 import (
 	"testing"
-
-	"github.com/thedandano/go-apply/internal/port"
 )
 
 func TestApplyBulletRewrites_EmptyRewrites_ReturnsOriginal(t *testing.T) {
@@ -19,7 +17,7 @@ func TestApplyBulletRewrites_EmptyRewrites_ReturnsOriginal(t *testing.T) {
 
 func TestApplyBulletRewrites_NoMatch_ReturnsOriginal(t *testing.T) {
 	text := "Some resume text"
-	rewrites := []port.BulletRewrite{
+	rewrites := []BulletRewrite{
 		{Original: "not present", Replacement: "replaced"},
 	}
 	result, count := ApplyBulletRewrites(text, rewrites)
@@ -33,7 +31,7 @@ func TestApplyBulletRewrites_NoMatch_ReturnsOriginal(t *testing.T) {
 
 func TestApplyBulletRewrites_HappyPath_TwoSubstitutions(t *testing.T) {
 	text := "Led team of 5. Reduced latency by 40%."
-	rewrites := []port.BulletRewrite{
+	rewrites := []BulletRewrite{
 		{Original: "Led team of 5", Replacement: "Led team of 10 engineers"},
 		{Original: "40%", Replacement: "60%"},
 	}
@@ -48,7 +46,7 @@ func TestApplyBulletRewrites_HappyPath_TwoSubstitutions(t *testing.T) {
 
 func TestApplyBulletRewrites_EmptyOriginalSkipped(t *testing.T) {
 	text := "Some resume text"
-	rewrites := []port.BulletRewrite{
+	rewrites := []BulletRewrite{
 		{Original: "", Replacement: "should not replace"},
 		{Original: "Some", Replacement: "Replaced"},
 	}
@@ -63,7 +61,7 @@ func TestApplyBulletRewrites_EmptyOriginalSkipped(t *testing.T) {
 
 func TestApplyBulletRewrites_AllEmpty_ReturnsOriginal(t *testing.T) {
 	text := "Some resume text"
-	rewrites := []port.BulletRewrite{
+	rewrites := []BulletRewrite{
 		{Original: "", Replacement: "x"},
 		{Original: "", Replacement: "y"},
 	}

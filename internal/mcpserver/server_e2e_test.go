@@ -249,10 +249,11 @@ func TestServerDispatch_OnboardThenScore(t *testing.T) {
 	setupTestEnv(t)
 	cl := newMCPClient(t)
 
-	// Step 1: onboard resume.
+	// Step 1: onboard resume with a sections sidecar so submit_keywords can score it.
 	onboardRaw := callTool(t, cl, "onboard_user", map[string]any{
 		"resume_content": "Senior Go Engineer with 5 years of experience building distributed systems in Go. Proficient in Kubernetes, Docker, Terraform, and gRPC.",
 		"resume_label":   "main",
+		"sections":       `{"schema_version":1,"contact":{"name":"Test User"},"experience":[{"company":"Acme","role":"Engineer","start_date":"2020-01","bullets":["Built systems"]}],"skills":{"kind":"flat","flat":"go kubernetes docker terraform grpc distributed systems"}}`,
 	})
 	var onboardResp map[string]any
 	if err := json.Unmarshal([]byte(onboardRaw), &onboardResp); err != nil {

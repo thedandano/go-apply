@@ -4,6 +4,7 @@ package mcpserver
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -76,7 +77,10 @@ func NewServer() *server.MCPServer {
 
 	srv.AddTool(
 		mcp.NewTool("compile_profile",
-			mcp.WithDescription("Read all skills and accomplishment files from the user's profile, tag each story with matching skills, and write a compiled profile artifact. Returns all stories (with skill tags and classification), orphaned skills (skills with no supporting story), and any LLM tagging failures. Call this after onboard_user, after adding a new skills file, or after the user reports adding a new accomplishment file."),
+			mcp.WithDescription("Assemble a compiled profile from host-tagged skills and stories. The host (Claude) performs skill tagging before calling this tool. Returns a rich diff: orphaned skills, coverage gained, skills added/removed, and story counts. Call after onboard_user or after the user adds new accomplishments."),
+			mcp.WithString("skills", mcp.Description("JSON array of skill labels to add, e.g. '[\"Go\",\"Kubernetes\"]'. Unioned with prior skills.")),
+			mcp.WithString("remove_skills", mcp.Description("JSON array of skill labels to explicitly remove from the profile, e.g. '[\"Java\"]'.")),
+			mcp.WithString("stories", mcp.Description("JSON array of story objects. Each must have either 'id' (string, resolves text from prior profile) or 'accomplishment' (string, new story text), plus 'tags' ([]string) and optional 'source' (string). The 'source' field indicates where the story came from: supply \"onboard\" for stories drawn from onboard_text, supply the created_stories[].id string (e.g. \"2\") for stories created via create_story, or omit/leave empty if unknown. Example: '[{\"accomplishment\":\"shipped the thing\",\"tags\":[\"Go\"],\"source\":\"onboard\"}]'.")),
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			return HandleCompileProfile(ctx, &req), nil
@@ -179,7 +183,12 @@ func NewServer() *server.MCPServer {
 	return srv
 }
 
+// sessionTTL is the maximum age of a session file before it is swept on startup.
+const sessionTTL = 7 * 24 * time.Hour
+
 // Serve starts the MCP stdio server.
+// On startup, expired sessions older than sessionTTL are swept from disk.
 func Serve() error {
+	sessions().SweepExpired(sessionTTL)
 	return server.ServeStdio(NewServer())
 }

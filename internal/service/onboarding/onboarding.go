@@ -4,7 +4,10 @@ package onboarding
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -22,7 +25,7 @@ var _ port.Onboarder = (*Service)(nil)
 // It writes text files to disk:
 //   - Resumes → dataDir/inputs/<label>.txt
 //   - Skills  → dataDir/skills.md
-//   - Accomplishments → dataDir/accomplishments-<n>.md
+//   - Accomplishments → dataDir/accomplishments.json
 type Service struct {
 	dataDir string
 	log     *slog.Logger
@@ -84,19 +87,12 @@ func (s *Service) Run(ctx context.Context, input model.OnboardInput) (model.Onbo
 	}
 
 	if input.AccomplishmentsText != "" {
-		sections := splitAccomplishmentSections(input.AccomplishmentsText)
-		s.log.DebugContext(ctx, "onboard: storing accomplishments", "sections", len(sections))
-		for i, section := range sections {
-			sourceDoc := fmt.Sprintf("accomplishments:%d", i)
-			path := filepath.Join(s.dataDir, fmt.Sprintf("accomplishments-%d.md", i))
-			if warn := s.writeDocument(ctx, sourceDoc, section, path); warn != "" {
-				result.Warnings = append(result.Warnings, model.RiskWarning{Severity: model.SeverityWarn, Message: warn})
-				continue
-			}
-			result.Stored = append(result.Stored, sourceDoc)
+		if err := s.writeAccomplishments(ctx, input.AccomplishmentsText); err != nil {
+			return result, err
 		}
-		result.Summary.AccomplishmentsCount = len(sections)
-		s.log.DebugContext(ctx, "onboard: accomplishments stored", "chunks", result.Summary.AccomplishmentsCount)
+		result.Stored = append(result.Stored, "accomplishments:onboard")
+		result.Summary.AccomplishmentsCount = 1
+		s.log.DebugContext(ctx, "onboard: accomplishments stored")
 	} else {
 		s.log.DebugContext(ctx, "onboard: skipping accomplishments — empty input")
 	}
@@ -105,6 +101,48 @@ func (s *Service) Run(ctx context.Context, input model.OnboardInput) (model.Onbo
 	result.Summary.TotalChunks = len(result.Stored)
 
 	return result, nil
+}
+
+// writeAccomplishments loads existing accomplishments.json (if present), replaces onboard_text,
+// preserves created_stories, and writes atomically via temp file + rename.
+func (s *Service) writeAccomplishments(ctx context.Context, text string) error {
+	path := filepath.Join(s.dataDir, "accomplishments.json")
+
+	var acc model.AccomplishmentsJSON
+	data, err := os.ReadFile(path) // #nosec G304 -- dataDir is a trusted config value
+	if err != nil {
+		if !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("read accomplishments.json: %w", err)
+		}
+		// File does not exist yet — start fresh.
+	} else {
+		if jsonErr := json.Unmarshal(data, &acc); jsonErr != nil {
+			return fmt.Errorf("accomplishments.json is corrupt — run go-apply onboard --reset: %w", jsonErr)
+		}
+		if acc.SchemaVersion != model.AccomplishmentsSchemaV1 {
+			return fmt.Errorf("accomplishments.json schema_version %q is not supported — run go-apply onboard --reset", acc.SchemaVersion)
+		}
+	}
+
+	acc.SchemaVersion = model.AccomplishmentsSchemaV1
+	acc.OnboardText = text
+
+	out, err := json.Marshal(acc)
+	if err != nil {
+		return fmt.Errorf("marshal accomplishments: %w", err)
+	}
+
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, out, 0o600); err != nil { // #nosec G306
+		return fmt.Errorf("write accomplishments tmp: %w", err)
+	}
+	defer func() { _ = os.Remove(tmp) }()
+	if err := os.Rename(tmp, path); err != nil {
+		return fmt.Errorf("rename accomplishments: %w", err)
+	}
+
+	s.log.InfoContext(ctx, "onboard: accomplishments.json written", "path", path)
+	return nil
 }
 
 // writeDocument writes text to path.
@@ -137,62 +175,6 @@ func countSkillItems(text string) int {
 		}
 	}
 	return count
-}
-
-// splitAccomplishmentSections splits accomplishments text into per-accomplishment chunks.
-//
-// Strategy:
-//  1. If the text contains any markdown headings (lines starting with #), split on those.
-//  2. Otherwise treat each blank-line-delimited paragraph as its own chunk — this handles
-//     plain-text STAR-format files (Situation / Behavior / Impact paragraphs).
-func splitAccomplishmentSections(text string) []string {
-	trimmed := strings.TrimSpace(text)
-	if trimmed == "" {
-		return nil
-	}
-
-	// Check for markdown headings.
-	for _, line := range strings.Split(trimmed, "\n") {
-		if strings.HasPrefix(strings.TrimSpace(line), "#") {
-			return splitOnHeadings(trimmed)
-		}
-	}
-
-	// No headings — split on blank lines (paragraph-per-accomplishment).
-	return splitOnParagraphs(trimmed)
-}
-
-// splitOnHeadings splits text each time a line starting with # is encountered.
-func splitOnHeadings(text string) []string {
-	lines := strings.Split(text, "\n")
-	var sections []string
-	var current strings.Builder
-	for _, line := range lines {
-		if strings.HasPrefix(strings.TrimSpace(line), "#") && current.Len() > 0 {
-			if s := strings.TrimSpace(current.String()); s != "" {
-				sections = append(sections, s)
-			}
-			current.Reset()
-		}
-		current.WriteString(line)
-		current.WriteByte('\n')
-	}
-	if s := strings.TrimSpace(current.String()); s != "" {
-		sections = append(sections, s)
-	}
-	return sections
-}
-
-// splitOnParagraphs splits on blank lines, returning each non-empty paragraph as a chunk.
-func splitOnParagraphs(text string) []string {
-	raw := strings.Split(text, "\n\n")
-	var sections []string
-	for _, p := range raw {
-		if s := strings.TrimSpace(p); s != "" {
-			sections = append(sections, s)
-		}
-	}
-	return sections
 }
 
 // validateLabel rejects empty labels and labels containing path separators.

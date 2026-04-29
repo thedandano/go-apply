@@ -39,14 +39,12 @@ type EditResult struct {
 	NewSections   model.SectionMap `json:"new_sections"`
 }
 
-// Tailor rewrites a resume to better match a job description.
-// The pipeline drives the tier loop; TailorResume executes a single tier pass.
+// Tailor applies structured edits to resume sections.
+// ApplyEdits applies the edit envelope to the given sections and returns the
+// new sections along with per-edit success/failure tracking.
+//
+// Edits are applied in order; each is independent (one rejection does not
+// abort subsequent edits). The input sections are not mutated.
 type Tailor interface {
-	TailorResume(ctx context.Context, input *model.TailorInput) (model.TailorResult, error)
-	// ApplyEdits applies the edit envelope to the given sections and returns the
-	// new sections along with per-edit success/failure tracking.
-	//
-	// Edits are applied in order; each is independent (one rejection does not
-	// abort subsequent edits). The input sections are not mutated.
 	ApplyEdits(ctx context.Context, sections model.SectionMap, edits []Edit) (EditResult, error)
 }

@@ -1,6 +1,7 @@
 package storycreator_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
@@ -33,6 +34,30 @@ func writeCareer(t *testing.T, dir string, refs []model.ExperienceRef) {
 	}
 }
 
+func writeAccomplishments(t *testing.T, dir string, acc model.AccomplishmentsJSON) {
+	t.Helper()
+	data, err := json.Marshal(acc)
+	if err != nil {
+		t.Fatalf("marshal accomplishments.json: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "accomplishments.json"), data, 0o600); err != nil {
+		t.Fatalf("write accomplishments.json: %v", err)
+	}
+}
+
+func readAccomplishments(t *testing.T, dir string) model.AccomplishmentsJSON {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(dir, "accomplishments.json"))
+	if err != nil {
+		t.Fatalf("read accomplishments.json: %v", err)
+	}
+	var acc model.AccomplishmentsJSON
+	if err := json.Unmarshal(data, &acc); err != nil {
+		t.Fatalf("parse accomplishments.json: %v", err)
+	}
+	return acc
+}
+
 func happyInput() model.StoryInput {
 	return model.StoryInput{
 		PrimarySkill: "Go",
@@ -45,7 +70,7 @@ func happyInput() model.StoryInput {
 	}
 }
 
-// TestCreate_HappyPath verifies a story is written and source_file returned.
+// TestCreate_HappyPath verifies a story is written to accomplishments.json and StoryID returned.
 func TestCreate_HappyPath(t *testing.T) {
 	dir := t.TempDir()
 	writeSkills(t, dir, "Go\nKubernetes")
@@ -56,20 +81,26 @@ func TestCreate_HappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if out.SourceFile == "" {
-		t.Error("SourceFile empty")
+	if out.StoryID == "" {
+		t.Error("StoryID empty")
 	}
 
-	// File must exist and contain the SBI content.
-	data, readErr := os.ReadFile(filepath.Join(dir, out.SourceFile))
-	if readErr != nil {
-		t.Fatalf("read written file: %v", readErr)
+	// accomplishments.json must exist and contain the SBI content.
+	acc := readAccomplishments(t, dir)
+	if len(acc.CreatedStories) != 1 {
+		t.Fatalf("created_stories length = %d; want 1", len(acc.CreatedStories))
 	}
-	content := string(data)
-	for _, want := range []string{"Go", "technical", "Backend Engineer", "Situation", "Behavior", "Impact"} {
-		if !strings.Contains(content, want) {
-			t.Errorf("story file missing %q", want)
+	text := acc.CreatedStories[0].Text
+	for _, want := range []string{"Situation", "Behavior", "Impact"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("story text missing %q", want)
 		}
+	}
+
+	// No .md files must be written.
+	matches, _ := filepath.Glob(filepath.Join(dir, "accomplishments-*.md"))
+	if len(matches) != 0 {
+		t.Errorf("unexpected .md files written: %v", matches)
 	}
 }
 
@@ -146,8 +177,8 @@ func TestCreate_IsNewJob_AppendsCareer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if out.SourceFile == "" {
-		t.Error("SourceFile empty")
+	if out.StoryID == "" {
+		t.Error("StoryID empty")
 	}
 
 	// career.json must now contain the new role.
@@ -173,18 +204,20 @@ func TestCreate_IsNewJob_AppendsCareer(t *testing.T) {
 	}
 }
 
-// TestCreate_NextAccomplishmentsNumber verifies the file counter increments correctly.
+// TestCreate_NextAccomplishmentsNumber verifies the ID counter increments past gaps correctly.
 func TestCreate_NextAccomplishmentsNumber(t *testing.T) {
 	dir := t.TempDir()
 	writeSkills(t, dir, "Go")
 	writeCareer(t, dir, []model.ExperienceRef{{Role: "Backend Engineer", StartDate: "2020-01", EndDate: "2023-01"}})
 
-	// Pre-existing accomplishments-0.md and accomplishments-2.md (gap is intentional).
-	for _, name := range []string{"accomplishments-0.md", "accomplishments-2.md"} {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte("existing"), 0o600); err != nil {
-			t.Fatalf("write %s: %v", name, err)
-		}
-	}
+	// Pre-existing accomplishments with ids "0" and "2" (gap is intentional).
+	writeAccomplishments(t, dir, model.AccomplishmentsJSON{
+		SchemaVersion: "1",
+		CreatedStories: []model.CreatedStory{
+			{ID: "0", Skill: "Go", Type: model.StoryTypeTechnical, JobTitle: "Backend Engineer", Text: "old story 0"},
+			{ID: "2", Skill: "Go", Type: model.StoryTypeTechnical, JobTitle: "Backend Engineer", Text: "old story 2"},
+		},
+	})
 
 	svc := newSvc(t, dir)
 	out, err := svc.Create(context.Background(), happyInput())
@@ -192,7 +225,109 @@ func TestCreate_NextAccomplishmentsNumber(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	// Max existing = 2, so next must be 3.
-	if out.SourceFile != "accomplishments-3.md" {
-		t.Errorf("SourceFile=%q; want accomplishments-3.md", out.SourceFile)
+	if out.StoryID != "3" {
+		t.Errorf("StoryID=%q; want \"3\"", out.StoryID)
+	}
+
+	// Verify the entry was appended with the correct ID.
+	acc := readAccomplishments(t, dir)
+	last := acc.CreatedStories[len(acc.CreatedStories)-1]
+	if last.ID != "3" {
+		t.Errorf("last created_story id=%q; want \"3\"", last.ID)
+	}
+
+	// No .md files must be written.
+	matches, _ := filepath.Glob(filepath.Join(dir, "accomplishments-*.md"))
+	if len(matches) != 0 {
+		t.Errorf("unexpected .md files written: %v", matches)
+	}
+}
+
+// TestCreate_MissingAccomplishments verifies that a missing accomplishments.json yields first id "0".
+func TestCreate_MissingAccomplishments(t *testing.T) {
+	dir := t.TempDir()
+	writeSkills(t, dir, "Go")
+	writeCareer(t, dir, []model.ExperienceRef{{Role: "Backend Engineer", StartDate: "2020-01", EndDate: "2023-01"}})
+	// accomplishments.json intentionally absent.
+
+	svc := newSvc(t, dir)
+	out, err := svc.Create(context.Background(), happyInput())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.StoryID != "0" {
+		t.Errorf("StoryID=%q; want \"0\"", out.StoryID)
+	}
+
+	acc := readAccomplishments(t, dir)
+	if len(acc.CreatedStories) != 1 {
+		t.Fatalf("created_stories length = %d; want 1", len(acc.CreatedStories))
+	}
+	if acc.CreatedStories[0].ID != "0" {
+		t.Errorf("created_stories[0].id=%q; want \"0\"", acc.CreatedStories[0].ID)
+	}
+}
+
+// TestCreate_UnsupportedSchemaVersion verifies that an unsupported schema_version returns an error
+// and does NOT modify the file.
+func TestCreate_UnsupportedSchemaVersion(t *testing.T) {
+	dir := t.TempDir()
+	writeSkills(t, dir, "Go")
+	writeCareer(t, dir, []model.ExperienceRef{{Role: "Backend Engineer", StartDate: "2020-01", EndDate: "2023-01"}})
+
+	badPath := filepath.Join(dir, "accomplishments.json")
+	original, _ := json.Marshal(model.AccomplishmentsJSON{SchemaVersion: "99"})
+	if err := os.WriteFile(badPath, original, 0o600); err != nil {
+		t.Fatalf("write v99 accomplishments.json: %v", err)
+	}
+
+	svc := newSvc(t, dir)
+	_, err := svc.Create(context.Background(), happyInput())
+	if err == nil {
+		t.Fatal("expected error for unsupported schema_version, got nil")
+	}
+	if !strings.Contains(err.Error(), "schema_version") {
+		t.Errorf("error %q does not mention 'schema_version'", err.Error())
+	}
+
+	after, readErr := os.ReadFile(badPath)
+	if readErr != nil {
+		t.Fatalf("read accomplishments.json after error: %v", readErr)
+	}
+	if !bytes.Equal(after, original) {
+		t.Errorf("accomplishments.json was modified despite error")
+	}
+}
+
+// TestCreate_CorruptAccomplishments verifies that a corrupt accomplishments.json returns an error
+// and does NOT modify the file.
+func TestCreate_CorruptAccomplishments(t *testing.T) {
+	dir := t.TempDir()
+	writeSkills(t, dir, "Go")
+	writeCareer(t, dir, []model.ExperienceRef{{Role: "Backend Engineer", StartDate: "2020-01", EndDate: "2023-01"}})
+
+	// Write corrupt JSON.
+	corruptPath := filepath.Join(dir, "accomplishments.json")
+	original := []byte("not-json")
+	if err := os.WriteFile(corruptPath, original, 0o600); err != nil {
+		t.Fatalf("write corrupt accomplishments.json: %v", err)
+	}
+
+	svc := newSvc(t, dir)
+	_, err := svc.Create(context.Background(), happyInput())
+	if err == nil {
+		t.Fatal("expected error for corrupt accomplishments.json, got nil")
+	}
+	if !strings.Contains(err.Error(), "parse accomplishments") {
+		t.Errorf("error %q does not mention 'parse accomplishments'", err.Error())
+	}
+
+	// File must be unchanged.
+	after, readErr := os.ReadFile(corruptPath)
+	if readErr != nil {
+		t.Fatalf("read accomplishments.json after error: %v", readErr)
+	}
+	if !bytes.Equal(after, original) {
+		t.Errorf("accomplishments.json was modified despite error; got %q; want %q", after, original)
 	}
 }

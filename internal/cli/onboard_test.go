@@ -25,7 +25,7 @@ func executeOnboard(t *testing.T, args ...string) (stdout, stderr string, err er
 	return outBuf.String(), errBuf.String(), err
 }
 
-// TestOnboard_Reset_WithYes verifies that --reset --yes removes inputs/, skills.md, and accomplishments-*.md.
+// TestOnboard_Reset_WithYes verifies that --reset --yes removes inputs/, skills.md, accomplishments.json, and accomplishments-*.md.
 func TestOnboard_Reset_WithYes(t *testing.T) {
 	tmpDataDir := t.TempDir()
 	tmpConfigDir := t.TempDir()
@@ -51,10 +51,14 @@ func TestOnboard_Reset_WithYes(t *testing.T) {
 		t.Fatalf("failed to create file in inputs: %v", err)
 	}
 
-	// Create skills.md and accomplishments-0.md at dataDir root.
+	// Create skills.md, accomplishments.json, and accomplishments-0.md at dataDir root.
 	skillsPath := filepath.Join(dataDir, "skills.md")
 	if err := os.WriteFile(skillsPath, []byte("Go, Python"), 0o600); err != nil {
 		t.Fatalf("failed to create skills.md: %v", err)
+	}
+	accomplishmentsJSONPath := filepath.Join(dataDir, "accomplishments.json")
+	if err := os.WriteFile(accomplishmentsJSONPath, []byte("[]"), 0o600); err != nil {
+		t.Fatalf("failed to create accomplishments.json: %v", err)
 	}
 	accomplishmentsPath := filepath.Join(dataDir, "accomplishments-0.md")
 	if err := os.WriteFile(accomplishmentsPath, []byte("built things"), 0o600); err != nil {
@@ -90,6 +94,11 @@ func TestOnboard_Reset_WithYes(t *testing.T) {
 	// Verify skills.md is removed.
 	if _, err := os.Stat(skillsPath); !os.IsNotExist(err) {
 		t.Errorf("expected skills.md to be removed, but it exists")
+	}
+
+	// Verify accomplishments.json is removed.
+	if _, err := os.Stat(accomplishmentsJSONPath); !os.IsNotExist(err) {
+		t.Errorf("expected accomplishments.json to be removed, but it exists")
 	}
 
 	// Verify accomplishments-0.md is removed.
@@ -256,5 +265,50 @@ func TestOnboard_Reset_Message(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "go-apply onboard") {
 		t.Errorf("expected output to mention 'go-apply onboard' command, got: %q", stdout)
+	}
+}
+
+// TestOnboard_Reset_DeletesAccomplishmentsJSON verifies that --reset --yes removes accomplishments.json.
+func TestOnboard_Reset_DeletesAccomplishmentsJSON(t *testing.T) {
+	tmpDataDir := t.TempDir()
+	tmpConfigDir := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", tmpDataDir)
+	t.Setenv("XDG_CONFIG_HOME", tmpConfigDir)
+
+	// Create a default config
+	cfg := &config.Config{}
+	if err := cfg.Save(); err != nil {
+		t.Fatalf("failed to save config: %v", err)
+	}
+
+	dataDir := filepath.Join(tmpDataDir, "go-apply")
+	if err := os.MkdirAll(dataDir, 0o700); err != nil {
+		t.Fatalf("failed to create data dir: %v", err)
+	}
+
+	// Create accomplishments.json and accomplishments-0.md in temp dir
+	accomplishmentsJSONPath := filepath.Join(dataDir, "accomplishments.json")
+	if err := os.WriteFile(accomplishmentsJSONPath, []byte("[]"), 0o600); err != nil {
+		t.Fatalf("failed to create accomplishments.json: %v", err)
+	}
+	accomplishmentsLegacyPath := filepath.Join(dataDir, "accomplishments-0.md")
+	if err := os.WriteFile(accomplishmentsLegacyPath, []byte("legacy story"), 0o600); err != nil {
+		t.Fatalf("failed to create accomplishments-0.md: %v", err)
+	}
+
+	// Run reset with --yes
+	_, _, err := executeOnboard(t, "onboard", "--reset", "--yes")
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	// Verify accomplishments.json is absent
+	if _, err := os.Stat(accomplishmentsJSONPath); !os.IsNotExist(err) {
+		t.Errorf("expected accomplishments.json to be removed, but it exists")
+	}
+
+	// Verify accomplishments-0.md is absent
+	if _, err := os.Stat(accomplishmentsLegacyPath); !os.IsNotExist(err) {
+		t.Errorf("expected accomplishments-0.md to be removed, but it exists")
 	}
 }

@@ -15,17 +15,16 @@ const (
 )
 
 // Story is a canonical accomplishment entry with skill tags and classification.
-// Source content lives in accomplishments-N.md; the compiled copy is stored here
-// for fast access during tailoring.
+// SourceFile is a source identifier: "onboard", a created_stories[].id string, or empty if
+// unknown; informational only, not a join key.
 type Story struct {
-	ID           string    `json:"id"`
-	SourceFile   string    `json:"source_file"`
-	Text         string    `json:"text"`
-	Skills       []string  `json:"skills"`
-	Format       string    `json:"format"`
-	Type         StoryType `json:"type"`
-	JobTitle     string    `json:"job_title"`
-	TaggingError string    `json:"tagging_error"`
+	ID         string    `json:"id"`
+	SourceFile string    `json:"source_file"`
+	Text       string    `json:"text"`
+	Skills     []string  `json:"skills"`
+	Format     string    `json:"format"`
+	Type       StoryType `json:"type"`
+	JobTitle   string    `json:"job_title"`
 }
 
 // OrphanedSkill is a skill label with no successfully-tagged supporting story.
@@ -37,26 +36,32 @@ type OrphanedSkill struct {
 // CompiledProfile is the derived artifact produced by compilation.
 // Written to ~/.local/share/go-apply/profile-compiled.json. Never hand-edited.
 type CompiledProfile struct {
-	SchemaVersion         string          `json:"schema_version"`
-	CompiledAt            time.Time       `json:"compiled_at"`
-	Stories               []Story         `json:"stories"`
-	OrphanedSkills        []OrphanedSkill `json:"orphaned_skills"`
-	PartialTaggingFailure bool            `json:"partial_tagging_failure"`
+	SchemaVersion  string          `json:"schema_version"`
+	Skills         []string        `json:"skills"`
+	CompiledAt     time.Time       `json:"compiled_at"`
+	Stories        []Story         `json:"stories"`
+	OrphanedSkills []OrphanedSkill `json:"orphaned_skills"`
 }
 
-// CompileInput holds the parsed source data passed to ProfileCompiler.Compile.
-// DataDir is intentionally absent — the caller reads files; the compiler
-// operates on pure in-memory data.
-type CompileInput struct {
-	SkillsText   string           // raw content of skills.md
-	Stories      []RawStory       // parsed from accomplishments-N.md files
-	PriorProfile *CompiledProfile // nil on first run; used to carry deferred flags forward
+// AssembleStory is one entry in AssembleInput.Stories.
+// Exactly one of ID or Accomplishment must be set.
+// ID references a story from the prior profile; Accomplishment is new story text.
+// Source is supplied by the host: "onboard" for stories drawn from onboard_text,
+// or the created_stories[].id string for created stories; empty means unknown.
+type AssembleStory struct {
+	ID             string   `json:"id,omitempty"`
+	Accomplishment string   `json:"accomplishment,omitempty"`
+	Tags           []string `json:"tags"`
+	Source         string   `json:"source,omitempty"`
 }
 
-// RawStory is an unparsed story read from an accomplishments file.
-type RawStory struct {
-	SourceFile string
-	Text       string
+// AssembleInput is the host-provided input to ProfileCompiler.Compile.
+// Skills are additive (union with prior); RemoveSkills explicitly removes.
+type AssembleInput struct {
+	Skills       []string         // additive: unioned with prior skills
+	RemoveSkills []string         // explicit removals from prior skills
+	Stories      []AssembleStory  // host-tagged stories
+	PriorProfile *CompiledProfile // nil on first compile; required for ID resolution
 }
 
 // ExperienceRef is a lightweight career record used by the story creator to
@@ -82,5 +87,5 @@ type StoryInput struct {
 
 // StoryOutput is returned by port.StoryCreatorService.Create.
 type StoryOutput struct {
-	SourceFile string // basename of the written accomplishments file, e.g. "accomplishments-2.md"
+	StoryID string // id of the entry written to created_stories in accomplishments.json
 }

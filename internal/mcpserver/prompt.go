@@ -112,6 +112,13 @@ Both T1 and T2 accept your inputs directly — they do not read from the profile
 - With accomplishments onboarded: T2 bullet rewrites can draw on real metrics and impact statements.
 - Without either: T1 and T2 still work — your keyword and bullet suggestions drive the output.
 
+## compile_profile: source field tracking
+
+When calling compile_profile, always include the optional source field for each story to track its origin:
+- For stories read from onboard_text (via onboard_user): set source to "onboard"
+- For stories created via create_story: set source to the created_stories[].id string (e.g. "2")
+- If the source is unknown, omit the field or leave it empty
+
 ## Response Format
 
 Use these exact formats every time. Do not improvise.

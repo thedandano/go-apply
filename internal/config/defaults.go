@@ -34,12 +34,6 @@ type ThresholdDefaults struct {
 	MaxBoostIterations int     `json:"max_boost_iterations"`
 }
 
-type CoverLetterDefaults struct {
-	MaxWords      int `json:"max_words"`
-	SentenceCount int `json:"sentence_count"`
-	TargetWords   int `json:"target_words"`
-}
-
 type TailorDefaults struct {
 	MaxTier2BulletRewrites          int     `json:"max_tier2_bullet_rewrites"`
 	MaxTier1SkillRewrites           int     `json:"max_tier1_skill_rewrites"`
@@ -56,25 +50,13 @@ type FetcherDefaults struct {
 	MaxJDTextLengthChars int `json:"max_jd_text_length_chars"`
 }
 
-type LLMDefaults struct {
-	TimeoutMS                  int     `json:"timeout_ms"`
-	KeywordExtractionTemp      float64 `json:"keyword_extraction_temp"`
-	KeywordExtractionMaxTokens int     `json:"keyword_extraction_max_tokens"`
-	CoverLetterTemp            float64 `json:"cover_letter_temp"`
-	CoverLetterMaxTokens       int     `json:"cover_letter_max_tokens"`
-	BulletRewriteTemp          float64 `json:"bullet_rewrite_temp"`
-	BulletRewriteMaxTokens     int     `json:"bullet_rewrite_max_tokens"`
-}
-
 // AppDefaults holds all tunable constants loaded from internal/config/defaults.json.
 // Injected into services — never read inline constants from source code.
 type AppDefaults struct {
-	Scoring     ScoringDefaults     `json:"scoring"`
-	Thresholds  ThresholdDefaults   `json:"thresholds"`
-	CoverLetter CoverLetterDefaults `json:"cover_letter"`
-	Tailor      TailorDefaults      `json:"tailor"`
-	Fetcher     FetcherDefaults     `json:"fetcher"`
-	LLM         LLMDefaults         `json:"llm"`
+	Scoring    ScoringDefaults   `json:"scoring"`
+	Thresholds ThresholdDefaults `json:"thresholds"`
+	Tailor     TailorDefaults    `json:"tailor"`
+	Fetcher    FetcherDefaults   `json:"fetcher"`
 }
 
 // defaultsJSON is the embedded defaults.json.

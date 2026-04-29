@@ -34,10 +34,10 @@ func newBaseSection() model.SectionMap {
 
 func TestApplyEdits(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	svc := tailor.New(nil, nil, log)
+	svc := tailor.New(nil, log)
 	ctx := context.Background()
 
-	tests := []struct {
+	tests := []struct { //nolint:prealloc
 		name         string
 		sections     func() model.SectionMap
 		edits        []port.Edit

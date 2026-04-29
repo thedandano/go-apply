@@ -100,9 +100,7 @@ func TestHandleSubmitTailorT2_ResponseContainsScoringMethod(t *testing.T) {
 	// Use experience sections for T2.
 	cfg := pipeline.ApplyConfig{
 		Fetcher:        &stubJDFetcher{},
-		LLM:            &stubLLMClient{},
 		Scorer:         &stubScorer{},
-		CLGen:          nil,
 		Resumes:        &stubResumeRepoWithExperienceSections{},
 		Loader:         &stubDocumentLoader{},
 		AppRepo:        &stubApplicationRepository{},

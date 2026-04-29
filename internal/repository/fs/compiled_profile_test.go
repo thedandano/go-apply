@@ -128,9 +128,9 @@ func TestIsStale_FileNewerThanProfile(t *testing.T) {
 		t.Fatalf("Save: %v", err)
 	}
 
-	// Write an accomplishments file and set its mtime to "now" (newer than compiledAt).
-	accPath := filepath.Join(dir, "accomplishments-2.md")
-	writeFile(t, accPath, "## story")
+	// Write accomplishments.json and set its mtime to "now" (newer than compiledAt).
+	accPath := filepath.Join(dir, "accomplishments.json")
+	writeFile(t, accPath, `[]`)
 	future := time.Now().Add(time.Minute)
 	if err := os.Chtimes(accPath, future, future); err != nil {
 		t.Fatalf("Chtimes: %v", err)
@@ -143,8 +143,8 @@ func TestIsStale_FileNewerThanProfile(t *testing.T) {
 	if !stale {
 		t.Error("stale=false; want true")
 	}
-	if len(files) != 1 || files[0] != "accomplishments-2.md" {
-		t.Errorf("stale_files=%v; want [accomplishments-2.md]", files)
+	if len(files) != 1 || files[0] != "accomplishments.json" {
+		t.Errorf("stale_files=%v; want [accomplishments.json]", files)
 	}
 }
 
@@ -153,9 +153,9 @@ func TestIsStale_AllSourcesOlderThanProfile(t *testing.T) {
 	dir := t.TempDir()
 	repo := newProfileRepo()
 
-	// Write source files first with old mtime.
-	accPath := filepath.Join(dir, "accomplishments-0.md")
-	writeFile(t, accPath, "## story")
+	// Write accomplishments.json with old mtime.
+	accPath := filepath.Join(dir, "accomplishments.json")
+	writeFile(t, accPath, `[]`)
 	old := time.Now().Add(-20 * time.Minute)
 	if err := os.Chtimes(accPath, old, old); err != nil {
 		t.Fatalf("Chtimes: %v", err)
@@ -178,6 +178,123 @@ func TestIsStale_AllSourcesOlderThanProfile(t *testing.T) {
 	}
 	if stale {
 		t.Errorf("stale=true; want false; stale_files=%v", files)
+	}
+}
+
+// TestIsStale_AccomplishmentsAbsent verifies that a missing accomplishments.json does not mark the profile stale.
+func TestIsStale_AccomplishmentsAbsent(t *testing.T) {
+	dir := t.TempDir()
+	repo := newProfileRepo()
+
+	// Write a profile — no accomplishments.json, no skills.md.
+	profile := model.CompiledProfile{
+		SchemaVersion:  "1",
+		CompiledAt:     time.Now().Add(-5 * time.Minute).UTC(),
+		Stories:        []model.Story{},
+		OrphanedSkills: []model.OrphanedSkill{},
+	}
+	if err := repo.Save(dir, profile); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	stale, files, err := repo.IsStale(dir)
+	if err != nil {
+		t.Fatalf("IsStale: %v", err)
+	}
+	if stale {
+		t.Errorf("stale=true; want false; stale_files=%v", files)
+	}
+	if len(files) != 0 {
+		t.Errorf("stale_files=%v; want empty", files)
+	}
+}
+
+// TestNeedsCompilation_ProfileAbsent verifies NeedsCompilation returns (true, nil/empty, nil) when no profile exists.
+func TestNeedsCompilation_ProfileAbsent(t *testing.T) {
+	dir := t.TempDir()
+	repo := newProfileRepo()
+	needs, files, err := repo.NeedsCompilation(dir)
+	if err != nil {
+		t.Fatalf("NeedsCompilation: %v", err)
+	}
+	if !needs {
+		t.Error("needs=false for absent profile; want true")
+	}
+	if len(files) != 0 {
+		t.Errorf("stale_files=%v for absent profile; want empty", files)
+	}
+}
+
+// TestNeedsCompilation_ProfileStale verifies NeedsCompilation returns (true, non-empty, nil) when a source file is newer than CompiledAt.
+func TestNeedsCompilation_ProfileStale(t *testing.T) {
+	dir := t.TempDir()
+	repo := newProfileRepo()
+
+	// Write a profile compiled "in the past".
+	past := time.Now().Add(-10 * time.Minute).UTC()
+	profile := model.CompiledProfile{
+		SchemaVersion:  "1",
+		CompiledAt:     past,
+		Stories:        []model.Story{},
+		OrphanedSkills: []model.OrphanedSkill{},
+	}
+	if err := repo.Save(dir, profile); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	// Write accomplishments.json with mtime newer than compiledAt.
+	accPath := filepath.Join(dir, "accomplishments.json")
+	writeFile(t, accPath, `[]`)
+	future := time.Now().Add(time.Minute)
+	if err := os.Chtimes(accPath, future, future); err != nil {
+		t.Fatalf("Chtimes: %v", err)
+	}
+
+	needs, files, err := repo.NeedsCompilation(dir)
+	if err != nil {
+		t.Fatalf("NeedsCompilation: %v", err)
+	}
+	if !needs {
+		t.Error("needs=false; want true")
+	}
+	if len(files) != 1 || files[0] != "accomplishments.json" {
+		t.Errorf("stale_files=%v; want [accomplishments.json]", files)
+	}
+}
+
+// TestNeedsCompilation_ProfileFresh verifies NeedsCompilation returns (false, nil/empty, nil) when profile is newer than all source files.
+func TestNeedsCompilation_ProfileFresh(t *testing.T) {
+	dir := t.TempDir()
+	repo := newProfileRepo()
+
+	// Write accomplishments.json with old mtime.
+	accPath := filepath.Join(dir, "accomplishments.json")
+	writeFile(t, accPath, `[]`)
+	old := time.Now().Add(-20 * time.Minute)
+	if err := os.Chtimes(accPath, old, old); err != nil {
+		t.Fatalf("Chtimes: %v", err)
+	}
+
+	// Profile compiled after source file.
+	profile := model.CompiledProfile{
+		SchemaVersion:  "1",
+		CompiledAt:     time.Now().Add(-5 * time.Minute).UTC(),
+		Stories:        []model.Story{},
+		OrphanedSkills: []model.OrphanedSkill{},
+	}
+	if err := repo.Save(dir, profile); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	needs, files, err := repo.NeedsCompilation(dir)
+	if err != nil {
+		t.Fatalf("NeedsCompilation: %v", err)
+	}
+	if needs {
+		t.Errorf("needs=true; want false; stale_files=%v", files)
+	}
+	if len(files) != 0 {
+		t.Errorf("stale_files=%v; want empty", files)
 	}
 }
 

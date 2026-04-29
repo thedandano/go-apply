@@ -77,7 +77,6 @@ func sectionsForTailoring() model.SectionMap {
 func applyConfigWithSpy(spy *spyResumeRepo) pipeline.ApplyConfig {
 	return pipeline.ApplyConfig{
 		Fetcher:        &stubJDFetcher{},
-		LLM:            &stubLLMClient{},
 		Scorer:         &stubScorer{},
 		Resumes:        spy,
 		Loader:         &stubDocumentLoader{},

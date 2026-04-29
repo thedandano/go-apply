@@ -39,11 +39,6 @@
     "score_boost_min": 40.0,
     "max_boost_iterations": 3
   },
-  "cover_letter": {
-    "max_words":       90,
-    "sentence_count":   3,
-    "target_words":    75
-  },
   "tailor": {
     "max_tier2_bullet_rewrites": 4,
     "max_tier1_skill_rewrites": 5,
@@ -57,14 +52,5 @@
     "chromedp_timeout_ms":     60000,
     "min_jd_text_length_chars": 100,
     "max_jd_text_length_chars": 8000
-  },
-  "llm": {
-    "timeout_ms":                    60000,
-    "keyword_extraction_temp":       0.1,
-    "keyword_extraction_max_tokens": 500,
-    "cover_letter_temp":             0.3,
-    "cover_letter_max_tokens":       200,
-    "bullet_rewrite_temp":           0.2,
-    "bullet_rewrite_max_tokens":     800
   }
 }
