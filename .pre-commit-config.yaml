@@ -65,7 +65,7 @@ repos:
         entry: >-
           bash -c
           'head -1 "$1" | grep -qE
-          "^(feat|fix|chore|test|docs|refactor|ci|perf|style|build)(\(.+\))?: .{1,100}$"
+          "^(feat|fix|chore|test|docs|refactor|ci|perf|style|build)(\(.+\))?!?: .{1,100}$"
           || (echo "commit msg must follow conventional commits: type(scope): description" && exit 1)'
           --
         language: system
