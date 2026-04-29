@@ -1,11 +1,20 @@
-linters:
+version: "2"
+
+formatters:
   enable:
     - gofmt
     - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/thedandano/go-apply
+
+linters:
+  default: none
+  enable:
     - govet
     - staticcheck
     - errcheck
-    - gosimple
     - ineffassign
     - unused
     - gocritic
@@ -15,25 +24,45 @@ linters:
     - noctx
     - prealloc
 
-linters-settings:
-  goimports:
-    local-prefixes: github.com/thedandano/go-apply
-  gocritic:
-    enabled-tags:
-      - diagnostic
-      - performance
-  gosec:
-    excludes:
-      - G304
+  settings:
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - performance
+      disabled-checks:
+        - exitAfterDefer
+    gosec:
+      excludes:
+        - G104
+        - G204
+        - G301
+        - G302
+        - G304
+        - G306
+    errcheck:
+      exclude-functions:
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - fmt.Fprintf
+        - (io.Closer).Close
+        - (*os.File).Close
+        - (*compress/gzip.Reader).Close
+        - (net/http.Response.Body).Close
+        - os.Remove
+        - os.WriteFile
+        - (*encoding/json.Encoder).Encode
+    revive:
+      rules:
+        - name: exported
+          disabled: true
+        - name: package-comments
+          disabled: true
 
 issues:
-  exclude-rules:
-    - path: _test\.go
-      linters: [gosec, errcheck]
+  exclusions:
+    paths:
+      - .worktrees
+      - spike
 
 run:
   timeout: 5m
-  go: "1.23"
-  skip-dirs:
-    - .worktrees
-    - spike

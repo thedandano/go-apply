@@ -20,7 +20,7 @@ import (
 
 // NewOnboardCommand returns the cobra command for "go-apply onboard".
 // It accepts one or more resume files plus optional skills and accomplishments paths.
-// When --reset is set, it clears inputs/, skills.md, and accomplishments-*.md.
+// When --reset is set, it clears inputs/, skills.md, accomplishments.json, and accomplishments-*.md (legacy).
 func NewOnboardCommand() *cobra.Command {
 	var (
 		resumePaths         []string
@@ -34,9 +34,9 @@ func NewOnboardCommand() *cobra.Command {
 		Use:   "onboard",
 		Short: "Store resumes, skills, and accomplishments in the data directory",
 		Long: `Read resume, skills, and accomplishments files, and write them to the data directory.
-Resumes are written to inputs/, skills to skills.md, and accomplishments to accomplishments-N.md.
+Resumes are written to inputs/, skills to skills.md, and accomplishments to accomplishments.json.
 
-Use --reset to clear inputs/, skills.md, and accomplishments-*.md.`,
+Use --reset to clear inputs/, skills.md, accomplishments.json, and accomplishments-*.md (legacy).`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			// Handle --reset flag
 			if resetFlag {
@@ -120,13 +120,13 @@ Use --reset to clear inputs/, skills.md, and accomplishments-*.md.`,
 	cmd.Flags().StringArrayVar(&resumePaths, "resume", nil, "Path to a resume file (repeatable)")
 	cmd.Flags().StringVar(&skillsFlag, "skills", "", "Path to skills reference file")
 	cmd.Flags().StringVar(&accomplishmentsFlag, "accomplishments", "", "Path to accomplishments file")
-	cmd.Flags().BoolVar(&resetFlag, "reset", false, "Delete inputs/, skills.md, and accomplishments-*.md from the data directory")
+	cmd.Flags().BoolVar(&resetFlag, "reset", false, "Delete inputs/, skills.md, accomplishments.json, and accomplishments-*.md (legacy) from the data directory")
 	cmd.Flags().BoolVar(&yesFlag, "yes", false, "Skip confirmation prompt for --reset (required for non-interactive mode)")
 
 	return cmd
 }
 
-// resetProfile deletes the onboarding data: inputs/, skills.md, and accomplishments-*.md.
+// resetProfile deletes the onboarding data: inputs/, skills.md, accomplishments.json, and accomplishments-*.md (legacy).
 // If --yes is not set and stdin is a TTY, prompts the user for confirmation.
 // If --yes is not set and stdin is not a TTY, returns an error.
 func resetProfile(confirmed bool, cmd *cobra.Command) error {
@@ -138,7 +138,7 @@ func resetProfile(confirmed bool, cmd *cobra.Command) error {
 	}
 
 	if !confirmed && isTTY {
-		fmt.Fprintf(cmd.OutOrStdout(), "Delete inputs/, skills.md, and accomplishments-*.md at %s? This cannot be undone. [y/N]: ", config.DataDir())
+		fmt.Fprintf(cmd.OutOrStdout(), "Delete inputs/, skills.md, accomplishments.json, and accomplishments-*.md at %s? This cannot be undone. [y/N]: ", config.DataDir())
 		scanner := bufio.NewScanner(os.Stdin)
 		if !scanner.Scan() {
 			return fmt.Errorf("reset cancelled")
@@ -164,7 +164,7 @@ func resetProfile(confirmed bool, cmd *cobra.Command) error {
 		return fmt.Errorf("delete skills.md: %w", err)
 	}
 
-	// Delete all accomplishments-*.md files.
+	// Delete all accomplishments-*.md files (legacy).
 	matches, err := filepath.Glob(filepath.Join(dataDir, "accomplishments-*.md"))
 	if err != nil {
 		return fmt.Errorf("glob accomplishments files: %w", err)
@@ -173,6 +173,12 @@ func resetProfile(confirmed bool, cmd *cobra.Command) error {
 		if err := os.Remove(match); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("delete %s: %w", match, err)
 		}
+	}
+
+	// Delete accomplishments.json (if it exists).
+	accomplishmentsPath := filepath.Join(dataDir, "accomplishments.json")
+	if err := os.Remove(accomplishmentsPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("delete accomplishments.json: %w", err)
 	}
 
 	return nil

@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"golang.org/x/sync/errgroup"
@@ -23,10 +25,21 @@ import (
 	"github.com/thedandano/go-apply/internal/service/tailor"
 )
 
-// sessions is the process-lifetime session store shared by all multi-turn handlers.
-// The MCP server uses stdio dispatch (one JSON-RPC message at a time), so concurrent
-// access to the same session from multiple goroutines cannot occur in production.
-var sessions = NewSessionStore()
+// sessionStoreOnce guards lazy initialization of the process-level session store.
+var (
+	sessionStoreOnce sync.Once
+	sessionStore     *SessionStore
+)
+
+// sessions returns the process-level disk-backed SessionStore, lazy-initialized
+// on first call using config.DataDir(). Tests inject their own store via
+// HandleXWithConfig instead of relying on this var.
+func sessions() *SessionStore {
+	sessionStoreOnce.Do(func() {
+		sessionStore = NewSessionStore(config.DataDir())
+	})
+	return sessionStore
+}
 
 // extractionProtocol is embedded in every load_jd response to guide keyword extraction
 // with enough specificity to minimize model-to-model variance in T0 scoring.
@@ -94,10 +107,21 @@ func HandleLoadJDWithConfig(ctx context.Context, req *mcp.CallToolRequest, deps 
 		return envelopeResult(stageErrorEnvelope("", "fetch", "fetch_failed", err.Error(), true))
 	}
 
-	sess := sessions.Create(jdText)
-	sess.URL = jdURL
-	sess.IsText = isText
+	sess := &Session{
+		ID:        newSessionID(),
+		State:     stateLoaded,
+		JDText:    jdText,
+		URL:       jdURL,
+		IsText:    isText,
+		CreatedAt: time.Now().UTC(),
+	}
 	logger.Banner(ctx, slog.Default(), "Session", sess.ID)
+	if err := sessions().Save(sess); err != nil {
+		slog.ErrorContext(ctx, "load_jd: session save failed",
+			slog.String("session_id", sess.ID), slog.Any("error", err))
+		return envelopeResult(stageErrorEnvelope("", "load_jd", "session_error",
+			"failed to persist session — check server logs", true))
+	}
 
 	type loadJDData struct {
 		JDText             string `json:"jd_text"`
@@ -138,8 +162,8 @@ func HandleSubmitKeywordsWithConfig(ctx context.Context, req *mcp.CallToolReques
 		return envelopeResult(stageErrorEnvelope(sessionID, "submit_keywords", "missing_jd", "jd_json is required", false))
 	}
 
-	sess := sessions.Get(sessionID)
-	if sess == nil {
+	sess, loadErr := sessions().Load(sessionID)
+	if loadErr != nil {
 		return envelopeResult(stageErrorEnvelope(sessionID, "submit_keywords", "session_not_found",
 			"session not found — call load_jd first", false))
 	}
@@ -243,6 +267,12 @@ func HandleSubmitKeywordsWithConfig(ctx context.Context, req *mcp.CallToolReques
 	sess.JD = jd
 	sess.ScoreResult = scored
 	sess.State = stateScored
+	if err := sessions().Save(sess); err != nil {
+		slog.ErrorContext(ctx, "submit_keywords: session save failed",
+			slog.String("session_id", sessionID), slog.Any("error", err))
+		return envelopeResult(stageErrorEnvelope(sessionID, "submit_keywords", "session_error",
+			"failed to persist session — check server logs", true))
+	}
 
 	nextAction := NextActionFromScore(scored.BestScore)
 
@@ -331,8 +361,8 @@ func HandleFinalizeWithConfig(ctx context.Context, req *mcp.CallToolRequest, dep
 		logger.PayloadAttr("cover_letter", coverLetter, logger.Verbose()),
 	)
 
-	sess := sessions.Get(sessionID)
-	if sess == nil {
+	sess, loadErr := sessions().Load(sessionID)
+	if loadErr != nil {
 		return envelopeResult(stageErrorEnvelope(sessionID, "finalize", "session_not_found",
 			"session not found — call load_jd first", false))
 	}
@@ -372,6 +402,12 @@ func HandleFinalizeWithConfig(ctx context.Context, req *mcp.CallToolRequest, dep
 	}
 
 	sess.State = stateFinalized
+	if err := sessions().Delete(sess.ID); err != nil {
+		slog.ErrorContext(ctx, "finalize: session delete failed",
+			slog.String("session_id", sessionID), slog.Any("error", err))
+	} else {
+		slog.DebugContext(ctx, "finalize: session deleted", slog.String("session_id", sessionID))
+	}
 
 	type finalizeSummary struct {
 		KeywordsRequired  int     `json:"keywords_required"`
@@ -471,8 +507,8 @@ func HandleSubmitTailorT1WithConfig(ctx context.Context, req *mcp.CallToolReques
 		}
 	}
 
-	sess := sessions.Get(sessionID)
-	if sess == nil {
+	sess, loadErr := sessions().Load(sessionID)
+	if loadErr != nil {
 		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t1", "session_not_found",
 			"session not found — call load_jd first", false))
 	}
@@ -527,7 +563,7 @@ func HandleSubmitTailorT1WithConfig(ctx context.Context, req *mcp.CallToolReques
 	deps.Presenter = pres
 
 	logger.Banner(ctx, slog.Default(), "Tailor", "T1")
-	svc := tailor.New(nil, deps.Defaults, slog.Default())
+	svc := tailor.New(deps.Defaults, slog.Default())
 	editResult, editErr := svc.ApplyEdits(ctx, sections, edits)
 	if editErr != nil {
 		slog.ErrorContext(ctx, "submit_tailor_t1: apply edits failed", "session_id", sessionID, "error", editErr)
@@ -563,6 +599,12 @@ func HandleSubmitTailorT1WithConfig(ctx context.Context, req *mcp.CallToolReques
 	}
 	sess.ScoreResult.Scores[sess.ScoreResult.BestLabel] = newScore
 	sess.ScoreResult.BestScore = newScoreTotal
+	if err := sessions().Save(sess); err != nil {
+		slog.ErrorContext(ctx, "submit_tailor_t1: session save failed",
+			slog.String("session_id", sessionID), slog.Any("error", err))
+		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t1", "session_error",
+			"failed to persist session — check server logs", true))
+	}
 
 	type t1Data struct {
 		PreviousScore float64              `json:"previous_score"`
@@ -625,8 +667,8 @@ func HandleSubmitTailorT2WithConfig(ctx context.Context, req *mcp.CallToolReques
 		}
 	}
 
-	sess := sessions.Get(sessionID)
-	if sess == nil {
+	sess, loadErr := sessions().Load(sessionID)
+	if loadErr != nil {
 		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t2", "session_not_found",
 			"session not found — call load_jd first", false))
 	}
@@ -659,7 +701,7 @@ func HandleSubmitTailorT2WithConfig(ctx context.Context, req *mcp.CallToolReques
 	deps.Presenter = pres
 
 	logger.Banner(ctx, slog.Default(), "Tailor", "T2")
-	svc := tailor.New(nil, deps.Defaults, slog.Default())
+	svc := tailor.New(deps.Defaults, slog.Default())
 	editResult, editErr := svc.ApplyEdits(ctx, sections, edits)
 	if editErr != nil {
 		slog.ErrorContext(ctx, "submit_tailor_t2: apply edits failed", "session_id", sessionID, "error", editErr)
@@ -694,6 +736,12 @@ func HandleSubmitTailorT2WithConfig(ctx context.Context, req *mcp.CallToolReques
 	}
 	sess.ScoreResult.Scores[sess.ScoreResult.BestLabel] = newScore
 	sess.ScoreResult.BestScore = newScoreTotal
+	if err := sessions().Save(sess); err != nil {
+		slog.ErrorContext(ctx, "submit_tailor_t2: session save failed",
+			slog.String("session_id", sessionID), slog.Any("error", err))
+		return envelopeResult(stageErrorEnvelope(sessionID, "submit_tailor_t2", "session_error",
+			"failed to persist session — check server logs", true))
+	}
 
 	type t2Data struct {
 		PreviousScore float64              `json:"previous_score"`
@@ -741,8 +789,8 @@ func HandlePreviewATSExtractionWithConfig(ctx context.Context, req *mcp.CallTool
 		slog.String("session_id", sessionID),
 	)
 
-	sess := sessions.Get(sessionID)
-	if sess == nil {
+	sess, loadErr := sessions().Load(sessionID)
+	if loadErr != nil {
 		return envelopeResult(stageErrorEnvelope(sessionID, "preview_ats_extraction", "session_not_found",
 			"session not found — call load_jd first", false))
 	}
@@ -806,7 +854,7 @@ func HandlePreviewATSExtractionWithConfig(ctx context.Context, req *mcp.CallTool
 		slog.ErrorContext(ctx, "preview_ats_extraction: extract failed",
 			slog.String("session_id", sessionID), slog.Any("error", extErr))
 		return envelopeResult(stageErrorEnvelope(sessionID, "preview_ats_extraction", "extract_failed",
-			"text extraction failed — check server logs for details", false))
+			extErr.Error(), false))
 	}
 
 	pd.ConstructedText = extracted
@@ -871,13 +919,11 @@ func checkFR010a(ctx context.Context, sessionID string, edits []port.Edit, dataD
 		)
 	}
 
-	// Build evidenced skill set from all successfully-tagged stories.
+	// Build evidenced skill set from all assembled stories.
 	evidenced := make(map[string]bool)
 	for i := range profile.Stories {
-		if profile.Stories[i].TaggingError == "" {
-			for _, sk := range profile.Stories[i].Skills {
-				evidenced[sk] = true
-			}
+		for _, sk := range profile.Stories[i].Skills {
+			evidenced[sk] = true
 		}
 	}
 

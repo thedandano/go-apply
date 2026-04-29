@@ -2,6 +2,7 @@ package onboarding_test
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -57,7 +58,7 @@ func TestOnboardingService_SkillsAndAccomplishmentsStored(t *testing.T) {
 	if len(result.Warnings) > 0 {
 		t.Errorf("unexpected warnings: %v", result.Warnings)
 	}
-	wantStored := map[string]bool{"ref:skills": true, "accomplishments:0": true}
+	wantStored := map[string]bool{"ref:skills": true, "accomplishments:onboard": true}
 	for _, s := range result.Stored {
 		delete(wantStored, s)
 	}
@@ -135,12 +136,12 @@ func TestOnboardingService_SummaryPopulated(t *testing.T) {
 	if result.Summary.SkillsCount != 3 {
 		t.Errorf("SkillsCount = %d, want 3", result.Summary.SkillsCount)
 	}
-	if result.Summary.AccomplishmentsCount != 2 {
-		t.Errorf("AccomplishmentsCount = %d, want 2", result.Summary.AccomplishmentsCount)
+	if result.Summary.AccomplishmentsCount != 1 {
+		t.Errorf("AccomplishmentsCount = %d, want 1", result.Summary.AccomplishmentsCount)
 	}
-	// 1 resume + skills + 2 accomplishment sections = 4 chunks
-	if result.Summary.TotalChunks != 4 {
-		t.Errorf("TotalChunks = %d, want 4", result.Summary.TotalChunks)
+	// 1 resume + skills + accomplishments:onboard = 3 chunks
+	if result.Summary.TotalChunks != 3 {
+		t.Errorf("TotalChunks = %d, want 3", result.Summary.TotalChunks)
 	}
 }
 
@@ -186,8 +187,154 @@ func TestOnboardingService_WritesFilesToDisk(t *testing.T) {
 		}
 	}
 
-	// Resumes go in inputs/; skills and accomplishments go in dataDir root.
 	check(filepath.Join(dataDir, "inputs", "backend.txt"), "resume content")
 	check(filepath.Join(dataDir, "skills.md"), "skills content")
-	check(filepath.Join(dataDir, "accomplishments-0.md"), "accomplishments content")
+
+	// Accomplishments are stored in accomplishments.json; onboard_text holds the raw text.
+	accPath := filepath.Join(dataDir, "accomplishments.json")
+	accData, err := os.ReadFile(accPath) // #nosec G304 -- test reads temp dir
+	if err != nil {
+		t.Fatalf("read accomplishments.json: %v", err)
+	}
+	var acc model.AccomplishmentsJSON
+	if err := json.Unmarshal(accData, &acc); err != nil {
+		t.Fatalf("unmarshal accomplishments.json: %v", err)
+	}
+	if acc.OnboardText != "accomplishments content" {
+		t.Errorf("onboard_text = %q, want %q", acc.OnboardText, "accomplishments content")
+	}
+
+	// No legacy split-file chunks should be created.
+	matches, _ := filepath.Glob(filepath.Join(dataDir, "accomplishments-*.md"))
+	if len(matches) > 0 {
+		t.Errorf("legacy accomplishments-N.md files found: %v", matches)
+	}
+}
+
+func TestOnboardingService_CreatedStoriesPreservedOnReOnboard(t *testing.T) {
+	dataDir := t.TempDir()
+	svc := onboarding.New(dataDir, slog.Default())
+
+	// Pre-seed accomplishments.json with existing created_stories.
+	seed := model.AccomplishmentsJSON{
+		SchemaVersion: "1",
+		OnboardText:   "old onboard text",
+		CreatedStories: []model.CreatedStory{
+			{
+				ID:       "story-001",
+				Skill:    "Go",
+				Type:     model.StoryTypeAchievement,
+				JobTitle: "Senior Engineer",
+				Text:     "Reduced latency by 40%.",
+			},
+		},
+	}
+	seedData, err := json.Marshal(seed)
+	if err != nil {
+		t.Fatalf("marshal seed: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dataDir, "accomplishments.json"), seedData, 0o600); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+
+	// Re-onboard with new text.
+	_, err = svc.Run(context.Background(), model.OnboardInput{
+		AccomplishmentsText: "new onboard text",
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dataDir, "accomplishments.json")) // #nosec G304 -- test reads temp dir
+	if err != nil {
+		t.Fatalf("read accomplishments.json: %v", err)
+	}
+	var result model.AccomplishmentsJSON
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+
+	// onboard_text must be updated.
+	if result.OnboardText != "new onboard text" {
+		t.Errorf("onboard_text = %q, want %q", result.OnboardText, "new onboard text")
+	}
+
+	// created_stories must be preserved unchanged.
+	if len(result.CreatedStories) != 1 {
+		t.Fatalf("created_stories len = %d, want 1", len(result.CreatedStories))
+	}
+	if result.CreatedStories[0].ID != "story-001" {
+		t.Errorf("created_stories[0].ID = %q, want %q", result.CreatedStories[0].ID, "story-001")
+	}
+	if result.CreatedStories[0].Text != "Reduced latency by 40%." {
+		t.Errorf("created_stories[0].Text = %q, want preserved value", result.CreatedStories[0].Text)
+	}
+}
+
+func TestOnboardingService_CorruptAccomplishmentsJSONReturnsError(t *testing.T) {
+	dataDir := t.TempDir()
+	svc := onboarding.New(dataDir, slog.Default())
+
+	// Write corrupt JSON.
+	if err := os.WriteFile(filepath.Join(dataDir, "accomplishments.json"), []byte("{not valid json"), 0o600); err != nil {
+		t.Fatalf("write corrupt file: %v", err)
+	}
+
+	_, err := svc.Run(context.Background(), model.OnboardInput{
+		AccomplishmentsText: "some text",
+	})
+	if err == nil {
+		t.Fatal("expected error for corrupt accomplishments.json, got nil")
+	}
+}
+
+func TestOnboardingService_AtomicWritePreservesOriginalOnFailure(t *testing.T) {
+	dataDir := t.TempDir()
+	svc := onboarding.New(dataDir, slog.Default())
+
+	// Write known-good accomplishments.json.
+	original := model.AccomplishmentsJSON{
+		SchemaVersion: "1",
+		OnboardText:   "original text",
+	}
+	originalData, err := json.Marshal(original)
+	if err != nil {
+		t.Fatalf("marshal original: %v", err)
+	}
+	accPath := filepath.Join(dataDir, "accomplishments.json")
+	if err := os.WriteFile(accPath, originalData, 0o600); err != nil {
+		t.Fatalf("write original: %v", err)
+	}
+
+	// Make dataDir read-only so any write (including the tmp file) fails.
+	if err := os.Chmod(dataDir, 0o500); err != nil {
+		t.Fatalf("chmod dataDir: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chmod(dataDir, 0o700)
+	})
+
+	_, runErr := svc.Run(context.Background(), model.OnboardInput{
+		AccomplishmentsText: "new text",
+	})
+	if runErr == nil {
+		t.Fatal("expected error when dataDir is read-only, got nil")
+	}
+
+	// Restore permissions to read the file.
+	if err := os.Chmod(dataDir, 0o700); err != nil {
+		t.Fatalf("restore chmod: %v", err)
+	}
+
+	data, err := os.ReadFile(accPath) // #nosec G304 -- test reads temp dir
+	if err != nil {
+		t.Fatalf("read accomplishments.json after failure: %v", err)
+	}
+	var result model.AccomplishmentsJSON
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatalf("unmarshal after failure: %v", err)
+	}
+	if result.OnboardText != "original text" {
+		t.Errorf("onboard_text = %q after write failure, want original %q", result.OnboardText, "original text")
+	}
 }

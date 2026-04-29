@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"sort"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -19,77 +18,33 @@ import (
 
 // HandleCreateStory is the MCP-wired handler for the create_story tool.
 func HandleCreateStory(ctx context.Context, req *mcp.CallToolRequest) *mcp.CallToolResult {
-	cfg, _, err := loadDeps()
-	if err != nil {
-		return errorResult("load deps: " + err.Error())
-	}
-	llmClient, err := newLLMClient(cfg)
-	if err != nil {
-		return errorResult("llm client: " + err.Error())
-	}
 	dataDir := config.DataDir()
 	creator := storycreator.New(dataDir, fs.NewCareerRepository(), slog.Default())
-	return HandleCreateStoryWith(ctx, dataDir, req.GetArguments(), creator, llmClient)
+	return HandleCreateStoryWith(ctx, req.GetArguments(), creator)
 }
 
-// HandleCreateStoryWith is the testable core — accepts explicit dataDir, parsed args,
-// a StoryCreatorService, and an LLMClient for recompilation.
+// HandleCreateStoryWith is the testable core — accepts parsed args and a StoryCreatorService.
+// After saving the story it returns needs_compile: true so the host triggers recompilation.
 func HandleCreateStoryWith(
 	ctx context.Context,
-	dataDir string,
 	args map[string]interface{},
 	creator port.StoryCreatorService,
-	llmClient port.LLMClient,
 ) *mcp.CallToolResult {
-	// 1. Parse and validate required args.
 	input, err := parseStoryArgs(args)
 	if err != nil {
 		return errorResult(err.Error())
 	}
 
-	// 2. Delegate to StoryCreatorService.
 	out, err := creator.Create(ctx, input)
 	if err != nil {
 		return errorResult(err.Error())
 	}
 
-	// 3. Recompile so the new story is tagged and orphans are updated.
-	compiled, _, compileErr := runCompile(ctx, dataDir, llmClient)
-	if compileErr != nil {
-		return errorResult("story saved, recompilation failed: " + compileErr.Error())
+	resp := map[string]interface{}{
+		"story_id":      out.StoryID,
+		"needs_compile": true,
 	}
-
-	// 4. Find the new story in the compiled profile.
-	storyID := ""
-	var skillsTagged []string
-	for i := range compiled.Stories {
-		if compiled.Stories[i].SourceFile == out.SourceFile {
-			storyID = compiled.Stories[i].ID
-			skillsTagged = compiled.Stories[i].Skills
-			break
-		}
-	}
-	if skillsTagged == nil {
-		skillsTagged = []string{}
-	}
-
-	// 5. Build remaining orphans: non-deferred skills with no story, alphabetical.
-	remaining := make([]string, 0)
-	for _, o := range compiled.OrphanedSkills {
-		if !o.Deferred {
-			remaining = append(remaining, o.Skill)
-		}
-	}
-	sort.Strings(remaining)
-
-	out2 := map[string]interface{}{
-		"story_id":          storyID,
-		"source_file":       out.SourceFile,
-		"skills_tagged":     skillsTagged,
-		"compiled_at":       compiled.CompiledAt,
-		"remaining_orphans": remaining,
-	}
-	data, marshalErr := json.Marshal(out2)
+	data, marshalErr := json.Marshal(resp)
 	if marshalErr != nil {
 		return errorResult("marshal response: " + marshalErr.Error())
 	}

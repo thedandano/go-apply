@@ -73,7 +73,7 @@ func TestUS1_StructuredEdits_E2E(t *testing.T) {
 			t.Errorf("loaded.Experience[0].Bullets len = %d, want 2", len(loaded.Experience[0].Bullets))
 		}
 
-		svc := tailor.New(nil, nil, log)
+		svc := tailor.New(nil, log)
 		edits := []port.Edit{
 			{Section: "skills", Op: port.EditOpReplace, Value: "Go, Python, Kubernetes"},
 			{Section: "experience", Op: port.EditOpReplace, Target: "exp-0-b0", Value: "Led K8s migration for 50-service platform"},
@@ -143,7 +143,7 @@ func TestUS1_StructuredEdits_E2E(t *testing.T) {
 			t.Fatalf("LoadSections: %v", err)
 		}
 
-		svc := tailor.New(nil, nil, log)
+		svc := tailor.New(nil, log)
 		edits := []port.Edit{
 			{Section: "skills", Op: port.EditOpReplace, Value: "Go, Python, Kubernetes"},
 			{Section: "experience", Op: port.EditOpReplace, Target: "exp-0-b0", Value: "Led K8s migration for 50-service platform"},

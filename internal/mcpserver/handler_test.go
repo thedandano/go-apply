@@ -1,8 +1,10 @@
 package mcpserver_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,6 +17,7 @@ import (
 	"github.com/thedandano/go-apply/internal/mcpserver"
 	"github.com/thedandano/go-apply/internal/model"
 	"github.com/thedandano/go-apply/internal/port"
+	"github.com/thedandano/go-apply/internal/service/onboarding"
 )
 
 // ── onboard stubs ─────────────────────────────────────────────────────────────
@@ -38,14 +41,6 @@ var _ port.JDFetcher = (*stubJDFetcher)(nil)
 
 func (s *stubJDFetcher) Fetch(_ context.Context, _ string) (string, error) {
 	return "fake job description text", nil
-}
-
-type stubLLMClient struct{}
-
-var _ port.LLMClient = (*stubLLMClient)(nil)
-
-func (s *stubLLMClient) ChatComplete(_ context.Context, _ []model.ChatMessage, _ model.ChatOptions) (string, error) {
-	return `{"title":"SWE","company":"Acme","required":["go"],"preferred":["docker"],"location":"Remote","seniority":"senior","required_years":3}`, nil
 }
 
 type stubScorer struct{}
@@ -355,9 +350,10 @@ func TestHandleGetConfigWithProfile_OnboardedTrue_WhenResumesExist(t *testing.T)
 		t.Fatalf("write skills: %v", err)
 	}
 
-	// Create accomplishments file at dataDir root using the accomplishments-N.md naming convention.
-	accomplishmentsPath := filepath.Join(tmpDir, "accomplishments-0.md")
-	if err := os.WriteFile(accomplishmentsPath, []byte("accomplished things"), 0o644); err != nil {
+	// Create accomplishments.json at dataDir root with non-empty onboard_text.
+	accJSON := `{"schema_version":"1","onboard_text":"accomplished things","created_stories":[]}`
+	accomplishmentsPath := filepath.Join(tmpDir, "accomplishments.json")
+	if err := os.WriteFile(accomplishmentsPath, []byte(accJSON), 0o644); err != nil {
 		t.Fatalf("write accomplishments: %v", err)
 	}
 
@@ -414,7 +410,7 @@ func TestHandleGetConfigWithProfile_OnboardedTrue_WhenResumesExist(t *testing.T)
 		t.Errorf("profile.has_accomplishments is not a bool: %T", profile["has_accomplishments"])
 	}
 	if !hasAccomplishments {
-		t.Error("profile.has_accomplishments = false, want true when accomplishments-*.md exists and is non-empty")
+		t.Error("profile.has_accomplishments = false, want true when accomplishments.json has onboard_text or stories")
 	}
 }
 
@@ -463,10 +459,47 @@ func TestHandleGetConfigWithProfile_OnboardedFalse_WhenNoResumes(t *testing.T) {
 	}
 }
 
+// TestBuildProfileStatus_HasAccomplishments_ParseError verifies that malformed accomplishments.json
+// causes has_accomplishments to be false and a warning to be logged.
+func TestBuildProfileStatus_HasAccomplishments_ParseError(t *testing.T) {
+	dir := t.TempDir()
+
+	// Write malformed JSON to accomplishments.json.
+	if err := os.WriteFile(filepath.Join(dir, "accomplishments.json"), []byte("{bad json"), 0o600); err != nil {
+		t.Fatalf("write accomplishments.json: %v", err)
+	}
+
+	// Capture slog output at Warn level.
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	result := mcpserver.HandleGetConfigWithProfileAndFiles(&config.Config{}, dir)
+	text := extractText(t, result)
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal([]byte(text), &resp); err != nil {
+		t.Fatalf("parse response: %v", err)
+	}
+
+	profile, _ := resp["profile"].(map[string]interface{})
+	if profile == nil {
+		t.Fatal("profile missing from response")
+	}
+
+	hasAcc, _ := profile["has_accomplishments"].(bool)
+	if hasAcc {
+		t.Error("has_accomplishments = true; want false when accomplishments.json is malformed")
+	}
+
+	if !strings.Contains(buf.String(), "WARN") {
+		t.Errorf("expected warning log for parse error, got: %s", buf.String())
+	}
+}
+
 func TestHandleGetConfigWithProfile_PreservesConfigFields(t *testing.T) {
 	cfg := &config.Config{}
-	cfg.Orchestrator.BaseURL = "https://api.example.com/v1"
-	cfg.Orchestrator.Model = "claude-sonnet-4-6"
 
 	tmpDir := t.TempDir()
 	inputsDir := filepath.Join(tmpDir, "inputs")
@@ -482,10 +515,10 @@ func TestHandleGetConfigWithProfile_PreservesConfigFields(t *testing.T) {
 		t.Fatalf("response is not JSON: %v", err)
 	}
 
-	// Orchestrator keys are excluded from MCP mode — verify they are absent.
+	// orchestrator.* keys were renamed to llm.* — verify the old names are absent.
 	for _, key := range []string{"orchestrator.base_url", "orchestrator.model", "orchestrator.api_key"} {
 		if _, found := response[key]; found {
-			t.Errorf("get_config must not expose %q in MCP mode", key)
+			t.Errorf("get_config must not expose %q (renamed to llm.*)", key)
 		}
 	}
 
@@ -508,9 +541,9 @@ func TestBuildProfileStatus_Stale_WhenSourceNewerThanProfile(t *testing.T) {
 		t.Fatalf("write profile: %v", err)
 	}
 
-	// Write accomplishments-0.md with an mtime AFTER CompiledAt.
-	accPath := filepath.Join(dir, "accomplishments-0.md")
-	if err := os.WriteFile(accPath, []byte("story"), 0o600); err != nil {
+	// Write accomplishments.json with an mtime AFTER CompiledAt.
+	accPath := filepath.Join(dir, "accomplishments.json")
+	if err := os.WriteFile(accPath, []byte(`{"schema_version":"1","onboard_text":"story","created_stories":[]}`), 0o600); err != nil {
 		t.Fatalf("write accomplishments: %v", err)
 	}
 	future := time.Now().Add(time.Minute)
@@ -539,9 +572,9 @@ func TestBuildProfileStatus_Stale_WhenSourceNewerThanProfile(t *testing.T) {
 	}
 }
 
-// TestBuildProfileStatus_NotStale_WhenProfileAbsent verifies stale is false (or absent) when
-// no compiled profile exists — IsStale returns (false,nil,nil) for absent profile.
-func TestBuildProfileStatus_NotStale_WhenProfileAbsent(t *testing.T) {
+// TestBuildProfileStatus_Stale_WhenProfileAbsent verifies stale is true when
+// no compiled profile exists — NeedsCompilation returns (true,nil,nil) for absent profile.
+func TestBuildProfileStatus_Stale_WhenProfileAbsent(t *testing.T) {
 	dir := t.TempDir()
 
 	result := mcpserver.HandleGetConfigWithProfileAndFiles(&config.Config{}, dir)
@@ -556,7 +589,150 @@ func TestBuildProfileStatus_NotStale_WhenProfileAbsent(t *testing.T) {
 		t.Fatal("profile missing from response")
 	}
 	stale, _ := profile["stale"].(bool)
-	if stale {
-		t.Error("stale=true; want false when no compiled profile exists")
+	if !stale {
+		t.Error("stale=false; want true when no compiled profile exists")
+	}
+	staleFiles, _ := profile["stale_files"].([]interface{})
+	if staleFiles == nil {
+		t.Error("stale_files missing or null; want empty array when profile absent")
+	}
+}
+
+// TestHandleOnboardUser_NeedsCompile verifies that onboard_user always returns needs_compile: true.
+func TestHandleOnboardUser_NeedsCompile(t *testing.T) {
+	svc := &stubOnboarder{
+		result: model.OnboardResult{Stored: []string{"resume:backend"}},
+	}
+	req := callToolRequest("onboard_user", map[string]any{
+		"resume_content": "resume text",
+		"resume_label":   "backend",
+	})
+	result := mcpserver.HandleOnboardUser(context.Background(), &req, svc)
+	text := extractText(t, result)
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal([]byte(text), &resp); err != nil {
+		t.Fatalf("parse: %v — raw: %s", err, text)
+	}
+	if resp["needs_compile"] != true {
+		t.Errorf("needs_compile = %v; want true", resp["needs_compile"])
+	}
+}
+
+// TestHandleCreateStory_NeedsCompile verifies that create_story returns needs_compile: true
+// after successfully saving the story.
+func TestHandleCreateStory_NeedsCompile(t *testing.T) {
+	creator := &stubCreator{
+		out: model.StoryOutput{StoryID: "1"},
+	}
+	args := map[string]any{
+		"skill":      "Go",
+		"story_type": "technical",
+		"job_title":  "SWE",
+		"situation":  "legacy system slowing releases",
+		"behavior":   "rewrote the pipeline in Go",
+		"impact":     "20% faster deployments",
+	}
+	result := mcpserver.HandleCreateStoryWith(context.Background(), args, creator)
+	text := extractText(t, result)
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal([]byte(text), &resp); err != nil {
+		t.Fatalf("parse: %v — raw: %s", err, text)
+	}
+	if resp["needs_compile"] != true {
+		t.Errorf("needs_compile = %v; want true", resp["needs_compile"])
+	}
+	if resp["story_id"] != "1" {
+		t.Errorf("story_id = %v; want \"1\"", resp["story_id"])
+	}
+}
+
+// TestOnboardThenHasAccomplishments verifies the end-to-end contract:
+// HandleOnboardUserWith writes accomplishments.json, and HandleGetConfigWithProfileAndFiles
+// subsequently reports has_accomplishments=true.
+func TestOnboardThenHasAccomplishments(t *testing.T) {
+	dir := t.TempDir()
+	svc := onboarding.New(dir, slog.Default())
+	req := callToolRequest("onboard_user", map[string]any{
+		"resume_content":  "resume text",
+		"resume_label":    "backend",
+		"accomplishments": "Led migration to microservices",
+	})
+	onboardResult := mcpserver.HandleOnboardUserWith(context.Background(), &req, svc, dir)
+	onboardText := extractText(t, onboardResult)
+	var onboardResp map[string]interface{}
+	if err := json.Unmarshal([]byte(onboardText), &onboardResp); err != nil {
+		t.Fatalf("onboard response parse: %v — raw: %s", err, onboardText)
+	}
+	if _, hasErr := onboardResp["error"]; hasErr {
+		t.Fatalf("onboard_user returned error: %s", onboardText)
+	}
+
+	result := mcpserver.HandleGetConfigWithProfileAndFiles(&config.Config{}, dir)
+	text := extractText(t, result)
+	var resp map[string]interface{}
+	if err := json.Unmarshal([]byte(text), &resp); err != nil {
+		t.Fatalf("get_config response parse: %v — raw: %s", err, text)
+	}
+	profile, ok := resp["profile"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("profile is not a map: %T", resp["profile"])
+	}
+	if profile["has_accomplishments"] != true {
+		t.Errorf("has_accomplishments = %v; want true after onboard_user with accomplishments text", profile["has_accomplishments"])
+	}
+}
+
+// TestCreateStoryThenCompileProfile verifies the end-to-end contract: the story_id returned
+// by create_story, when passed as Source to compile_profile, populates Story.SourceFile
+// in the compiled profile saved to disk.
+func TestCreateStoryThenCompileProfile(t *testing.T) {
+	dir := t.TempDir()
+	ctx := context.Background()
+
+	// Step 1: create_story returns story_id "0" (via stub).
+	creator := &stubCreator{out: model.StoryOutput{StoryID: "0"}}
+	storyResult := mcpserver.HandleCreateStoryWith(ctx, baseStoryArgs(), creator)
+	storyText := extractText(t, storyResult)
+	var storyResp map[string]interface{}
+	if err := json.Unmarshal([]byte(storyText), &storyResp); err != nil {
+		t.Fatalf("story response parse: %v — raw: %s", err, storyText)
+	}
+	storyID, _ := storyResp["story_id"].(string)
+	if storyID == "" {
+		t.Fatalf("story_id empty in create_story response: %s", storyText)
+	}
+
+	// Step 2: pass story_id as Source to compile_profile.
+	compileResult := mcpserver.HandleCompileProfileWith(ctx, dir, model.AssembleInput{
+		Skills: []string{"Go"},
+		Stories: []model.AssembleStory{
+			{Accomplishment: "rewrote the handler", Tags: []string{"Go"}, Source: storyID},
+		},
+	})
+	compileText := extractText(t, compileResult)
+	var compileResp map[string]interface{}
+	if err := json.Unmarshal([]byte(compileText), &compileResp); err != nil {
+		t.Fatalf("compile response parse: %v — raw: %s", err, compileText)
+	}
+	if _, hasErr := compileResp["error"]; hasErr {
+		t.Fatalf("compile_profile returned error: %s", compileText)
+	}
+
+	// Step 3: load the saved profile and assert SourceFile == storyID.
+	raw, err := os.ReadFile(filepath.Join(dir, "profile-compiled.json"))
+	if err != nil {
+		t.Fatalf("read profile-compiled.json: %v", err)
+	}
+	var profile model.CompiledProfile
+	if err := json.Unmarshal(raw, &profile); err != nil {
+		t.Fatalf("parse profile-compiled.json: %v", err)
+	}
+	if len(profile.Stories) != 1 {
+		t.Fatalf("stories count = %d; want 1", len(profile.Stories))
+	}
+	if profile.Stories[0].SourceFile != storyID {
+		t.Errorf("Story.SourceFile = %q; want %q (story_id should flow through to compiled profile)", profile.Stories[0].SourceFile, storyID)
 	}
 }

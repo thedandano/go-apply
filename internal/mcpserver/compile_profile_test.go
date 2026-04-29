@@ -8,137 +8,23 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mark3labs/mcp-go/mcp"
-
 	"github.com/thedandano/go-apply/internal/mcpserver"
 	"github.com/thedandano/go-apply/internal/model"
-	"github.com/thedandano/go-apply/internal/testutil/llmstub"
 )
 
-func textFrom(t *testing.T, result *mcp.CallToolResult) string {
+// writeCompiledProfile writes a CompiledProfile as profile-compiled.json in dir.
+//
+//nolint:gocritic // hugeParam: test helper, CompiledProfile passed by value for clarity
+func writeCompiledProfile(t *testing.T, dir string, p model.CompiledProfile) {
 	t.Helper()
-	if len(result.Content) == 0 {
-		t.Fatal("CallToolResult has no content")
+	data, err := json.Marshal(p)
+	if err != nil {
+		t.Fatalf("marshal profile: %v", err)
 	}
-	tc, ok := result.Content[0].(mcp.TextContent)
-	if !ok {
-		t.Fatalf("content[0] is not TextContent: %T", result.Content[0])
-	}
-	return tc.Text
-}
-
-// TestHandleCompileProfile_HappyPath verifies compilation runs and returns correct schema.
-func TestHandleCompileProfile_HappyPath(t *testing.T) {
-	dir := t.TempDir()
-	writeCompileTestFile(t, filepath.Join(dir, "skills.md"), "Go\nKubernetes")
-	writeCompileTestFile(t, filepath.Join(dir, "accomplishments-0.md"), "## Go — technical @ Eng\n**Situation:** s\n**Behavior:** b\n**Impact:** i")
-
-	stub := llmstub.New(map[string]string{}, 0, "")
-	result := mcpserver.HandleCompileProfileWith(context.Background(), dir, stub)
-	text := textFrom(t, result)
-
-	var resp map[string]interface{}
-	if err := json.Unmarshal([]byte(text), &resp); err != nil {
-		t.Fatalf("parse response: %v\nraw: %s", err, text)
-	}
-
-	assertStringKey(t, resp, "schema_version", "1")
-	assertStringKey(t, resp, "status", "compiled")
-	for _, key := range []string{"compiled_at", "stories", "orphaned_skills", "partial_tagging_failure"} {
-		if _, ok := resp[key]; !ok {
-			t.Errorf("key %q missing from response", key)
-		}
+	if err := os.WriteFile(filepath.Join(dir, "profile-compiled.json"), data, 0o600); err != nil {
+		t.Fatalf("write compiled profile: %v", err)
 	}
 }
-
-// TestHandleCompileProfile_AlreadyUpToDate — arrays must still be populated.
-func TestHandleCompileProfile_AlreadyUpToDate(t *testing.T) {
-	dir := t.TempDir()
-
-	accPath := filepath.Join(dir, "accomplishments-0.md")
-	writeCompileTestFile(t, accPath, "## Go — technical @ Eng\n**Situation:** s\n**Behavior:** b\n**Impact:** i")
-	old := time.Now().Add(-10 * time.Minute)
-	_ = os.Chtimes(accPath, old, old)
-
-	profile := model.CompiledProfile{
-		SchemaVersion:  "1",
-		CompiledAt:     time.Now().UTC(),
-		Stories:        []model.Story{{ID: "story-001", SourceFile: "accomplishments-0.md", Text: "t", Skills: []string{"Go"}, Format: "SBI", Type: model.StoryTypeTechnical, JobTitle: "Eng"}},
-		OrphanedSkills: []model.OrphanedSkill{{Skill: "ArgoCD", Deferred: false}},
-	}
-	writeProfileFile(t, dir, profile)
-
-	stub := llmstub.New(map[string]string{}, 0, "")
-	result := mcpserver.HandleCompileProfileWith(context.Background(), dir, stub)
-	text := textFrom(t, result)
-
-	var resp map[string]interface{}
-	_ = json.Unmarshal([]byte(text), &resp)
-
-	assertStringKey(t, resp, "status", "already_up_to_date")
-
-	stories, _ := resp["stories"].([]interface{})
-	if len(stories) == 0 {
-		t.Error("stories[] empty on already_up_to_date; want populated from existing profile")
-	}
-	orphans, _ := resp["orphaned_skills"].([]interface{})
-	if len(orphans) == 0 {
-		t.Error("orphaned_skills[] empty on already_up_to_date; want populated from existing profile")
-	}
-}
-
-// TestHandleCompileProfile_FirstRun — no profile must produce status=compiled, not already_up_to_date.
-func TestHandleCompileProfile_FirstRun(t *testing.T) {
-	dir := t.TempDir()
-	writeCompileTestFile(t, filepath.Join(dir, "skills.md"), "Go")
-	writeCompileTestFile(t, filepath.Join(dir, "accomplishments-0.md"), "## Go — technical @ Eng\n**Situation:** s\n**Behavior:** b\n**Impact:** i")
-
-	stub := llmstub.New(map[string]string{}, 0, "")
-	result := mcpserver.HandleCompileProfileWith(context.Background(), dir, stub)
-	text := textFrom(t, result)
-
-	var resp map[string]interface{}
-	_ = json.Unmarshal([]byte(text), &resp)
-
-	if resp["status"] == "already_up_to_date" {
-		t.Error("status=already_up_to_date on first run; want compiled")
-	}
-	assertStringKey(t, resp, "status", "compiled")
-}
-
-// TestHandleCompileProfile_PartialTaggingFailure verifies partial_tagging_failure surfaced.
-func TestHandleCompileProfile_PartialTaggingFailure(t *testing.T) {
-	dir := t.TempDir()
-	writeCompileTestFile(t, filepath.Join(dir, "skills.md"), "Go")
-	writeCompileTestFile(t, filepath.Join(dir, "accomplishments-0.md"), "## story")
-
-	stub := llmstub.New(map[string]string{}, 1, "llm down")
-	result := mcpserver.HandleCompileProfileWith(context.Background(), dir, stub)
-	text := textFrom(t, result)
-
-	var resp map[string]interface{}
-	_ = json.Unmarshal([]byte(text), &resp)
-
-	if resp["partial_tagging_failure"] != true {
-		t.Errorf("partial_tagging_failure=%v; want true", resp["partial_tagging_failure"])
-	}
-}
-
-// TestHandleCompileProfile_EmptyDataDir — must not panic on missing sources.
-func TestHandleCompileProfile_EmptyDataDir(t *testing.T) {
-	dir := t.TempDir()
-	stub := llmstub.New(map[string]string{}, 0, "")
-	result := mcpserver.HandleCompileProfileWith(context.Background(), dir, stub)
-	if result == nil {
-		t.Fatal("nil result on empty dataDir")
-	}
-	text := textFrom(t, result)
-	if text == "" {
-		t.Error("empty text response")
-	}
-}
-
-// helpers
 
 func assertStringKey(t *testing.T, m map[string]interface{}, key, want string) {
 	t.Helper()
@@ -152,20 +38,262 @@ func assertStringKey(t *testing.T, m map[string]interface{}, key, want string) {
 	}
 }
 
-func writeCompileTestFile(t *testing.T, path, content string) {
-	t.Helper()
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		t.Fatalf("write %s: %v", path, err)
+// TestHandleCompileProfileWith_EmptyInput verifies compilation with no prior and no input
+// returns status "compiled" with empty orphans.
+func TestHandleCompileProfileWith_EmptyInput(t *testing.T) {
+	dir := t.TempDir()
+	result := mcpserver.HandleCompileProfileWith(context.Background(), dir, model.AssembleInput{})
+	if result == nil {
+		t.Fatal("nil result")
+	}
+	text := extractText(t, result)
+	var resp map[string]interface{}
+	if err := json.Unmarshal([]byte(text), &resp); err != nil {
+		t.Fatalf("parse: %v\nraw: %s", err, text)
+	}
+	assertStringKey(t, resp, "status", "compiled")
+	orphans, _ := resp["orphaned_skills"].([]interface{})
+	if len(orphans) != 0 {
+		t.Errorf("orphaned_skills = %v; want empty", orphans)
 	}
 }
 
-func writeProfileFile(t *testing.T, dir string, p model.CompiledProfile) { //nolint:gocritic // hugeParam: test helper
-	t.Helper()
-	data, err := json.Marshal(p)
-	if err != nil {
-		t.Fatalf("marshal profile: %v", err)
+// TestHandleCompileProfileWith_OrphanOutput verifies skills with no story coverage appear
+// in orphaned_skills.
+func TestHandleCompileProfileWith_OrphanOutput(t *testing.T) {
+	dir := t.TempDir()
+	input := model.AssembleInput{
+		Skills: []string{"Go", "Kubernetes", "Terraform"},
+		Stories: []model.AssembleStory{
+			{Accomplishment: "Go work", Tags: []string{"Go"}},
+		},
 	}
-	if err := os.WriteFile(filepath.Join(dir, "profile-compiled.json"), data, 0o600); err != nil {
-		t.Fatalf("write profile: %v", err)
+	result := mcpserver.HandleCompileProfileWith(context.Background(), dir, input)
+	text := extractText(t, result)
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal([]byte(text), &resp); err != nil {
+		t.Fatalf("parse: %v\nraw: %s", err, text)
+	}
+
+	assertStringKey(t, resp, "status", "compiled")
+
+	orphans, _ := resp["orphaned_skills"].([]interface{})
+	if len(orphans) != 2 {
+		t.Errorf("orphaned_skills len = %d; want 2 (Kubernetes, Terraform)", len(orphans))
+	}
+}
+
+// TestHandleCompileProfileWith_IDResolutionError verifies that an unknown story ID returns
+// an error response (not a panic or "compiled" status).
+func TestHandleCompileProfileWith_IDResolutionError(t *testing.T) {
+	dir := t.TempDir()
+	prior := model.CompiledProfile{
+		SchemaVersion: "1",
+		CompiledAt:    time.Now().Add(-time.Minute),
+		Stories:       []model.Story{{ID: "story-001", Text: "first story"}},
+	}
+	writeCompiledProfile(t, dir, prior)
+
+	input := model.AssembleInput{
+		Stories: []model.AssembleStory{
+			{ID: "story-999", Tags: []string{"Go"}}, // unknown ID
+		},
+	}
+
+	result := mcpserver.HandleCompileProfileWith(context.Background(), dir, input)
+	text := extractText(t, result)
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal([]byte(text), &resp); err != nil {
+		t.Fatalf("parse: %v\nraw: %s", err, text)
+	}
+
+	if _, ok := resp["error"]; !ok {
+		t.Error("expected error key when story ID cannot be resolved")
+	}
+	if resp["status"] == "compiled" {
+		t.Error("status must not be 'compiled' when ID resolution fails")
+	}
+}
+
+// TestHandleCompileProfileWith_SkillUnion verifies effective_skills = prior ∪ input - removes,
+// and that skills_added / skills_removed are correctly computed.
+func TestHandleCompileProfileWith_SkillUnion(t *testing.T) {
+	dir := t.TempDir()
+	prior := model.CompiledProfile{
+		SchemaVersion: "1",
+		CompiledAt:    time.Now().Add(-time.Minute),
+		Skills:        []string{"Go", "Kubernetes"},
+	}
+	writeCompiledProfile(t, dir, prior)
+
+	input := model.AssembleInput{
+		Skills:       []string{"Terraform"},
+		RemoveSkills: []string{"Kubernetes"},
+		Stories: []model.AssembleStory{
+			{Accomplishment: "Terraform and Go work", Tags: []string{"Terraform", "Go"}},
+		},
+	}
+
+	result := mcpserver.HandleCompileProfileWith(context.Background(), dir, input)
+	text := extractText(t, result)
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal([]byte(text), &resp); err != nil {
+		t.Fatalf("parse: %v\nraw: %s", err, text)
+	}
+
+	assertStringKey(t, resp, "status", "compiled")
+
+	skillsAdded, _ := resp["skills_added"].([]interface{})
+	if len(skillsAdded) != 1 || skillsAdded[0].(string) != "Terraform" {
+		t.Errorf("skills_added = %v; want [Terraform]", skillsAdded)
+	}
+
+	skillsRemoved, _ := resp["skills_removed"].([]interface{})
+	if len(skillsRemoved) != 1 || skillsRemoved[0].(string) != "Kubernetes" {
+		t.Errorf("skills_removed = %v; want [Kubernetes]", skillsRemoved)
+	}
+
+	// Effective skills = Go + Terraform; both covered by the story → no orphans.
+	orphans, _ := resp["orphaned_skills"].([]interface{})
+	if len(orphans) != 0 {
+		t.Errorf("orphaned_skills = %v; want empty", orphans)
+	}
+}
+
+// TestHandleCompileProfileWith_RichDiff_CoverageGained verifies that a skill previously
+// orphaned in the prior profile and now covered appears in coverage_gained.
+func TestHandleCompileProfileWith_RichDiff_CoverageGained(t *testing.T) {
+	dir := t.TempDir()
+	prior := model.CompiledProfile{
+		SchemaVersion:  "1",
+		CompiledAt:     time.Now().Add(-time.Minute),
+		Skills:         []string{"Go", "Kubernetes"},
+		OrphanedSkills: []model.OrphanedSkill{{Skill: "Kubernetes", Deferred: false}},
+		Stories:        []model.Story{{ID: "story-001", Text: "Go work", Skills: []string{"Go"}}},
+	}
+	writeCompiledProfile(t, dir, prior)
+
+	// New story covers Kubernetes — removing it from orphans.
+	input := model.AssembleInput{
+		Stories: []model.AssembleStory{
+			{Accomplishment: "K8s migration", Tags: []string{"Kubernetes", "Go"}},
+		},
+	}
+
+	result := mcpserver.HandleCompileProfileWith(context.Background(), dir, input)
+	text := extractText(t, result)
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal([]byte(text), &resp); err != nil {
+		t.Fatalf("parse: %v\nraw: %s", err, text)
+	}
+
+	coverageGained, _ := resp["coverage_gained"].([]interface{})
+	found := false
+	for _, c := range coverageGained {
+		if c.(string) == "Kubernetes" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("coverage_gained = %v; want Kubernetes", coverageGained)
+	}
+
+	// Kubernetes should no longer be orphaned.
+	orphans, _ := resp["orphaned_skills"].([]interface{})
+	for _, o := range orphans {
+		if om, ok := o.(map[string]interface{}); ok {
+			if om["skill"].(string) == "Kubernetes" {
+				t.Error("Kubernetes still in orphaned_skills after being covered")
+			}
+		}
+	}
+}
+
+// TestHandleCompileProfileWith_StoryCounts verifies stories_added and stories_updated.
+func TestHandleCompileProfileWith_StoryCounts(t *testing.T) {
+	dir := t.TempDir()
+	prior := model.CompiledProfile{
+		SchemaVersion: "1",
+		CompiledAt:    time.Now().Add(-time.Minute),
+		Skills:        []string{"Go", "Kubernetes"},
+		Stories:       []model.Story{{ID: "story-001", Text: "existing", Skills: []string{"Go"}}},
+	}
+	writeCompiledProfile(t, dir, prior)
+
+	input := model.AssembleInput{
+		Stories: []model.AssembleStory{
+			{ID: "story-001", Tags: []string{"Go"}},                    // updated
+			{Accomplishment: "K8s work", Tags: []string{"Kubernetes"}}, // added
+		},
+	}
+
+	result := mcpserver.HandleCompileProfileWith(context.Background(), dir, input)
+	text := extractText(t, result)
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal([]byte(text), &resp); err != nil {
+		t.Fatalf("parse: %v\nraw: %s", err, text)
+	}
+
+	storiesAdded, _ := resp["stories_added"].(float64)
+	storiesUpdated, _ := resp["stories_updated"].(float64)
+	if storiesAdded != 1 {
+		t.Errorf("stories_added = %v; want 1", storiesAdded)
+	}
+	if storiesUpdated != 1 {
+		t.Errorf("stories_updated = %v; want 1", storiesUpdated)
+	}
+}
+
+// TestHandleCompileProfile_InvalidSkillsJSON verifies that invalid JSON in the skills arg
+// returns an error response from the JSON parse layer.
+func TestHandleCompileProfile_InvalidSkillsJSON(t *testing.T) {
+	tmpData := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", tmpData)
+
+	req := callToolRequest("compile_profile", map[string]any{"skills": "not-valid-json"})
+	result := mcpserver.HandleCompileProfile(context.Background(), &req)
+	text := extractText(t, result)
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal([]byte(text), &resp); err != nil {
+		t.Fatalf("parse: %v\nraw: %s", err, text)
+	}
+	if _, ok := resp["error"]; !ok {
+		t.Error("expected error key for invalid skills JSON")
+	}
+}
+
+// TestHandleCompileProfile_ValidJSON verifies that valid JSON strings are parsed and
+// produce a successful compilation.
+func TestHandleCompileProfile_ValidJSON(t *testing.T) {
+	tmpData := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", tmpData)
+	// Create the go-apply data dir so Save can write.
+	if err := os.MkdirAll(filepath.Join(tmpData, "go-apply"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	req := callToolRequest("compile_profile", map[string]any{
+		"skills":  `["Go","Kubernetes"]`,
+		"stories": `[{"accomplishment":"did Go work","tags":["Go"]}]`,
+	})
+	result := mcpserver.HandleCompileProfile(context.Background(), &req)
+	text := extractText(t, result)
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal([]byte(text), &resp); err != nil {
+		t.Fatalf("parse: %v\nraw: %s", err, text)
+	}
+	assertStringKey(t, resp, "status", "compiled")
+
+	// Kubernetes not covered by any story → should be orphaned.
+	orphans, _ := resp["orphaned_skills"].([]interface{})
+	if len(orphans) != 1 {
+		t.Errorf("orphaned_skills = %v; want 1 (Kubernetes)", orphans)
 	}
 }

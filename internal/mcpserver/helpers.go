@@ -10,12 +10,10 @@ import (
 	"github.com/thedandano/go-apply/internal/config"
 	"github.com/thedandano/go-apply/internal/loader"
 	"github.com/thedandano/go-apply/internal/logger"
-	"github.com/thedandano/go-apply/internal/port"
 	"github.com/thedandano/go-apply/internal/redact"
 	"github.com/thedandano/go-apply/internal/repository/fs"
 	extractPkg "github.com/thedandano/go-apply/internal/service/extract"
 	"github.com/thedandano/go-apply/internal/service/fetcher"
-	"github.com/thedandano/go-apply/internal/service/llm"
 	pdfrender "github.com/thedandano/go-apply/internal/service/pdfrender"
 	"github.com/thedandano/go-apply/internal/service/pipeline"
 	"github.com/thedandano/go-apply/internal/service/scorer"
@@ -24,8 +22,6 @@ import (
 
 // loadDeps loads configuration and wires all pipeline dependencies.
 // Config is loaded fresh per invocation so changes take effect immediately.
-// The MCP host is the orchestrator — LLM, CLGen, and Tailor are nil so the host
-// handles keyword extraction, cover letters, and tailoring.
 func loadDeps() (*config.Config, pipeline.ApplyConfig, error) {
 	log := slog.Default()
 
@@ -49,14 +45,11 @@ func loadDeps() (*config.Config, pipeline.ApplyConfig, error) {
 
 	deps := pipeline.ApplyConfig{
 		Fetcher:        fetcherSvc,
-		LLM:            nil,
 		Scorer:         scorerSvc,
-		CLGen:          nil,
 		Resumes:        resumeRepo,
 		Loader:         docLoader,
 		AppRepo:        appRepo,
 		Defaults:       defaults,
-		Tailor:         nil,
 		PDFRenderer:    pdfrender.New(),
 		Extractor:      extractPkg.New(),
 		SurvivalDiffer: survival.New(),
@@ -76,13 +69,4 @@ func loadDeps() (*config.Config, pipeline.ApplyConfig, error) {
 func errorResult(message string) *mcp.CallToolResult {
 	data, _ := json.Marshal(map[string]string{"error": message})
 	return mcp.NewToolResultText(string(data))
-}
-
-// newLLMClient constructs a port.LLMClient from config orchestrator settings.
-func newLLMClient(cfg *config.Config) (port.LLMClient, error) {
-	defaults, err := config.LoadDefaults()
-	if err != nil {
-		return nil, fmt.Errorf("load defaults for llm client: %w", err)
-	}
-	return llm.New(cfg.Orchestrator.BaseURL, cfg.Orchestrator.Model, cfg.Orchestrator.APIKey, defaults, slog.Default()), nil
 }

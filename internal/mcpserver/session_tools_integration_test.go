@@ -59,10 +59,13 @@ func TestHandlePreviewATSExtraction_HonestLoop_RealPdftotext(t *testing.T) {
 func TestHandlePreviewATSExtraction_PdftotextMissing_ErrorReferencesDoctorCmd(t *testing.T) {
 	cfg := stubApplyConfigWithTier4Sections()
 	cfg.PDFRenderer = &stubPDFRenderer{failRender: false}
-	cfg.Extractor = &stubbedExtractorWithDoctorMsg{failExtract: true}
 	cfg.SurvivalDiffer = survival.New()
+	// Extractor left as working stub (from stubApplyConfigForSession) so scoring succeeds.
 
 	sessionID := buildScoredSession(t, &cfg)
+
+	// Switch to failing extractor only for the preview step.
+	cfg.Extractor = &stubbedExtractorWithDoctorMsg{failExtract: true}
 
 	previewReq := callToolRequest("preview_ats_extraction", map[string]any{"session_id": sessionID})
 	result := mcpserver.HandlePreviewATSExtractionWithConfig(context.Background(), &previewReq, &cfg)

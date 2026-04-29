@@ -73,6 +73,15 @@ func (r *CompiledProfileRepo) Save(dataDir string, profile model.CompiledProfile
 	return nil
 }
 
+// NeedsCompilation implements port.CompiledProfileRepository.
+func (r *CompiledProfileRepo) NeedsCompilation(dataDir string) (bool, []string, error) {
+	path := filepath.Join(dataDir, compiledProfileFile)
+	if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
+		return true, nil, nil
+	}
+	return r.IsStale(dataDir)
+}
+
 // IsStale compares profile.CompiledAt against the mtime of every source file in dataDir.
 // Returns (false, nil, nil) when the profile is absent — callers must handle ErrProfileMissing
 // from Load separately to distinguish "never compiled" from "compiled and current".
@@ -93,14 +102,13 @@ func (r *CompiledProfileRepo) IsStale(dataDir string) (bool, []string, error) {
 
 	compiledAt := p.CompiledAt
 
-	// Collect source files: skills.md + accomplishments-*.md
-	matches, _ := filepath.Glob(filepath.Join(dataDir, "accomplishments-*.md"))
-	sources := make([]string, 0, 1+len(matches))
+	// Collect source files: skills.md + accomplishments.json
+	sources := make([]string, 0, 2)
 	if _, err := os.Stat(filepath.Join(dataDir, "skills.md")); err == nil {
 		sources = append(sources, "skills.md")
 	}
-	for _, m := range matches {
-		sources = append(sources, filepath.Base(m))
+	if _, err := os.Stat(filepath.Join(dataDir, "accomplishments.json")); err == nil {
+		sources = append(sources, "accomplishments.json")
 	}
 
 	var staleFiles []string

@@ -20,26 +20,12 @@ import (
 )
 
 // HandleOnboardUser is the MCP-wired handler for "onboard_user".
-// It loads the LLM client from config and triggers recompilation after writing profile files.
 func HandleOnboardUser(ctx context.Context, req *mcp.CallToolRequest, svc port.Onboarder) *mcp.CallToolResult {
-	dataDir := config.DataDir()
-	var llmClient port.LLMClient
-	var llmErr error
-	if cfg, _, err := loadDeps(); err == nil {
-		llmClient, llmErr = newLLMClient(cfg)
-		if llmErr != nil {
-			slog.WarnContext(ctx, "onboard_user: LLM client unavailable; compile will be skipped",
-				slog.String("error", llmErr.Error()),
-			)
-		}
-	}
-	return HandleOnboardUserWith(ctx, req, svc, llmClient, llmErr, dataDir)
+	return HandleOnboardUserWith(ctx, req, svc, config.DataDir())
 }
 
 // HandleOnboardUserWith is the testable core for "onboard_user".
-// llmClient may be nil — when nil, recompilation is skipped.
-// llmErr is non-nil when the LLM client could not be constructed; surfaced in compile status.
-func HandleOnboardUserWith(ctx context.Context, req *mcp.CallToolRequest, svc port.Onboarder, llmClient port.LLMClient, llmErr error, dataDir string) *mcp.CallToolResult {
+func HandleOnboardUserWith(ctx context.Context, req *mcp.CallToolRequest, svc port.Onboarder, dataDir string) *mcp.CallToolResult {
 	resumeContent := req.GetString("resume_content", "")
 	resumeLabel := req.GetString("resume_label", "")
 	skills := req.GetString("skills", "")
@@ -101,21 +87,11 @@ func HandleOnboardUserWith(ctx context.Context, req *mcp.CallToolRequest, svc po
 		slog.DebugContext(ctx, "onboard_user: sections saved", slog.String("label", resumeLabel))
 	}
 
-	// Build the base response.
 	out := map[string]interface{}{
-		"stored":   result.Stored,
-		"warnings": result.Warnings,
-		"summary":  result.Summary,
-	}
-
-	// Trigger recompilation when an LLM is available (US5 mutation wiring).
-	if llmClient != nil {
-		out["compile"] = extractCompileSummary(ctx, dataDir, llmClient)
-	} else if llmErr != nil {
-		out["compile"] = map[string]interface{}{
-			"status": "compile_skipped",
-			"error":  llmErr.Error(),
-		}
+		"stored":        result.Stored,
+		"warnings":      result.Warnings,
+		"summary":       result.Summary,
+		"needs_compile": true,
 	}
 
 	data, marshalErr := json.Marshal(out)
@@ -129,32 +105,6 @@ func HandleOnboardUserWith(ctx context.Context, req *mcp.CallToolRequest, svc po
 		logger.PayloadAttr("result", string(data), logger.Verbose()),
 	)
 	return mcp.NewToolResultText(string(data))
-}
-
-// extractCompileSummary runs HandleCompileProfileWith and returns a compact compile summary
-// suitable for embedding in the onboard_user response.
-func extractCompileSummary(ctx context.Context, dataDir string, llmClient port.LLMClient) map[string]interface{} {
-	result := HandleCompileProfileWith(ctx, dataDir, llmClient)
-	if result == nil || len(result.Content) == 0 {
-		return map[string]interface{}{"status": "compile_failed", "error": "nil result"}
-	}
-	tc, ok := result.Content[0].(mcp.TextContent)
-	if !ok {
-		return map[string]interface{}{"status": "compile_failed", "error": "unexpected content type"}
-	}
-	var parsed map[string]interface{}
-	if err := json.Unmarshal([]byte(tc.Text), &parsed); err != nil {
-		return map[string]interface{}{"status": "compile_failed", "error": err.Error()}
-	}
-	// Return only the compile-relevant fields; omit full story text to keep response compact.
-	summary := map[string]interface{}{
-		"status":      parsed["status"],
-		"compiled_at": parsed["compiled_at"],
-	}
-	if orphans, ok := parsed["orphaned_skills"]; ok {
-		summary["orphaned_skills"] = orphans
-	}
-	return summary
 }
 
 // HandleAddResume is the exported, injectable handler for "add_resume".
@@ -331,15 +281,23 @@ func buildProfileStatus(dataDir string) map[string]interface{} {
 		profileObj["has_skills"] = true
 	}
 
-	// Check for any accomplishments-N.md file (written to dataDir root by onboarding).
-	accomplishmentsMatches, _ := filepath.Glob(filepath.Join(dataDir, "accomplishments-*.md"))
-	if len(accomplishmentsMatches) > 0 {
-		profileObj["has_accomplishments"] = true
+	// Check accomplishments.json: has_accomplishments is true when onboard_text or any created story is present.
+	accomplishmentsPath := filepath.Join(dataDir, "accomplishments.json")
+	if raw, readErr := os.ReadFile(accomplishmentsPath); readErr == nil { // #nosec G304 -- path is XDG-controlled data dir, not user input
+		var acc model.AccomplishmentsJSON
+		if jsonErr := json.Unmarshal(raw, &acc); jsonErr != nil {
+			slog.Warn("buildProfileStatus: accomplishments.json parse error",
+				slog.String("path", accomplishmentsPath),
+				slog.String("error", jsonErr.Error()),
+			)
+		} else if acc.OnboardText != "" || len(acc.CreatedStories) > 0 {
+			profileObj["has_accomplishments"] = true
+		}
 	}
 
 	// Report compiled-profile staleness so the host knows whether compile_profile is needed.
 	profileRepo := fs.NewCompiledProfileRepository()
-	stale, staleFiles, staleErr := profileRepo.IsStale(dataDir)
+	stale, staleFiles, staleErr := profileRepo.NeedsCompilation(dataDir)
 	if staleErr == nil {
 		profileObj["stale"] = stale
 		if staleFiles == nil {

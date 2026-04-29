@@ -15,9 +15,12 @@ import (
 	"github.com/thedandano/go-apply/internal/mcpserver"
 	"github.com/thedandano/go-apply/internal/model"
 	fsrepo "github.com/thedandano/go-apply/internal/repository/fs"
+	"github.com/thedandano/go-apply/internal/service/extract"
 	"github.com/thedandano/go-apply/internal/service/onboarding"
+	"github.com/thedandano/go-apply/internal/service/pdfrender"
 	"github.com/thedandano/go-apply/internal/service/pipeline"
 	"github.com/thedandano/go-apply/internal/service/scorer"
+	"github.com/thedandano/go-apply/internal/service/survival"
 )
 
 // TestOnboardThenScore exercises the full onboard → load_jd → submit_keywords flow
@@ -60,17 +63,33 @@ func TestOnboardThenScore(t *testing.T) {
 	docLoader := loader.New()
 	appRepo := fsrepo.NewApplicationRepository(dataDir)
 
+	// PDF-based scoring requires a sections sidecar. Create minimal valid sections for the text resume.
+	minSections := model.SectionMap{
+		SchemaVersion: model.CurrentSchemaVersion,
+		Contact:       model.ContactInfo{Name: "Test User"},
+		Experience: []model.ExperienceEntry{
+			{Company: "Acme", Role: "Engineer", StartDate: "2020-01", Bullets: []string{"Built systems"}},
+		},
+		Skills: &model.SkillsSection{
+			Kind: model.SkillsKindFlat,
+			Flat: "golang kubernetes docker senior engineer",
+		},
+	}
+	if err := resumeRepo.SaveSections("main", minSections); err != nil {
+		t.Fatalf("SaveSections: %v", err)
+	}
+
 	deps := pipeline.ApplyConfig{
-		Fetcher:   nil,
-		LLM:       nil, // MCP host (this test) provides keywords via submit_keywords
-		Scorer:    scorerSvc,
-		CLGen:     nil,
-		Resumes:   resumeRepo,
-		Loader:    docLoader,
-		AppRepo:   appRepo,
-		Defaults:  defaults,
-		Tailor:    nil,
-		Presenter: nil,
+		Fetcher:        nil,
+		Scorer:         scorerSvc,
+		Resumes:        resumeRepo,
+		Loader:         docLoader,
+		AppRepo:        appRepo,
+		Defaults:       defaults,
+		Presenter:      nil,
+		PDFRenderer:    pdfrender.New(),
+		Extractor:      extract.New(),
+		SurvivalDiffer: survival.New(),
 	}
 
 	// ── 4. load_jd ─────────────────────────────────────────────────────────────

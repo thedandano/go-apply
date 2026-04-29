@@ -2,8 +2,6 @@ package logger
 
 import (
 	"context"
-	"crypto/rand"
-	"fmt"
 	"log/slog"
 )
 
@@ -23,13 +21,4 @@ func Banner(ctx context.Context, log *slog.Logger, stage, title string) {
 	log.InfoContext(ctx, bannerLine)
 	log.InfoContext(ctx, label)
 	log.InfoContext(ctx, bannerLine)
-}
-
-// ShortID returns an 8-character hex string for identifying a run or session.
-func ShortID() string {
-	b := make([]byte, 4)
-	if _, err := rand.Read(b); err != nil {
-		return "????????"
-	}
-	return fmt.Sprintf("%08x", b)
 }

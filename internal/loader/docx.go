@@ -24,7 +24,7 @@ func (d *DOCXExtractor) Load(path string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("open docx %s: %w", path, err)
 	}
-	defer r.Close()
+	defer r.Close() //nolint:errcheck
 
 	for _, f := range r.File {
 		if f.Name != "word/document.xml" {

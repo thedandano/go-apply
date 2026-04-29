@@ -2,305 +2,15 @@ package profilecompiler_test
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 
 	"github.com/thedandano/go-apply/internal/model"
 	"github.com/thedandano/go-apply/internal/service/profilecompiler"
-	"github.com/thedandano/go-apply/internal/testutil/llmstub"
 )
 
-// buildPrompt returns the expected user-message key the compiler sends for a story.
-// The compiler embeds the story text and skills list; we replicate the format here
-// so tests can key the stub response correctly.
-func storyPromptKey(storyText, skillsText string) string {
-	return fmt.Sprintf("skills:\n%s\n\nstory:\n%s", skillsText, storyText)
-}
-
-const skillsText = "Go\nKubernetes\nTerraform"
-
-// TestCompile_HappyPath — all stories tagged correctly.
-func TestCompile_HappyPath(t *testing.T) {
-	ctx := context.Background()
-	story1 := model.RawStory{SourceFile: "accomplishments-0.md", Text: "story1 text"}
-	story2 := model.RawStory{SourceFile: "accomplishments-1.md", Text: "story2 text"}
-
-	stub := llmstub.New(map[string]string{
-		storyPromptKey(story1.Text, skillsText): `["Go","Kubernetes"]`,
-		storyPromptKey(story2.Text, skillsText): `["Terraform"]`,
-	}, 0, "")
-
-	compiler := profilecompiler.New(stub, nil)
-	input := model.CompileInput{
-		SkillsText: skillsText,
-		Stories:    []model.RawStory{story1, story2},
-	}
-	profile, err := compiler.Compile(ctx, input)
-	if err != nil {
-		t.Fatalf("Compile: %v", err)
-	}
-	if profile.PartialTaggingFailure {
-		t.Error("PartialTaggingFailure=true; want false")
-	}
-	if len(profile.Stories) != 2 {
-		t.Fatalf("stories count = %d; want 2", len(profile.Stories))
-	}
-	assertSkills(t, profile.Stories[0], "Go", "Kubernetes")
-	assertSkills(t, profile.Stories[1], "Terraform")
-}
-
-// TestCompile_ManyToMany — skill in multiple stories.
-func TestCompile_ManyToMany(t *testing.T) {
-	ctx := context.Background()
-	story1 := model.RawStory{SourceFile: "accomplishments-0.md", Text: "s1"}
-	story2 := model.RawStory{SourceFile: "accomplishments-1.md", Text: "s2"}
-	story3 := model.RawStory{SourceFile: "accomplishments-2.md", Text: "s3"}
-
-	stub := llmstub.New(map[string]string{
-		storyPromptKey(story1.Text, skillsText): `["Go"]`,
-		storyPromptKey(story2.Text, skillsText): `["Go","Kubernetes"]`,
-		storyPromptKey(story3.Text, skillsText): `["Go","Terraform"]`,
-	}, 0, "")
-
-	compiler := profilecompiler.New(stub, nil)
-	profile, err := compiler.Compile(ctx, model.CompileInput{
-		SkillsText: skillsText,
-		Stories:    []model.RawStory{story1, story2, story3},
-	})
-	if err != nil {
-		t.Fatalf("Compile: %v", err)
-	}
-	// "Go" must appear in all three stories
-	for i, s := range profile.Stories {
-		if !containsSkill(s, "Go") {
-			t.Errorf("story[%d] missing Go; skills=%v", i, s.Skills)
-		}
-	}
-	if len(profile.OrphanedSkills) != 0 {
-		t.Errorf("orphaned_skills=%v; want empty", profile.OrphanedSkills)
-	}
-}
-
-// TestCompile_LLMFailure_SetsTaggingError.
-func TestCompile_LLMFailure_SetsTaggingError(t *testing.T) {
-	ctx := context.Background()
-	story1 := model.RawStory{SourceFile: "accomplishments-0.md", Text: "s1"}
-	story2 := model.RawStory{SourceFile: "accomplishments-1.md", Text: "s2"}
-
-	// Fail on 1st LLM call (story1); story2 succeeds.
-	stub := llmstub.New(map[string]string{
-		storyPromptKey(story2.Text, skillsText): `["Kubernetes"]`,
-	}, 1, "llm unavailable")
-
-	compiler := profilecompiler.New(stub, nil)
-	profile, err := compiler.Compile(ctx, model.CompileInput{
-		SkillsText: skillsText,
-		Stories:    []model.RawStory{story1, story2},
-	})
-	if err != nil {
-		t.Fatalf("Compile returned hard error; want soft partial failure: %v", err)
-	}
-	if !profile.PartialTaggingFailure {
-		t.Error("PartialTaggingFailure=false; want true")
-	}
-	if profile.Stories[0].TaggingError == "" {
-		t.Error("story[0] TaggingError empty; want non-empty")
-	}
-	if profile.Stories[1].TaggingError != "" {
-		t.Errorf("story[1] TaggingError=%q; want empty", profile.Stories[1].TaggingError)
-	}
-}
-
-// TestCompile_FailedStoryExcludedFromOrphans.
-func TestCompile_FailedStoryExcludedFromOrphans(t *testing.T) {
-	ctx := context.Background()
-	// skills: Go, Kubernetes, Terraform
-	// story1 fails → its claimed skills don't count
-	// story2 covers Go only
-	// Kubernetes and Terraform must be orphaned; Go must NOT be orphaned.
-	story1 := model.RawStory{SourceFile: "a.md", Text: "s1"} // will fail
-	story2 := model.RawStory{SourceFile: "b.md", Text: "s2"}
-
-	stub := llmstub.New(map[string]string{
-		storyPromptKey(story2.Text, skillsText): `["Go"]`,
-	}, 1, "timeout")
-
-	compiler := profilecompiler.New(stub, nil)
-	profile, err := compiler.Compile(ctx, model.CompileInput{
-		SkillsText: skillsText,
-		Stories:    []model.RawStory{story1, story2},
-	})
-	if err != nil {
-		t.Fatalf("Compile: %v", err)
-	}
-	orphanSkills := orphanSet(profile.OrphanedSkills)
-	if orphanSkills["Go"] {
-		t.Error("Go in orphaned_skills; it is covered by story2")
-	}
-	if !orphanSkills["Kubernetes"] {
-		t.Error("Kubernetes not in orphaned_skills; story1 failed so it should be orphaned")
-	}
-	if !orphanSkills["Terraform"] {
-		t.Error("Terraform not in orphaned_skills")
-	}
-}
-
-// TestCompile_OrphanedSkills_UncoveredSkill — skill not in any story.
-func TestCompile_OrphanedSkills_UncoveredSkill(t *testing.T) {
-	ctx := context.Background()
-	story := model.RawStory{SourceFile: "a.md", Text: "s"}
-	stub := llmstub.New(map[string]string{
-		storyPromptKey(story.Text, skillsText): `["Go","Kubernetes"]`,
-	}, 0, "")
-
-	compiler := profilecompiler.New(stub, nil)
-	profile, err := compiler.Compile(ctx, model.CompileInput{
-		SkillsText: skillsText,
-		Stories:    []model.RawStory{story},
-	})
-	if err != nil {
-		t.Fatalf("Compile: %v", err)
-	}
-	orphans := orphanSet(profile.OrphanedSkills)
-	if !orphans["Terraform"] {
-		t.Error("Terraform not orphaned; want orphaned")
-	}
-}
-
-// TestCompile_OrphanedSkills_PositiveConverse — covered skill never appears in orphans.
-func TestCompile_OrphanedSkills_PositiveConverse(t *testing.T) {
-	ctx := context.Background()
-	// story1 fails, story2 covers Go. Go must NOT appear in orphaned_skills.
-	story1 := model.RawStory{SourceFile: "a.md", Text: "fail"}
-	story2 := model.RawStory{SourceFile: "b.md", Text: "good"}
-	stub := llmstub.New(map[string]string{
-		storyPromptKey(story2.Text, skillsText): `["Go"]`,
-	}, 1, "err")
-
-	compiler := profilecompiler.New(stub, nil)
-	profile, err := compiler.Compile(ctx, model.CompileInput{
-		SkillsText: skillsText,
-		Stories:    []model.RawStory{story1, story2},
-	})
-	if err != nil {
-		t.Fatalf("Compile: %v", err)
-	}
-	for _, o := range profile.OrphanedSkills {
-		if o.Skill == "Go" {
-			t.Error("Go appears in orphaned_skills despite being covered by story2")
-		}
-	}
-}
-
-// TestCompile_DeferredCarriesForward.
-func TestCompile_DeferredCarriesForward(t *testing.T) {
-	ctx := context.Background()
-	stub := llmstub.New(map[string]string{}, 0, "")
-
-	prior := &model.CompiledProfile{
-		SchemaVersion: "1",
-		CompiledAt:    time.Now(),
-		OrphanedSkills: []model.OrphanedSkill{
-			{Skill: "Kubernetes", Deferred: true},
-		},
-	}
-	compiler := profilecompiler.New(stub, nil)
-	profile, err := compiler.Compile(ctx, model.CompileInput{
-		SkillsText:   "Go\nKubernetes",
-		Stories:      []model.RawStory{{SourceFile: "a.md", Text: "about Go"}},
-		PriorProfile: prior,
-	})
-	if err != nil {
-		t.Fatalf("Compile: %v", err)
-	}
-	orphans := orphanSet(profile.OrphanedSkills)
-	if !orphans["Kubernetes"] {
-		t.Error("Kubernetes not orphaned; should still be orphaned since no story covers it")
-	}
-	for _, o := range profile.OrphanedSkills {
-		if o.Skill == "Kubernetes" && !o.Deferred {
-			t.Error("Kubernetes Deferred=false; want true (carried from prior)")
-		}
-		// Skills not in the prior must NOT inherit Deferred=true.
-		if o.Skill != "Kubernetes" && o.Deferred {
-			t.Errorf("skill %q Deferred=true but was not deferred in prior; want false", o.Skill)
-		}
-	}
-}
-
-// TestCompile_LLMLabelNotInSkillsSource — out-of-set labels discarded.
-func TestCompile_LLMLabelNotInSkillsSource(t *testing.T) {
-	ctx := context.Background()
-	story := model.RawStory{SourceFile: "a.md", Text: "s"}
-	stub := llmstub.New(map[string]string{
-		storyPromptKey(story.Text, skillsText): `["Go","Docker","Kubernetes"]`, // Docker not in skills
-	}, 0, "")
-
-	compiler := profilecompiler.New(stub, nil)
-	profile, err := compiler.Compile(ctx, model.CompileInput{
-		SkillsText: skillsText,
-		Stories:    []model.RawStory{story},
-	})
-	if err != nil {
-		t.Fatalf("Compile: %v", err)
-	}
-	for _, skill := range profile.Stories[0].Skills {
-		if skill == "Docker" {
-			t.Error("Docker in story skills; should have been filtered (not in skills source)")
-		}
-	}
-}
-
-// TestCompile_MalformedLLMResponse — non-JSON sets tagging_error.
-func TestCompile_MalformedLLMResponse(t *testing.T) {
-	ctx := context.Background()
-	story := model.RawStory{SourceFile: "a.md", Text: "s"}
-	stub := llmstub.New(map[string]string{
-		storyPromptKey(story.Text, skillsText): `not json at all`,
-	}, 0, "")
-
-	compiler := profilecompiler.New(stub, nil)
-	profile, err := compiler.Compile(ctx, model.CompileInput{
-		SkillsText: skillsText,
-		Stories:    []model.RawStory{story},
-	})
-	if err != nil {
-		t.Fatalf("Compile hard error: %v", err)
-	}
-	if profile.Stories[0].TaggingError == "" {
-		t.Error("TaggingError empty after malformed LLM response; want non-empty")
-	}
-	if !profile.PartialTaggingFailure {
-		t.Error("PartialTaggingFailure=false after malformed response; want true")
-	}
-}
-
-// helpers
-
-func assertSkills(t *testing.T, s model.Story, want ...string) { //nolint:gocritic // hugeParam: test helper
-	t.Helper()
-	got := map[string]bool{}
-	for _, sk := range s.Skills {
-		got[sk] = true
-	}
-	for _, w := range want {
-		if !got[w] {
-			t.Errorf("story %s missing skill %q; skills=%v", s.ID, w, s.Skills)
-		}
-	}
-	if len(s.Skills) != len(want) {
-		t.Errorf("story %s skills=%v; want exactly %v", s.ID, s.Skills, want)
-	}
-}
-
-func containsSkill(s model.Story, skill string) bool { //nolint:gocritic // hugeParam: test helper
-	for _, sk := range s.Skills {
-		if sk == skill {
-			return true
-		}
-	}
-	return false
+func newCompiler() *profilecompiler.Compiler {
+	return profilecompiler.New(nil)
 }
 
 func orphanSet(orphans []model.OrphanedSkill) map[string]bool {
@@ -309,4 +19,360 @@ func orphanSet(orphans []model.OrphanedSkill) map[string]bool {
 		m[o.Skill] = true
 	}
 	return m
+}
+
+// TestCompile_SkillUnion verifies: effective_skills = prior_skills ∪ input.Skills − remove_skills, sorted.
+func TestCompile_SkillUnion(t *testing.T) {
+	ctx := context.Background()
+	prior := &model.CompiledProfile{
+		SchemaVersion: "1",
+		CompiledAt:    time.Now(),
+		Skills:        []string{"Kubernetes", "Go"},
+	}
+	input := model.AssembleInput{
+		Skills:       []string{"Terraform"},
+		RemoveSkills: []string{"Kubernetes"},
+		Stories:      nil,
+		PriorProfile: prior,
+	}
+
+	profile, err := newCompiler().Compile(ctx, input)
+	if err != nil {
+		t.Fatalf("Compile: %v", err)
+	}
+
+	want := []string{"Go", "Terraform"}
+	if len(profile.Skills) != len(want) {
+		t.Fatalf("skills = %v; want %v", profile.Skills, want)
+	}
+	for i, sk := range want {
+		if profile.Skills[i] != sk {
+			t.Errorf("skills[%d] = %q; want %q", i, profile.Skills[i], sk)
+		}
+	}
+}
+
+// TestCompile_NewStoryAssignment verifies a new story (no ID) gets assigned an ID like "story-001".
+func TestCompile_NewStoryAssignment(t *testing.T) {
+	ctx := context.Background()
+	input := model.AssembleInput{
+		Skills: []string{"Go"},
+		Stories: []model.AssembleStory{
+			{Accomplishment: "shipped the thing", Tags: []string{"Go"}},
+		},
+		PriorProfile: nil,
+	}
+
+	profile, err := newCompiler().Compile(ctx, input)
+	if err != nil {
+		t.Fatalf("Compile: %v", err)
+	}
+	if len(profile.Stories) != 1 {
+		t.Fatalf("stories count = %d; want 1", len(profile.Stories))
+	}
+
+	s := profile.Stories[0]
+	if s.ID != "story-001" {
+		t.Errorf("story ID = %q; want %q", s.ID, "story-001")
+	}
+	if s.Text != "shipped the thing" {
+		t.Errorf("story Text = %q; want %q", s.Text, "shipped the thing")
+	}
+	if len(s.Skills) != 1 || s.Skills[0] != "Go" {
+		t.Errorf("story Skills = %v; want [Go]", s.Skills)
+	}
+}
+
+// TestCompile_ExistingStoryByID verifies text comes from prior and tags are replaced by input.
+func TestCompile_ExistingStoryByID(t *testing.T) {
+	ctx := context.Background()
+	prior := &model.CompiledProfile{
+		SchemaVersion: "1",
+		CompiledAt:    time.Now(),
+		Stories: []model.Story{
+			{ID: "story-001", SourceFile: "acc-0.md", Text: "old text", Skills: []string{"A"}},
+		},
+	}
+	input := model.AssembleInput{
+		Skills: []string{"Go", "K8s"},
+		Stories: []model.AssembleStory{
+			{ID: "story-001", Tags: []string{"Go", "K8s"}},
+		},
+		PriorProfile: prior,
+	}
+
+	profile, err := newCompiler().Compile(ctx, input)
+	if err != nil {
+		t.Fatalf("Compile: %v", err)
+	}
+	if len(profile.Stories) != 1 {
+		t.Fatalf("stories count = %d; want 1", len(profile.Stories))
+	}
+
+	s := profile.Stories[0]
+	if s.ID != "story-001" {
+		t.Errorf("story ID = %q; want story-001", s.ID)
+	}
+	if s.Text != "old text" {
+		t.Errorf("story Text = %q; want %q (text must come from prior)", s.Text, "old text")
+	}
+	if s.SourceFile != "" {
+		t.Errorf("story SourceFile = %q; want %q (Source not set → empty)", s.SourceFile, "")
+	}
+	// Tags replaced by input.
+	wantSkills := map[string]bool{"Go": true, "K8s": true}
+	if len(s.Skills) != len(wantSkills) {
+		t.Errorf("story Skills = %v; want Go+K8s", s.Skills)
+	}
+	for _, sk := range s.Skills {
+		if !wantSkills[sk] {
+			t.Errorf("unexpected skill %q in story", sk)
+		}
+	}
+}
+
+// TestCompile_UnknownIDError verifies that an unknown story ID returns an error and an empty profile.
+func TestCompile_UnknownIDError(t *testing.T) {
+	ctx := context.Background()
+	prior := &model.CompiledProfile{
+		SchemaVersion: "1",
+		CompiledAt:    time.Now(),
+		Stories: []model.Story{
+			{ID: "story-001", Text: "first story"},
+		},
+	}
+	input := model.AssembleInput{
+		Skills: []string{"Go"},
+		Stories: []model.AssembleStory{
+			{ID: "story-999", Tags: []string{"Go"}},
+		},
+		PriorProfile: prior,
+	}
+
+	profile, err := newCompiler().Compile(ctx, input)
+	if err == nil {
+		t.Fatal("Compile returned nil error; want error for unknown story ID")
+	}
+	// Result must be the zero value.
+	if profile.SchemaVersion != "" || len(profile.Stories) != 0 {
+		t.Errorf("profile must be zero value on error; got %+v", profile)
+	}
+}
+
+// TestCompile_NoPriorProfileWithID verifies that providing an ID with no prior profile returns an error.
+func TestCompile_NoPriorProfileWithID(t *testing.T) {
+	ctx := context.Background()
+	input := model.AssembleInput{
+		Skills: []string{"Go"},
+		Stories: []model.AssembleStory{
+			{ID: "story-001", Tags: []string{"Go"}},
+		},
+		PriorProfile: nil,
+	}
+
+	profile, err := newCompiler().Compile(ctx, input)
+	if err == nil {
+		t.Fatal("Compile returned nil error; want error for ID with no prior profile")
+	}
+	if profile.SchemaVersion != "" || len(profile.Stories) != 0 {
+		t.Errorf("profile must be zero value on error; got %+v", profile)
+	}
+}
+
+// TestCompile_OrphanedSkills verifies skills with no story coverage appear in OrphanedSkills.
+func TestCompile_OrphanedSkills(t *testing.T) {
+	ctx := context.Background()
+	input := model.AssembleInput{
+		Skills: []string{"Go", "Kubernetes", "Terraform"},
+		Stories: []model.AssembleStory{
+			{Accomplishment: "did Go things", Tags: []string{"Go"}},
+		},
+		PriorProfile: nil,
+	}
+
+	profile, err := newCompiler().Compile(ctx, input)
+	if err != nil {
+		t.Fatalf("Compile: %v", err)
+	}
+
+	orphans := orphanSet(profile.OrphanedSkills)
+	if orphans["Go"] {
+		t.Error("Go in OrphanedSkills; it is covered by a story")
+	}
+	if !orphans["Kubernetes"] {
+		t.Error("Kubernetes not in OrphanedSkills; want it orphaned")
+	}
+	if !orphans["Terraform"] {
+		t.Error("Terraform not in OrphanedSkills; want it orphaned")
+	}
+}
+
+// TestCompile_NoOrphans verifies that all covered skills produce an empty OrphanedSkills.
+func TestCompile_NoOrphans(t *testing.T) {
+	ctx := context.Background()
+	input := model.AssembleInput{
+		Skills: []string{"Go", "Kubernetes"},
+		Stories: []model.AssembleStory{
+			{Accomplishment: "story one", Tags: []string{"Go", "Kubernetes"}},
+		},
+		PriorProfile: nil,
+	}
+
+	profile, err := newCompiler().Compile(ctx, input)
+	if err != nil {
+		t.Fatalf("Compile: %v", err)
+	}
+	if len(profile.OrphanedSkills) != 0 {
+		t.Errorf("OrphanedSkills = %v; want empty", profile.OrphanedSkills)
+	}
+}
+
+// TestCompile_DeferredCarryForward verifies orphaned skills keep their Deferred flag from the prior.
+// Also checks the negative: a non-deferred prior orphan stays non-deferred.
+func TestCompile_DeferredCarryForward(t *testing.T) {
+	ctx := context.Background()
+	prior := &model.CompiledProfile{
+		SchemaVersion: "1",
+		CompiledAt:    time.Now(),
+		OrphanedSkills: []model.OrphanedSkill{
+			{Skill: "Kubernetes", Deferred: true},
+			{Skill: "Terraform", Deferred: false},
+		},
+	}
+	// Include both skills so they remain in effective set.
+	input := model.AssembleInput{
+		Skills: []string{"Go", "Kubernetes", "Terraform"},
+		Stories: []model.AssembleStory{
+			{Accomplishment: "Go work", Tags: []string{"Go"}},
+		},
+		PriorProfile: prior,
+	}
+
+	profile, err := newCompiler().Compile(ctx, input)
+	if err != nil {
+		t.Fatalf("Compile: %v", err)
+	}
+
+	// Build a map from skill name to OrphanedSkill for easy lookup.
+	orphanDetails := map[string]model.OrphanedSkill{}
+	for _, o := range profile.OrphanedSkills {
+		orphanDetails[o.Skill] = o
+	}
+
+	k8s, ok := orphanDetails["Kubernetes"]
+	if !ok {
+		t.Fatal("Kubernetes not in OrphanedSkills; want it present")
+	}
+	if !k8s.Deferred {
+		t.Error("Kubernetes Deferred=false; want true (carried from prior)")
+	}
+
+	tf, ok := orphanDetails["Terraform"]
+	if !ok {
+		t.Fatal("Terraform not in OrphanedSkills; want it present")
+	}
+	if tf.Deferred {
+		t.Error("Terraform Deferred=true; want false (not deferred in prior)")
+	}
+}
+
+// TestCompile_NewStoryIDSequencing verifies that new stories get IDs continuing from the prior count.
+func TestCompile_NewStoryIDSequencing(t *testing.T) {
+	ctx := context.Background()
+	prior := &model.CompiledProfile{
+		SchemaVersion: "1",
+		CompiledAt:    time.Now(),
+		Stories: []model.Story{
+			{ID: "story-001", Text: "first"},
+			{ID: "story-002", Text: "second"},
+		},
+	}
+	input := model.AssembleInput{
+		Skills: []string{"Go"},
+		Stories: []model.AssembleStory{
+			{Accomplishment: "third story", Tags: []string{"Go"}},
+			{Accomplishment: "fourth story", Tags: []string{"Go"}},
+		},
+		PriorProfile: prior,
+	}
+
+	profile, err := newCompiler().Compile(ctx, input)
+	if err != nil {
+		t.Fatalf("Compile: %v", err)
+	}
+	if len(profile.Stories) != 2 {
+		t.Fatalf("stories count = %d; want 2", len(profile.Stories))
+	}
+	if profile.Stories[0].ID != "story-003" {
+		t.Errorf("stories[0].ID = %q; want story-003", profile.Stories[0].ID)
+	}
+	if profile.Stories[1].ID != "story-004" {
+		t.Errorf("stories[1].ID = %q; want story-004", profile.Stories[1].ID)
+	}
+}
+
+// TestCompile_RemoveSkills verifies a skill explicitly removed via RemoveSkills is absent from the
+// profile skill roster but does not strip existing story tags (story content is immutable).
+func TestCompile_RemoveSkills(t *testing.T) {
+	ctx := context.Background()
+	prior := &model.CompiledProfile{
+		SchemaVersion: "1",
+		CompiledAt:    time.Now(),
+		Skills:        []string{"Go", "Java", "Kubernetes"},
+		Stories:       []model.Story{{ID: "story-001", Text: "built a Java service", Skills: []string{"Java"}}},
+	}
+	input := model.AssembleInput{
+		RemoveSkills: []string{"Java"},
+		Stories:      []model.AssembleStory{{ID: "story-001", Tags: []string{"Java"}}},
+		PriorProfile: prior,
+	}
+
+	profile, err := newCompiler().Compile(ctx, input)
+	if err != nil {
+		t.Fatalf("Compile: %v", err)
+	}
+
+	for _, sk := range profile.Skills {
+		if sk == "Java" {
+			t.Error("Java still in skills after explicit removal")
+		}
+	}
+	if len(profile.Stories) == 0 || len(profile.Stories[0].Skills) == 0 || profile.Stories[0].Skills[0] != "Java" {
+		t.Error("story-001 must retain its Java tag even after Java is removed from profile skills")
+	}
+}
+
+// TestCompile_SourceFieldCopied verifies AssembleStory.Source is copied to Story.SourceFile.
+func TestCompile_SourceFieldCopied(t *testing.T) {
+	ctx := context.Background()
+
+	cases := []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{"onboard", "onboard", "onboard"},
+		{"created_story_id", "2", "2"},
+		{"empty", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			input := model.AssembleInput{
+				Skills: []string{"Go"},
+				Stories: []model.AssembleStory{
+					{Accomplishment: "did the thing", Tags: []string{"Go"}, Source: tc.source},
+				},
+			}
+			profile, err := newCompiler().Compile(ctx, input)
+			if err != nil {
+				t.Fatalf("Compile: %v", err)
+			}
+			if len(profile.Stories) != 1 {
+				t.Fatalf("stories count = %d; want 1", len(profile.Stories))
+			}
+			if profile.Stories[0].SourceFile != tc.want {
+				t.Errorf("SourceFile = %q; want %q", profile.Stories[0].SourceFile, tc.want)
+			}
+		})
+	}
 }

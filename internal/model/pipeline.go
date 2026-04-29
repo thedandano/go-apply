@@ -1,7 +1,5 @@
 package model
 
-import "time"
-
 // No score threshold constants here — values come from AppDefaults injected at runtime.
 
 type StepStartedEvent struct {
@@ -30,33 +28,4 @@ const (
 type RiskWarning struct {
 	Severity string `json:"severity"`
 	Message  string `json:"message"`
-}
-
-type PipelineResult struct {
-	Status  string `json:"status"`
-	Error   string `json:"error,omitempty"`
-	Message string `json:"message,omitempty"`
-	JDText  string `json:"jd_text,omitempty"` // raw JD text; returned so Claude can reason over it in MCP mode
-
-	JD         JDData                 `json:"jd"`
-	Scores     map[string]ScoreResult `json:"scores"`
-	BestScore  float64                `json:"best_score"`
-	BestResume string                 `json:"best_resume"`
-	Keywords   struct {
-		Required  []string `json:"required"`
-		Preferred []string `json:"preferred"`
-	} `json:"keywords"`
-
-	Cascade     *TailorResult     `json:"cascade,omitempty"`
-	CoverLetter CoverLetterResult `json:"cover_letter"`
-	Warnings    []RiskWarning     `json:"warnings"`
-
-	StartTime time.Time `json:"start_time"`
-	EndTime   time.Time `json:"end_time"`
-}
-
-func NewPipelineResult() *PipelineResult {
-	return &PipelineResult{
-		Scores: make(map[string]ScoreResult),
-	}
 }

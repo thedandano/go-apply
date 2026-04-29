@@ -49,30 +49,16 @@ func LogDir() string {
 	return filepath.Join(StateDir(), "logs")
 }
 
-type LLMProviderConfig struct {
-	BaseURL string `yaml:"base_url"`
-	Model   string `yaml:"model"`
-	APIKey  string `yaml:"api_key"`
-}
-
 // Config is the top-level application configuration.
-//
-// Example config.yaml:
-//
-//	orchestrator:
-//	  base_url: https://api.anthropic.com/v1
-//	  model: claude-sonnet-4-6
-//	  api_key: sk-ant-...
 type Config struct {
-	Orchestrator      LLMProviderConfig `yaml:"orchestrator"`
-	LogLevel          string            `yaml:"log_level"`
-	Verbose           bool              `yaml:"verbose"`
-	DefaultSeniority  string            `yaml:"default_seniority"`
-	UserName          string            `yaml:"user_name"`
-	Occupation        string            `yaml:"occupation"`
-	Location          string            `yaml:"location"`
-	LinkedInURL       string            `yaml:"linkedin_url"`
-	YearsOfExperience float64           `yaml:"years_of_experience"`
+	LogLevel          string  `yaml:"log_level"`
+	Verbose           bool    `yaml:"verbose"`
+	DefaultSeniority  string  `yaml:"default_seniority"`
+	UserName          string  `yaml:"user_name"`
+	Occupation        string  `yaml:"occupation"`
+	Location          string  `yaml:"location"`
+	LinkedInURL       string  `yaml:"linkedin_url"`
+	YearsOfExperience float64 `yaml:"years_of_experience"`
 }
 
 func (c *Config) ResolveLogLevel() slog.Level {
@@ -91,7 +77,6 @@ func (c *Config) ResolveLogLevel() slog.Level {
 // Load reads config.yaml from the XDG config directory.
 // Returns an error if the file does not exist or cannot be parsed —
 // a missing config file is not a valid state; use `go-apply init` to create one.
-// The GO_APPLY_API_KEY environment variable overrides the orchestrator API key.
 func Load() (*Config, error) {
 	cfgFile := filepath.Join(Dir(), "config.yaml")
 	slog.Debug("loading config", "path", cfgFile)
@@ -113,34 +98,14 @@ func Load() (*Config, error) {
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("parse config %s: %w", cfgFile, err)
 	}
-	slog.Debug("config loaded", "path", cfgFile, "log_level", cfg.LogLevel, "model", cfg.Orchestrator.Model)
-
-	if key := os.Getenv("GO_APPLY_API_KEY"); key != "" {
-		slog.Debug("orchestrator API key overridden by GO_APPLY_API_KEY env var")
-		cfg.Orchestrator.APIKey = key
-	}
+	slog.Debug("config loaded", "path", cfgFile, "log_level", cfg.LogLevel)
 
 	return cfg, nil
-}
-
-// ValidateCLI returns an error if the orchestrator config required for CLI/TUI
-// mode is incomplete. MCP mode does not call this — the MCP host is the orchestrator.
-func (c *Config) ValidateCLI() error {
-	if strings.TrimSpace(c.Orchestrator.BaseURL) == "" {
-		return fmt.Errorf("orchestrator.base_url is not set — edit %s or set GO_APPLY_API_KEY", filepath.Join(Dir(), "config.yaml"))
-	}
-	if strings.TrimSpace(c.Orchestrator.Model) == "" {
-		return fmt.Errorf("orchestrator.model is not set — edit %s", filepath.Join(Dir(), "config.yaml"))
-	}
-	return nil
 }
 
 // AllKeys returns all user-facing dot-notation config keys in canonical order.
 func AllKeys() []string {
 	return []string{
-		"orchestrator.base_url",
-		"orchestrator.model",
-		"orchestrator.api_key",
 		"log_level",
 		"verbose",
 		"user_name",
@@ -152,18 +117,8 @@ func AllKeys() []string {
 }
 
 // MCPKeys returns the config keys relevant in MCP mode.
-// Orchestrator keys are excluded: in MCP mode Claude (the MCP host) is the orchestrator
-// and no separately-configured LLM is needed for reasoning tasks.
-// Derived from AllKeys() by filtering orchestrator.* so new keys are automatically included.
 func MCPKeys() []string {
-	all := AllKeys()
-	out := make([]string, 0, len(all))
-	for _, k := range all {
-		if !strings.HasPrefix(k, "orchestrator.") {
-			out = append(out, k)
-		}
-	}
-	return out
+	return AllKeys()
 }
 
 // IsAPIKey reports whether a dot-notation config key holds an API key value.
@@ -174,12 +129,6 @@ func IsAPIKey(key string) bool {
 // SetField sets a config field by dot-notation key, parsing the value string to the correct type.
 func (c *Config) SetField(key, value string) error {
 	switch key {
-	case "orchestrator.base_url":
-		c.Orchestrator.BaseURL = value
-	case "orchestrator.model":
-		c.Orchestrator.Model = value
-	case "orchestrator.api_key":
-		c.Orchestrator.APIKey = value
 	case "log_level":
 		switch strings.ToLower(value) {
 		case "debug", "info", "warn", "error", "":
@@ -216,12 +165,6 @@ func (c *Config) SetField(key, value string) error {
 // GetField returns the string representation of a config field by dot-notation key.
 func (c *Config) GetField(key string) (string, error) {
 	switch key {
-	case "orchestrator.base_url":
-		return c.Orchestrator.BaseURL, nil
-	case "orchestrator.model":
-		return c.Orchestrator.Model, nil
-	case "orchestrator.api_key":
-		return c.Orchestrator.APIKey, nil
 	case "log_level":
 		return c.LogLevel, nil
 	case "verbose":
