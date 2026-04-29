@@ -60,7 +60,7 @@ func NewServer() *server.MCPServer {
 
 	srv.AddTool(
 		mcp.NewTool("update_config",
-			mcp.WithDescription("Set a go-apply config field by dot-notation key (e.g. user_name, log_level, verbose). Orchestrator keys are not used in MCP mode."),
+			mcp.WithDescription("Set a go-apply config field by dot-notation key (e.g. user_name, log_level, verbose)."),
 			mcp.WithString("key", mcp.Description("Dot-notation config key"), mcp.Required()),
 			mcp.WithString("value", mcp.Description("New value for the key"), mcp.Required()),
 		),

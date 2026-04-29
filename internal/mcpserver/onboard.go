@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 
@@ -185,9 +184,6 @@ func HandleUpdateConfig(ctx context.Context, req *mcp.CallToolRequest, cfg *conf
 	if key == "" {
 		return errorResult("key is required")
 	}
-	if strings.HasPrefix(key, "orchestrator.") {
-		return errorResult("orchestrator config is not used in MCP mode: Claude is the orchestrator. To configure for CLI/TUI use, edit ~/.config/go-apply/config.yaml directly.")
-	}
 	if err := cfg.SetField(key, value); err != nil {
 		return errorResult(err.Error())
 	}
@@ -205,16 +201,12 @@ func HandleUpdateConfig(ctx context.Context, req *mcp.CallToolRequest, cfg *conf
 }
 
 // HandleGetConfigWith renders the config as redacted JSON. Exported for testing.
-// Only MCP-relevant keys are included; orchestrator keys are excluded because
-// in MCP mode Claude is the orchestrator.
 func HandleGetConfigWith(cfg *config.Config) *mcp.CallToolResult {
 	return HandleGetConfigWithProfileAndFiles(cfg, config.DataDir())
 }
 
 // HandleGetConfigWithProfileAndFiles renders the config plus profile status as redacted JSON.
 // This is the full implementation; HandleGetConfigWith is a convenience wrapper.
-// Only MCP-relevant keys are included; orchestrator keys are excluded because
-// in MCP mode Claude is the orchestrator.
 // Exported for testing.
 func HandleGetConfigWithProfileAndFiles(cfg *config.Config, dataDir string) *mcp.CallToolResult {
 	slog.Debug("mcp tool invoked", slog.String("tool", "get_config"))
