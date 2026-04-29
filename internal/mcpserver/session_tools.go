@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -390,6 +392,7 @@ func HandleFinalizeWithConfig(ctx context.Context, req *mcp.CallToolRequest, dep
 				RawText:     sess.JDText,
 				JD:          sess.JD,
 				CoverLetter: coverLetter,
+				ResumeText:  sess.TailoredText,
 			}
 			if bestScore, ok := sess.ScoreResult.Scores[sess.ScoreResult.BestLabel]; ok {
 				rec.Score = &bestScore
@@ -398,6 +401,48 @@ func HandleFinalizeWithConfig(ctx context.Context, req *mcp.CallToolRequest, dep
 			if putErr := deps.AppRepo.Put(rec); putErr != nil {
 				slog.WarnContext(ctx, "finalize: failed to persist record", "session_id", sessionID, "error", putErr)
 			}
+		}
+	}
+
+	// Generate PDF from tailored sections when available (best-effort; does not block finalize).
+	var pdfPath, pdfLink string
+	if sess.TailoredSections != nil {
+		if deps == nil {
+			_, liveDeps, err := loadDeps()
+			if err != nil {
+				slog.WarnContext(ctx, "finalize: dependency load failed; skipping PDF",
+					slog.String("session_id", sessionID), slog.Any("error", err))
+			} else {
+				deps = &liveDeps
+			}
+		}
+		if deps != nil && deps.PDFRenderer != nil {
+			pdfBytes, renderErr := deps.PDFRenderer.RenderPDF(sess.TailoredSections)
+			if renderErr != nil {
+				slog.WarnContext(ctx, "finalize: PDF render failed; skipping",
+					slog.String("session_id", sessionID), slog.Any("error", renderErr))
+			} else {
+				appsDir := filepath.Join(config.DataDir(), "applications")
+				if mkErr := os.MkdirAll(appsDir, 0o700); mkErr != nil {
+					slog.WarnContext(ctx, "finalize: could not create applications dir",
+						slog.String("session_id", sessionID), slog.Any("error", mkErr))
+				} else {
+					pdfPath = filepath.Join(appsDir, sessionID+".pdf")
+					// #nosec G304 -- path is constructed from config.DataDir() and session ID
+					if writeErr := os.WriteFile(pdfPath, pdfBytes, 0o600); writeErr != nil {
+						slog.WarnContext(ctx, "finalize: PDF write failed",
+							slog.String("session_id", sessionID), slog.Any("error", writeErr))
+						pdfPath = ""
+					}
+				}
+			}
+		}
+		if pdfPath != "" {
+			title := sess.ScoreResult.BestLabel
+			if sess.JD.Title != "" && sess.JD.Company != "" {
+				title = sess.JD.Title + " @ " + sess.JD.Company
+			}
+			pdfLink = fmt.Sprintf("[%s](file://%s)", title, pdfPath)
 		}
 	}
 
@@ -421,12 +466,16 @@ func HandleFinalizeWithConfig(ctx context.Context, req *mcp.CallToolRequest, dep
 		BestResume  string          `json:"best_resume"`
 		BestScore   float64         `json:"best_score"`
 		CoverLetter string          `json:"cover_letter,omitempty"`
+		PDFPath     string          `json:"pdf_path,omitempty"`
+		PDFLink     string          `json:"pdf_link,omitempty"`
 		Summary     finalizeSummary `json:"summary"`
 	}
 	resultData := finalizeData{
 		BestResume:  sess.ScoreResult.BestLabel,
 		BestScore:   sess.ScoreResult.BestScore,
 		CoverLetter: coverLetter,
+		PDFPath:     pdfPath,
+		PDFLink:     pdfLink,
 		Summary: finalizeSummary{
 			KeywordsRequired:  len(sess.JD.Required),
 			KeywordsPreferred: len(sess.JD.Preferred),
