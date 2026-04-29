@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -22,8 +23,11 @@ func TestRunCommandRemoved(t *testing.T) {
 	tmpDir := t.TempDir()
 	binaryPath := filepath.Join(tmpDir, "go-apply")
 
+	_, thisFile, _, _ := runtime.Caller(0)
+	projectRoot := filepath.Join(filepath.Dir(thisFile), "..", "..")
+
 	buildCmd := exec.Command("go", "build", "-o", binaryPath, "./cmd/go-apply") //nolint:noctx
-	buildCmd.Dir = "/Users/dandano/workplace/go-apply"
+	buildCmd.Dir = projectRoot
 	buildOutput := new(bytes.Buffer)
 	buildCmd.Stderr = buildOutput
 
