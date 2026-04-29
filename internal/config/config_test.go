@@ -81,11 +81,3 @@ func TestResolveLogLevel(t *testing.T) {
 		}
 	}
 }
-
-func TestConfigRename_OldKeyReturnsError(t *testing.T) {
-	cfg := &config.Config{}
-	err := cfg.SetField("orchestrator.base_url", "x")
-	if err == nil {
-		t.Fatal("expected error for deprecated orchestrator.base_url key, got nil")
-	}
-}

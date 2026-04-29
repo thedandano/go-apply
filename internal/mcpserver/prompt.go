@@ -30,7 +30,6 @@ You handle reasoning: extract keywords from JD text, interpret scores, drive tai
 
 ### Step 1 — Verify profile
 Call get_config.
-Do NOT ask the user for orchestrator config — it is irrelevant in MCP mode.
 Check profile.onboarded: if true, the user is already onboarded — do NOT call onboard_user unless the user explicitly asks to add or update their resume, skills, or accomplishments.
 Only call onboard_user when profile.onboarded is false.
 
@@ -103,8 +102,6 @@ This persists the application record and closes the session.
 
 ## Config — profile fields used in MCP mode
 - user_name, occupation, location, linkedin_url, years_of_experience: used in cover letters
-
-Orchestrator config is NOT used in MCP mode — Claude is the orchestrator.
 
 ## Tailoring tiers — signal quality (not availability gates)
 Both T1 and T2 accept your inputs directly — they do not read from the profile.
