@@ -1,6 +1,6 @@
 # go-apply
 
-AI-powered job application CLI. Scores your resume against job postings, tailors it, and generates cover letters.
+MCP server that helps you land job interviews — honestly. Scores your resume against job postings, tailors it with a two-tier cascade, and builds a compiled profile of your skills and stories for your AI agent to use.
 
 [![CI](https://github.com/thedandano/go-apply/actions/workflows/ci.yml/badge.svg)](https://github.com/thedandano/go-apply/actions/workflows/ci.yml)
 [![Latest Release](https://img.shields.io/github/v/release/thedandano/go-apply)](https://github.com/thedandano/go-apply/releases/latest)
@@ -12,14 +12,25 @@ AI-powered job application CLI. Scores your resume against job postings, tailors
 [![Works with OpenClaw](https://img.shields.io/badge/Works%20with-OpenClaw-orange)](https://github.com/openclaw)
 [![Works with Hermes](https://img.shields.io/badge/Works%20with-Hermes-teal)](https://github.com/hermes-agent)
 
-## Modes
+## How it works
 
-| Mode | Command | Use case |
-|------|---------|----------|
-| MCP Server | `go-apply serve` | Claude Code, Hermes, Openclaw — full orchestrated experience with automatic profile use |
-| Headless CLI | `go-apply run --url <url>` | For agents without MCP support |
+go-apply runs as an MCP server. Your AI agent (Claude Code, Hermes, Openclaw) is the orchestrator — it calls the tools, extracts keywords from job descriptions, tags your stories with skills, and drives the full workflow. go-apply provides the storage, scoring, and tailoring.
 
-MCP is the recommended path. The host agent drives the full tool flow and your onboarded profile is used automatically. For agents without MCP, use `go-apply run` directly — see [Commands](#commands).
+```
+Agent (Claude / Hermes / Openclaw)
+  │
+  ├─ onboard_user        Store resume, skills, accomplishments
+  ├─ add_resume          Add or replace a resume variant
+  ├─ compile_profile     Assemble profile from agent-tagged skills + stories
+  ├─ create_story        Save an SBI accomplishment story, trigger recompile
+  │
+  ├─ load_jd             Fetch or accept a job description
+  ├─ submit_keywords     Score resumes against extracted keywords
+  ├─ submit_tailor_t1    Keyword injection into skills section
+  ├─ submit_tailor_t2    Bullet rewriting in experience section
+  ├─ preview_ats_extraction  Show resume text as an ATS would see it
+  └─ finalize            Persist application record
+```
 
 ## Quick Start
 
@@ -35,8 +46,9 @@ MCP is the recommended path. The host agent drives the full tool flow and your o
    go-apply setup mcp --agent openclaw  # Openclaw
    ```
 
-3. **Ask your agent to onboard and apply** — the agent drives the full flow via MCP tools:
+3. **Ask your agent to onboard and apply**
    - *"Onboard my resume at ~/docs/resume.md"*
+   - *"Compile my profile from the accomplishments I just gave you"*
    - *"Score my resume against this job posting and tailor it"*
 
 ## Installation
@@ -73,20 +85,18 @@ curl -sSfL https://raw.githubusercontent.com/thedandano/go-apply/main/scripts/in
 Config file: `~/.config/go-apply/config.yaml`
 
 ```yaml
-# CLI mode only — not needed for MCP (the host agent is the orchestrator)
-orchestrator:
-  base_url: https://api.anthropic.com/v1
-  model: claude-sonnet-4-6
-  api_key: sk-ant-...        # or set GO_APPLY_API_KEY env var
-
 years_of_experience: 7
 default_seniority: senior
 user_name: "Your Name"
 occupation: "Software Engineer"
 location: "San Francisco, CA"
+log_level: info    # debug | info | warn | error
+verbose: false     # true = full payloads in logs
 ```
 
-> All tunable scoring constants (weights, thresholds, limits) live in `internal/config/defaults.json`.
+No API key is needed for MCP mode — the host agent is the LLM. Scoring constants (weights, thresholds) live in `internal/config/defaults.json`.
+
+> **Migration from older versions**: `orchestrator.*` keys in `config.yaml` are no longer used; you can remove them. The headless `go-apply run` command was removed in v2.
 
 ## Logging
 
@@ -101,22 +111,9 @@ go-apply logs --follow
 
 # Show last 200 lines
 go-apply logs --lines 200
-
-# Tail the raw log file with grep
-tail -f ~/.local/state/go-apply/logs/go-apply-$(date +%Y-%m-%d).log | grep ERROR
 ```
 
-### Configuration
-
-Log level and verbose mode are set in `~/.config/go-apply/config.yaml`:
-
-```yaml
-log_level: debug   # debug | info | warn | error (default: info)
-verbose: true      # true = full request/response payloads in logs; false = truncated at 2 KB
-```
-
-Set them without editing the file directly:
-
+Log level and verbose mode:
 ```bash
 go-apply config set log_level debug
 go-apply config set verbose true
@@ -124,7 +121,7 @@ go-apply config set verbose true
 
 ### MCP server debug logging
 
-To enable debug logs when running as an MCP server, set `log_level` in the config file, or pass it via the `env` block in Claude Code's `settings.json` (config file is read on startup):
+Set `log_level` in the config file, or pass it via the `env` block in your agent's settings. Example for Claude Code:
 
 ```json
 {
@@ -137,153 +134,101 @@ To enable debug logs when running as an MCP server, set `log_level` in the confi
 }
 ```
 
-Run `go-apply config set log_level debug` once and every invocation — CLI and MCP — picks it up.
+## Profile workflow
 
-## Commands
+The profile is the source of truth for who you are. Build it once; your agent uses it on every job application.
 
-### `go-apply run`
+### 1. Onboard
 
-Run the full pipeline against a job description. Fetches (or accepts) the JD, scores all resumes in `~/.local/share/go-apply/inputs/`, tailors resumes with a two-tier cascade (T1 keyword injection + T2 bullet rewriting), and generates a cover letter.
-
-```bash
-# From a URL (fetches and caches the JD)
-go-apply run --url https://example.com/jobs/123
-
-# From raw text (useful in scripts or when the page is paywalled)
-go-apply run --text "We are hiring a senior Go engineer..."
-
-# Specify application channel
-go-apply run --url <url> --channel REFERRAL   # COLD (default), REFERRAL, RECRUITER
+```
+Agent calls: onboard_user(resume_content, resume_label, skills, accomplishments)
 ```
 
-**Output** (stdout, JSON):
+Stores your resume(s), skills reference, and accomplishments text. Returns `needs_compile: true`.
+
+### 2. Compile profile
+
+```
+Agent calls: compile_profile(skills, stories)
+```
+
+The agent tags your accomplishments with skill labels before calling this tool. `compile_profile` assembles the compiled profile from the agent-provided `skills` array and `stories` array (each story has an `accomplishment` string and `tags`). Returns a rich diff: coverage gained, skills added/removed, orphaned skills (skills with no supporting story).
+
+### 3. Create stories (for orphaned skills)
+
+```
+Agent calls: create_story(skill, story_type, job_title, situation, behavior, impact)
+```
+
+Saves an SBI (Situation-Behavior-Impact) story to `accomplishments.json`. Returns `needs_compile: true` — the agent calls `compile_profile` again to pick up the new story.
+
+### Accomplishments storage
+
+Accomplishments are stored in `~/.local/share/go-apply/accomplishments.json`:
+
 ```json
 {
-  "status": "success",
-  "jd": { "title": "Senior Go Engineer", "company": "Acme", "required": ["go", "kubernetes"], ... },
-  "scores": { "my-resume": { "breakdown": { "keyword_match": 40.5, ... }, ... } },
-  "best_score": 82.3,
-  "best_resume": "my-resume",
-  "keywords": { "required": ["go", "kubernetes"], "preferred": ["docker"] },
-  "cover_letter": { "text": "...", "channel": "COLD", "word_count": 180 },
-  "start_time": "...", "end_time": "..."
+  "schema_version": "1",
+  "onboard_text": "Raw text from onboarding...",
+  "created_stories": [
+    { "id": "0", "skill": "Go", "type": "technical", "text": "..." },
+    { "id": "1", "skill": "Kubernetes", "type": "project", "text": "..." }
+  ]
 }
 ```
 
-Pipeline events (step-started/completed/failed) are written as JSON lines to stderr.
+Stories get sequential integer IDs (`"0"`, `"1"`, …). The compiled profile at `~/.local/share/go-apply/profile-compiled.json` is derived from this file plus the skills list.
 
-**Flags:**
+## Job application workflow
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--url` | — | URL of the job posting |
-| `--text` | — | Raw JD text (mutually exclusive with `--url`) |
-| `--headless` | `true` | JSON output mode |
-| `--channel` | `COLD` | Application channel: `COLD`, `REFERRAL`, `RECRUITER` |
-| `--accomplishments` | — | Path to accomplishments doc; **required for tailoring** — omitting it skips T1 and T2 entirely |
+Once your profile is compiled, the agent can score and tailor any job posting:
 
-## MCP Server (Claude Code, Hermes, Openclaw)
-
-Add to Claude Code `settings.json`:
-```json
-{
-  "mcpServers": {
-    "go-apply": { "command": "go-apply", "args": ["serve"] }
-  }
-}
+```
+load_jd → submit_keywords → submit_tailor_t1 → submit_tailor_t2 → finalize
+                           ↘ preview_ats_extraction (any post-scored state)
 ```
 
-Available tools: `onboard_user`, `add_resume`, `get_config`, `update_config`, `load_jd`, `submit_keywords`, `submit_tailor_t1`, `submit_tailor_t2`, `finalize`
-
-### MCP setup command
-
-Instead of editing config files manually, use the setup command:
-
-```bash
-# Register with Claude Code
-go-apply setup mcp --agent claude
-
-# Register with OpenClaw
-go-apply setup mcp --agent openclaw
-
-# Register with Hermes
-go-apply setup mcp --agent hermes
-
-# Register with all known agents at once
-go-apply setup mcp --agent all
-```
-
-To unregister:
-```bash
-go-apply setup mcp --agent claude --remove
-go-apply setup mcp --agent all --remove
-```
-
-To overwrite an existing registration:
-```bash
-go-apply setup mcp --agent claude --override   # or --force (alias)
-```
-
-The command is idempotent — running it again without `--override` reports "already registered" and makes no changes. On a TTY you will be prompted to confirm the overwrite.
+The agent receives `extraction_protocol` in the `load_jd` response — it extracts keywords from the JD text itself and calls `submit_keywords` with structured JD data.
 
 ## CLI Reference
 
-### Global (persistent) flags
-
-These apply to every subcommand and must come before the subcommand name.
-
-There are no persistent global flags. Log level and verbose mode are configured via `go-apply config set` (see [Logging](#logging)).
-
-### `go-apply run`
-
-Run the full apply pipeline against a job description.
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--url <url>` | — | URL of the job posting to fetch |
-| `--text <jd>` | — | Raw job description text (mutually exclusive with `--url`) |
-| `--headless` | `true` | JSON output mode |
-| `--channel <channel>` | `COLD` | Application channel: `COLD`, `REFERRAL`, `RECRUITER` |
-| `--accomplishments <path>` | — | Path to accomplishments doc; **required for tailoring** — omitting it skips T1 and T2 entirely |
-
 ### `go-apply serve`
 
-Start the MCP stdio server for Claude Code integration. No flags.
+Start the MCP stdio server. No flags. This is the primary way to use go-apply.
 
 ### `go-apply onboard`
 
-Store resumes, skills, and accomplishments in the profile database.
+Store resumes, skills, and accomplishments in the profile database directly from the CLI.
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--resume <path>` | — | Path to a resume file (repeatable; at least one required) |
 | `--skills <path>` | — | Path to skills reference file (optional) |
 | `--accomplishments <path>` | — | Path to accomplishments file (optional) |
-| `--reset` | `false` | Delete profile database and `inputs/` directory |
-| `--yes` | `false` | Skip confirmation prompt for `--reset` (required for non-interactive use) |
+| `--reset` | `false` | Delete profile database: inputs/, skills.md, accomplishments.json |
+| `--yes` | `false` | Skip confirmation prompt for `--reset` |
 
 ### `go-apply config`
 
-Manage go-apply configuration. Subcommands:
+Manage go-apply configuration.
 
 | Subcommand | Usage | Description |
 |------------|-------|-------------|
 | `set` | `go-apply config set <key> <value>` | Set a config field by dot-notation key |
-| `get` | `go-apply config get <key>` | Get a config field value by dot-notation key |
+| `get` | `go-apply config get <key>` | Get a config field value |
 | `show` | `go-apply config show` | Show all config fields (API keys redacted) |
-
-Config keys use dot notation (e.g. `llm.base_url`, `embedder.model`, `user_name`, `log_level`).
 
 ### `go-apply setup mcp`
 
-Register or unregister go-apply as an MCP server in an AI agent's config.
+Register or unregister go-apply as an MCP server in an agent's config.
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--agent <name>` | — | Agent to configure: `claude`, `openclaw`, `hermes`, `all` (required) |
-| `--remove` | `false` | Unregister go-apply from the agent's config |
-| `--override` | `false` | Overwrite an existing registration |
-| `--force` | `false` | Alias for `--override` |
+| `--remove` | `false` | Unregister go-apply |
+| `--override` / `--force` | `false` | Overwrite an existing registration |
+
+The command is idempotent — running it again without `--override` reports "already registered" and makes no changes.
 
 ### `go-apply logs`
 
@@ -294,6 +239,10 @@ View recent go-apply log entries.
 | `--lines <n>` | `-n` | `100` | Number of recent lines to show |
 | `--follow` | `-f` | `false` | Watch for new log lines (tail -f mode) |
 
+### `go-apply doctor`
+
+Diagnose configuration and profile health. No flags.
+
 ### `go-apply update`
 
 Update go-apply to the latest GitHub release. No flags.
@@ -302,11 +251,32 @@ Update go-apply to the latest GitHub release. No flags.
 
 Print the go-apply version. No flags.
 
+## MCP tools reference
+
+| Tool | Requires onboarding | Description |
+|------|--------------------|----|
+| `onboard_user` | — | Store resume, skills, accomplishments |
+| `add_resume` | — | Add or replace a single resume variant |
+| `compile_profile` | — | Assemble compiled profile from agent-tagged skills + stories |
+| `create_story` | — | Save an SBI story to accomplishments.json |
+| `get_config` | — | Return all config fields (API keys redacted) + profile status |
+| `update_config` | — | Set a config field by dot-notation key |
+| `load_jd` | Yes | Fetch or accept a job description; returns extraction protocol |
+| `submit_keywords` | Yes | Score resumes against extracted JD keywords |
+| `submit_tailor_t1` | Yes | Keyword injection into the skills section |
+| `submit_tailor_t2` | Yes | Experience bullet rewriting |
+| `preview_ats_extraction` | Yes | Show resume as an ATS would see it |
+| `finalize` | Yes | Persist application record and close session |
+
 ## Roadmap
 
 | Feature | Status |
 |---------|--------|
-| Resume tailoring (keyword injection + bullet rewriting) | Shipped |
-| Multi-resume scoring with full breakdown | Shipped |
+| Resume scoring with full keyword breakdown | Shipped |
+| Two-tier tailoring (T1 keyword injection + T2 bullet rewriting) | Shipped |
 | MCP integration (Claude Code, Hermes, Openclaw) | Shipped |
-| Headless CLI (agents without MCP) | Shipped |
+| Compiled profile: skill-story graph, orphan detection | Shipped |
+| Host-driven profile compilation (agent tags skills, pure assembler) | Shipped |
+| SBI story creation with job context | Shipped |
+| ATS extraction preview | Shipped |
+| PDF scoring via rendered text | Shipped |

@@ -17,7 +17,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 go-apply exists to help users land conversations with real humans — honestly. No fabricated experience, no invented skills. Every feature should make it easier for a user to present their genuine self more effectively, not to deceive.
 
 ## Project Overview
-A Go CLI that scores resumes against job postings, tailors them via a two-tier cascade, generates cover letters, and operates in two modes: Headless (JSON for agents), MCP Server (Claude Code integration).
+A Go MCP server that scores resumes against job postings and tailors them via a two-tier cascade. The host agent (Claude / Hermes / Openclaw) is the orchestrator — it extracts keywords, tags stories with skills, and drives the full workflow. go-apply provides the storage, scoring, and tailoring. There is no headless CLI mode; `go-apply serve` is the primary entrypoint.
 
 ## Commands
 
@@ -45,7 +45,7 @@ make security           # govulncheck + gosec
 make tools              # installs pinned golangci-lint, goimports, govulncheck, gosec
 ```
 
-Tunable scoring constants (weights, thresholds, LLM params) live in `internal/config/defaults.json` — not in code.
+Tunable scoring constants (weights, thresholds) live in `internal/config/defaults.json` — not in code.
 
 ## Architecture
 
@@ -53,19 +53,30 @@ Tunable scoring constants (weights, thresholds, LLM params) live in `internal/co
 
 ```
 cmd/go-apply/main.go
-  └── internal/cli/          ← Cobra commands (onboard, add_resume, get_config, serve, …)
+  └── internal/cli/          ← Cobra commands (onboard, config, serve, setup, logs, …)
   └── internal/mcpserver/    ← MCP stdio server; multi-turn session state machine
-        └── internal/port/   ← interfaces (Scorer, Tailor, DocumentLoader, …)
-              ├── internal/service/   ← implementations (scorer, tailor, pipeline, …)
+        └── internal/port/   ← interfaces (Scorer, Tailor, Onboarder, ProfileCompiler, …)
+              ├── internal/service/   ← implementations (scorer, tailor, profilecompiler, storycreator, …)
               ├── internal/repository/fs/  ← filesystem adapters
-              └── internal/presenter/mcp/  ← MCP envelope builder
+              └── internal/presenter/mcp/  ← MCP response envelope builder
 ```
 
 `internal/port/` is the hexagonal boundary. Services and repositories depend only on `port` interfaces and `model` types. Presenters are outbound-only adapters; no inward package may import them.
 
 ### Operating mode
 
-**MCP Server** (`go-apply serve`): `mcpserver/server.go` registers MCP tools. The MCP host (Claude) drives a multi-turn state machine over a disk-backed `SessionStore`. No `Orchestrator` is wired — Claude extracts keywords itself then calls `submit_keywords`. Sessions persist to `~/.local/share/go-apply/sessions/` and survive process restarts.
+**MCP Server** (`go-apply serve`): `mcpserver/server.go` registers MCP tools. The host agent (Claude) drives a multi-turn state machine over a disk-backed `SessionStore`. No internal LLM is wired — Claude extracts keywords itself, tags stories with skill labels before calling `compile_profile`, and calls `submit_keywords` with structured JD data. Sessions persist to `~/.local/share/go-apply/sessions/` and survive process restarts.
+
+### Profile compilation (host-driven)
+
+The compiled profile is assembled by the host, not by an internal LLM:
+
+1. Host calls `onboard_user` or `create_story` → these return `needs_compile: true`
+2. Host tags accomplishments with skill labels
+3. Host calls `compile_profile(skills, remove_skills, stories)` — pure assembler, no LLM
+4. `compile_profile` returns a rich diff: coverage gained, skills added/removed, orphaned skills
+
+The compiled profile is persisted to `~/.local/share/go-apply/profile-compiled.json`. Accomplishments are stored in `~/.local/share/go-apply/accomplishments.json` (schema_version "1").
 
 ### MCP session state machine
 
@@ -78,7 +89,7 @@ load_jd → [stateLoaded]
       → finalize → [stateFinalized]
 ```
 
-`requireOnboarded` middleware (`mcpserver/middleware.go`) gates workflow tools on a profile being present.
+`requireOnboarded` middleware (`mcpserver/middleware.go`) gates workflow tools on a compiled profile being present.
 
 ### Key packages
 
@@ -87,16 +98,36 @@ load_jd → [stateLoaded]
 | `internal/port/` | All interfaces — the only cross-cutting dependency |
 | `internal/model/` | Pure data types (no behaviour, no I/O) |
 | `internal/service/pipeline/` | `AcquireJD`, `NewApplyPipeline` — shared pipeline primitives |
-| `internal/service/tailor/` | Two-tier cascade: T1 (keyword injection) + T2 (LLM bullet rewrite) |
+| `internal/service/tailor/` | Two-tier cascade: T1 (keyword injection into skills section) + T2 (experience bullet rewriting) |
 | `internal/service/scorer/` | Pure scoring; weights from `AppDefaults` |
+| `internal/service/profilecompiler/` | Pure assembler: builds `CompiledProfile` from `AssembleInput` (host-tagged skills + stories) |
+| `internal/service/storycreator/` | Saves SBI stories to `accomplishments.json`; returns integer story ID |
+| `internal/service/onboarding/` | Stores resumes, skills, accomplishments; writes `accomplishments.json` |
 | `internal/mcpserver/` | MCP server, session store, per-tool handlers |
 | `internal/repository/fs/` | Filesystem adapters: resumes, JD cache, compiled profile, sessions |
 | `internal/presenter/mcp/` | MCP response envelope builder |
 | `internal/config/` | `Config` (YAML, XDG paths) + `AppDefaults` (defaults.json) |
 
+### Deleted packages (removed in v2)
+
+These packages no longer exist and must not be re-introduced without a new spec:
+
+| Removed package | Why |
+|---|---|
+| `internal/service/llm/` | Host agent is the LLM; no internal LLM client |
+| `internal/service/orchestrator/` | Host agent is the orchestrator |
+| `internal/service/coverletter/` | Cover letter generation moved to host |
+| `internal/service/tailor/tier2.go` (LLM path) | T2 now uses mechanical bullet rewriting only |
+| `internal/port/llm.go` | `port.LLMClient` interface removed |
+| `internal/port/orchestrator.go` | `port.Orchestrator` interface removed |
+| `internal/port/coverletter.go` | `port.CoverLetterGenerator` interface removed |
+| `internal/presenter/headless/` | Headless mode removed |
+| `internal/testutil/llmstub/` | No LLM client to stub |
+
 ## Development Guidelines
 - Use proper error handling — wrap errors with `fmt.Errorf("context: %w", err)`.
-- `golangci-lint` is configured in `.golangci.yml`; `gosec G304` is excluded globally; test files skip `gosec` and `errcheck`. `goimports` enforces the local prefix `github.com/thedandano/go-apply`.
+- `golangci-lint` is configured in `.golangci.yml`; test files skip `gosec` and `errcheck`. `goimports` enforces the local prefix `github.com/thedandano/go-apply`.
+- For file ops with variable paths (`os.ReadFile`, `os.WriteFile`) use `// #nosec G304 -- <reason>` (not `//nolint:gosec`) — standalone gosec ignores `#nosec` when `//nolint` precedes it on the same comment.
 
 ## Testing
 - Run all tests: `go test ./...`
@@ -107,16 +138,6 @@ load_jd → [stateLoaded]
 
 ## Configuration
 - Config file: `~/.config/go-apply/config.yaml`; XDG vars (`XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`) override defaults.
-- API key: `GO_APPLY_API_KEY` env var (no config key — headless mode removed in 011).
-- Data (resumes in `inputs/`, jd_cache/) stored in `~/.local/share/go-apply/`.
-- **Migration**: `orchestrator.*` keys in `config.yaml` are now ignored; remove them. MCP mode has no LLM config — the host agent is the orchestrator.
-
-<!-- SPECKIT START -->
-## Active Feature Plan
-
-**Feature**: 011-deprecate-headless-mcp-cleanup  
-**Plan**: [specs/011-deprecate-headless-mcp-cleanup/plan.md](specs/011-deprecate-headless-mcp-cleanup/plan.md)  
-**Spec**: [specs/011-deprecate-headless-mcp-cleanup/spec.md](specs/011-deprecate-headless-mcp-cleanup/spec.md)
-
-See plan.md for task breakdown (parallel tracks A/B/C/D), agent assignments (sonnet/haiku), and verification steps.
-<!-- SPECKIT END -->
+- No API key needed for MCP mode — the host agent is the LLM.
+- Data stored in `~/.local/share/go-apply/`: resumes in `inputs/`, sessions in `sessions/`, compiled profile at `profile-compiled.json`, accomplishments at `accomplishments.json`.
+- **Migration from v1**: remove `orchestrator.*` keys from `config.yaml` — they are ignored. The `go-apply run` command no longer exists.
