@@ -9,15 +9,14 @@ MCP server that helps you land job interviews — honestly. Scores your resume a
 [![Go Report Card](https://goreportcard.com/badge/github.com/thedandano/go-apply)](https://goreportcard.com/report/github.com/thedandano/go-apply)
 [![Powered by Claude](https://img.shields.io/badge/Powered%20by-Claude-blueviolet?logo=anthropic)](https://anthropic.com)
 [![Works with Claude Code](https://img.shields.io/badge/Works%20with-Claude%20Code-blueviolet?logo=anthropic)](https://claude.ai/code)
-[![Works with OpenClaw](https://img.shields.io/badge/Works%20with-OpenClaw-orange)](https://github.com/openclaw)
 [![Works with Hermes](https://img.shields.io/badge/Works%20with-Hermes-teal)](https://github.com/hermes-agent)
 
 ## How it works
 
-go-apply runs as an MCP server. Your AI agent (Claude Code, Hermes, Openclaw) is the orchestrator — it calls the tools, extracts keywords from job descriptions, tags your stories with skills, and drives the full workflow. go-apply provides the storage, scoring, and tailoring.
+go-apply runs as an MCP server. Your AI agent (Claude Code, Hermes) is the orchestrator — it calls the tools, extracts keywords from job descriptions, tags your stories with skills, and drives the full workflow. go-apply provides the storage, scoring, and tailoring.
 
 ```
-Agent (Claude / Hermes / Openclaw)
+Agent (Claude / Hermes)
   │
   ├─ onboard_user        Store resume, skills, accomplishments
   ├─ add_resume          Add or replace a resume variant
@@ -43,12 +42,11 @@ Agent (Claude / Hermes / Openclaw)
    ```bash
    go-apply setup mcp --agent claude    # Claude Code
    go-apply setup mcp --agent hermes    # Hermes
-   go-apply setup mcp --agent openclaw  # Openclaw
    ```
 
 3. **Ask your agent to onboard and apply**
    - *"Onboard my resume at ~/docs/resume.md"*
-   - *"Compile my profile from the accomplishments I just gave you"*
+   - *"Compile my profile from these accomplishments"*
    - *"Score my resume against this job posting and tailor it"*
 
 ## Installation
@@ -224,7 +222,7 @@ Register or unregister go-apply as an MCP server in an agent's config.
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--agent <name>` | — | Agent to configure: `claude`, `openclaw`, `hermes`, `all` (required) |
+| `--agent <name>` | — | Agent to configure: `claude`, `hermes`, `all` (required) |
 | `--remove` | `false` | Unregister go-apply |
 | `--override` / `--force` | `false` | Overwrite an existing registration |
 
@@ -274,7 +272,7 @@ Print the go-apply version. No flags.
 |---------|--------|
 | Resume scoring with full keyword breakdown | Shipped |
 | Two-tier tailoring (T1 keyword injection + T2 bullet rewriting) | Shipped |
-| MCP integration (Claude Code, Hermes, Openclaw) | Shipped |
+| MCP integration (Claude Code, Hermes) | Shipped |
 | Compiled profile: skill-story graph, orphan detection | Shipped |
 | Host-driven profile compilation (agent tags skills, pure assembler) | Shipped |
 | SBI story creation with job context | Shipped |
